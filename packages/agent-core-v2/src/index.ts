@@ -155,7 +155,6 @@ export * from '#/kosong/protocol/protocol';
 export * from '#/kosong/protocol/protocolBase';
 export * from '#/kosong/protocol/protocolTrait';
 import '#/app/kosongConfig/envOverlay';
-import '#/app/kosongConfig/secondaryModelOverlay';
 import '#/app/kosongConfig/visualModelOverlay';
 export * from '#/kosong/model/completionBudget';
 export * from '#/kosong/model/hostRequestHeaders';
@@ -172,24 +171,14 @@ export {
   ModelCatalogConfigSchema,
   type ModelCatalogConfig,
 } from '#/app/kosongConfig/configSection';
-export type { SecondaryModelConfig, VisualModelConfig } from '#/app/kosongConfig/configSection';
+export type { VisualModelConfig } from '#/app/kosongConfig/configSection';
 export {
-  SECONDARY_MODEL_SECTION,
-  SECONDARY_MODEL_ENV,
-  SECONDARY_MODEL_EFFORT_ENV,
-  SecondaryModelConfigSchema,
-  secondaryModelEnvBindings,
   VISUAL_MODEL_SECTION,
   VISUAL_MODEL_ENV,
   VISUAL_MODEL_EFFORT_ENV,
   VisualModelConfigSchema,
   visualModelEnvBindings,
 } from '#/app/kosongConfig/configSection';
-export {
-  SECONDARY_DERIVED_MODEL_ID,
-  secondaryModelOverlay,
-  secondaryModelPatch,
-} from '#/app/kosongConfig/secondaryModelOverlay';
 export {
   VISUAL_DERIVED_MODEL_ID,
   visualModelOverlay,

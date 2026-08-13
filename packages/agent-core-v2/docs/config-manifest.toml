@@ -8,7 +8,7 @@
 # commented "# field: type" lines describe the remaining schema fields.
 # Values resolve as: default -> config.toml -> env overlay -> memory.
 
-# Index (26 sections · 4 overlay(s))
+# Index (26 sections · 3 overlay(s))
 #   background               src/agent/task/configSection.ts
 #   builtinProductSkills     src/app/skillCatalog/configSection.ts
 #   cron                     src/app/cron/configSection.ts
@@ -37,7 +37,6 @@
 #   visualModel              src/app/kosongConfig/configSection.ts
 #   (overlay) servicesCredentialEnvOverlay  src/app/auth/configSection.ts
 #   (overlay) kimiModelEnvOverlay  src/app/kosongConfig/envOverlay.ts
-#   (overlay) secondaryModelOverlay  src/app/kosongConfig/secondaryModelOverlay.ts
 #   (overlay) visualModelOverlay  src/app/kosongConfig/visualModelOverlay.ts
 
 # ##########################################################################

@@ -25,6 +25,7 @@ import { z } from 'zod';
 import {
   type ConfigStripEnv,
   envBindings,
+  stripEnvBoundFields,
 } from '#/app/config/config';
 import { registerConfigSection } from '#/app/config/configSectionContributions';
 import {
@@ -310,31 +311,10 @@ registerConfigSection(THINKING_SECTION, ThinkingConfigSchema, {
   stripEnv: stripThinkingEnv,
 });
 
-export const SECONDARY_MODEL_SECTION = 'secondaryModel';
-
-export const SECONDARY_MODEL_ENV = 'KIMI_SECONDARY_MODEL';
-export const SECONDARY_MODEL_EFFORT_ENV = 'KIMI_SECONDARY_EFFORT';
-
-export const SecondaryModelConfigSchema = ModelOverrideSchema.extend({
-  model: z.string().min(1).optional(),
-});
-
-export type SecondaryModelConfig = z.infer<typeof SecondaryModelConfigSchema>;
-
 function parseNonEmptyEnv(raw: string): string | undefined {
   const trimmed = raw.trim();
   return trimmed.length > 0 ? trimmed : undefined;
 }
-
-export const secondaryModelEnvBindings = envBindings(SecondaryModelConfigSchema, {
-  model: { env: SECONDARY_MODEL_ENV, parse: parseNonEmptyEnv },
-  defaultEffort: { env: SECONDARY_MODEL_EFFORT_ENV, parse: parseNonEmptyEnv },
-});
-
-registerConfigSection(SECONDARY_MODEL_SECTION, SecondaryModelConfigSchema, {
-  env: secondaryModelEnvBindings,
-  stripEnv: stripEnvBoundFields(secondaryModelEnvBindings),
-});
 
 
 export const VISUAL_MODEL_SECTION = 'visualModel';
