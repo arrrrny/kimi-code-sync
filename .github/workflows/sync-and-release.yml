@@ -1,0 +1,197 @@
+# Daily Sync & Release for the zikzak-ai/kimi-code fork.
+#
+# Modeled on the (turned-off) CLIProxyAPIPlus pattern:
+#   1. Merge upstream/main (MoonshotAI/kimi-code) with `-X theirs`
+#   2. Re-apply the fork-owned files (visual-model feature, PR #1 + follow-up
+#      fixes) from FORK_BASE — upstream closed the PR and will never take it
+#   3. Restore this workflow file (the merge must never clobber it)
+#   4. Install + build; fail loudly instead of pushing a broken fork
+#   5. Push main + force-move the release tag to the latest upstream release name
+#
+# Push auth: GITHUB_TOKEN (contents: write) by default. If a PAT with broader
+# scope is configured as KIMI_SYNC in the fork's secrets, it takes precedence.
+
+name: Daily Sync & Release
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-sync-release
+  cancel-in-progress: false
+
+env:
+  PUSH_TOKEN: ${{ secrets.KIMI_SYNC || github.token }}
+
+jobs:
+  sync-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout fork main (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git & save fork base
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          echo "FORK_BASE=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "Fork base: $(git rev-parse --short HEAD)"
+
+      - name: Save workflow file (merge must not clobber it)
+        run: |
+          cp .github/workflows/sync-and-release.yml /tmp/sync-and-release.yml
+
+      - name: Fetch upstream
+        run: |
+          git remote remove upstream 2>/dev/null || true
+          git remote add upstream https://github.com/MoonshotAI/kimi-code.git
+          git fetch upstream --tags --force
+          git fetch upstream main
+
+      - name: Get latest upstream release tag
+        id: upstream
+        run: |
+          TAG=$(git ls-remote --tags --sort=-v:refname upstream '@moonshot-ai/kimi-code@*' | head -1 | sed 's|.*refs/tags/||; s/\^{}//')
+          TAG="${TAG:-sync-$(date +%Y%m%d)}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Latest upstream tag: $TAG"
+
+      - name: Merge upstream/main (-X theirs) with modify/delete resolution
+        run: |
+          if ! git merge upstream/main -m "chore: sync with upstream/main" -X theirs 2>&1; then
+            echo "Merge had conflicts. Resolving modify/delete conflicts..."
+            for file in $(git ls-files -u | awk '{print $4}' | sort -u); do
+              if git checkout --theirs -- "$file" 2>/dev/null; then
+                echo "  -> $file: upstream version kept"
+                git add -- "$file"
+              else
+                echo "  -> $file: deleted by us, keeping deletion"
+                git rm -- "$file" 2>/dev/null || git rm --cached -- "$file"
+              fi
+            done
+            remaining=$(git ls-files -u | awk '{print $4}' | sort -u)
+            if [ -n "$remaining" ]; then
+              echo "ERROR: Still have unmerged files after resolution:"
+              echo "$remaining"
+              exit 1
+            fi
+          fi
+          # If conflict resolution staged changes, commit them (clean merges are
+          # already committed by `git merge`).
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: sync with upstream/main"
+          fi
+          echo "HEAD after merge: $(git rev-parse --short HEAD)"
+
+      - name: Re-apply fork-owned files (visual-model feature + follow-up fixes)
+        run: |
+          # Fork-owned change: "feat(agent-core-v2): add visual model assignment for
+          # image inspection", merged into the fork as PR #1 (commit 123d8907). The
+          # upstream PR (#2754) was closed by MoonshotAI and never merged — these files
+          # are fork-only and must survive every sync. The list below is the full
+          # fork-owned file set (PR #1 + the fixes that keep it building against current
+          # upstream: dropped stale secondaryModel leftovers, literal choice type).
+          #
+          # After every upstream merge, restore the fork's last-good versions from
+          # FORK_BASE (pre-merge HEAD). Idempotent: a no-op when the merge left the
+          # files untouched, restores the fork version when -X theirs clobbered them,
+          # and recreates them if upstream ever deletes them. If the fork later adds
+          # more owned files, append them here.
+          FORK_OWNED_FILES="
+            .changeset/visual-model-assignment.md
+            docs/en/configuration/config-files.md
+            docs/zh/configuration/config-files.md
+            packages/agent-core-v2/docs/config-manifest.toml
+            packages/agent-core-v2/src/agent/media/mediaToolsRegistrar.ts
+            packages/agent-core-v2/src/app/kosongConfig/configSection.ts
+            packages/agent-core-v2/src/app/kosongConfig/visualModelOverlay.ts
+            packages/agent-core-v2/src/index.ts
+            packages/agent-core-v2/src/session/visual/configSection.ts
+            packages/agent-core-v2/src/session/visual/flag.ts
+            packages/agent-core-v2/test/agent/media/tools/read-media.test.ts
+            packages/agent-core-v2/test/app/kosongConfig/visualModelOverlay.test.ts
+            packages/agent-core-v2/test/session/visual/configSection.test.ts
+          "
+          for f in $FORK_OWNED_FILES; do
+            if git cat-file -e "${{ env.FORK_BASE }}:$f" 2>/dev/null; then
+              git checkout "${{ env.FORK_BASE }}" -- "$f"
+            else
+              git rm -q --cached "$f" 2>/dev/null || true
+            fi
+          done
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "fix: re-apply fork-owned files after upstream sync"
+          fi
+
+      - name: Restore sync-and-release workflow
+        run: |
+          cp /tmp/sync-and-release.yml .github/workflows/sync-and-release.yml
+          git add .github/workflows/sync-and-release.yml
+          if ! git diff --cached --quiet; then
+            git commit -m "ci: restore sync-and-release workflow"
+          fi
+
+      - name: Setup pnpm & Node
+        uses: pnpm/action-setup@v6
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify build (fail loudly, never push a broken fork)
+        run: |
+          for i in 1 2 3; do
+            if pnpm run build 2> /tmp/build-err.log; then
+              echo "Build succeeded."
+              exit 0
+            fi
+            echo "Build failed (attempt $i/3). Restoring fork-owned files named in errors..."
+            fixed=0
+            error_files=$(grep -oE 'packages/[^ (]+\.(ts|tsx|mjs|js)' /tmp/build-err.log | sed 's/:.*//' | sort -u)
+            for f in $error_files; do
+              if git cat-file -e "${{ env.FORK_BASE }}:$f" 2>/dev/null; then
+                echo "  -> restoring $f from fork base"
+                git checkout "${{ env.FORK_BASE }}" -- "$f"
+                fixed=1
+              fi
+            done
+            if [ "$fixed" = "0" ]; then
+              echo "Unfixable build errors — NOT pushing. Fork main stays at last good state."
+              cat /tmp/build-err.log
+              exit 1
+            fi
+            git add -A
+            git commit -m "fix: resolve build errors after sync (attempt $i)" 2>/dev/null || true
+          done
+          echo "Build failed after 3 iterations."
+          pnpm run build
+
+      - name: Push main + release tag
+        run: |
+          PUSH_URL="https://x-access-token:${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push "$PUSH_URL" main
+          git tag -f "${{ steps.upstream.outputs.tag }}" HEAD
+          git push "$PUSH_URL" "${{ steps.upstream.outputs.tag }}" --force
+          echo "Pushed main @ $(git rev-parse --short HEAD) + tag ${{ steps.upstream.outputs.tag }}"
+
+      - name: Summary
+        run: |
+          {
+            echo "### Daily Sync & Release Summary"
+            echo "- Fork base: \`${{ env.FORK_BASE }}\` → \`$(git rev-parse --short HEAD)\`"
+            echo "- Latest upstream release tag: \`${{ steps.upstream.outputs.tag }}\`"
+            echo "- Fork-owned visual-model change (PR #1): re-applied"
+            echo "- Build: verified"
+          } >> "$GITHUB_STEP_SUMMARY"
