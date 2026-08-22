@@ -41,6 +41,7 @@ export class ConfirmDialogComponent extends Container implements Focusable {
   private readonly opts: ConfirmDialogOptions;
   private readonly choices: readonly ConfirmChoice[];
   private selectedIndex = 0;
+  private resolved = false;
 
   constructor(opts: ConfirmDialogOptions) {
     super();
@@ -52,7 +53,9 @@ export class ConfirmDialogComponent extends Container implements Focusable {
   }
 
   handleInput(data: string): void {
+    if (this.resolved) return;
     if (matchesKey(data, Key.escape)) {
+      this.resolved = true;
       this.opts.onResolve(false);
       return;
     }
@@ -65,15 +68,18 @@ export class ConfirmDialogComponent extends Container implements Focusable {
       return;
     }
     if (matchesKey(data, Key.enter)) {
+      this.resolved = true;
       this.opts.onResolve(this.choices[this.selectedIndex]!.value);
       return;
     }
     const printable = printableChar(data);
     if (printable === 'y' || printable === 'Y') {
+      this.resolved = true;
       this.opts.onResolve(true);
       return;
     }
     if (printable === 'n' || printable === 'N') {
+      this.resolved = true;
       this.opts.onResolve(false);
     }
   }
@@ -102,7 +108,7 @@ export class ConfirmDialogComponent extends Container implements Focusable {
     });
 
     lines.push('');
-    lines.push(dim(' ↑↓ choose · Enter / Y confirm · N / Esc cancel'));
+    lines.push(dim(' ↑↓ choose · Enter select · Y confirm · N / Esc cancel'));
     lines.push(accent(bar));
     return lines.map((line) => truncateToWidth(line, width));
   }

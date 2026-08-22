@@ -403,45 +403,59 @@ async function applyModelToAllSessions(
   const currentId = host.session?.id;
   const displayName = modelDisplayName(alias, host.state.appState.availableModels[alias]);
   const results: BulkSessionOutcome[] = [];
+  const resumedSessions = new Set<string>();
 
-  for (const summary of sessions) {
-    const id = summary.id;
-    let session: Session | undefined;
-    if (id === currentId) {
-      session = host.session;
-    } else {
-      session = host.harness.getSession(id);
-      if (session === undefined) {
-        try {
-          session = await host.harness.resumeSession({ id });
-        } catch (error) {
-          results.push({ id, status: 'failed', reason: formatErrorMessage(error) });
-          continue;
+  try {
+    for (const summary of sessions) {
+      const id = summary.id;
+      let session: Session | undefined;
+      if (id === currentId) {
+        session = host.session;
+      } else {
+        session = host.harness.getSession(id);
+        if (session === undefined) {
+          try {
+            session = await host.harness.resumeSession({ id });
+            resumedSessions.add(id);
+          } catch (error) {
+            results.push({ id, status: 'failed', reason: formatErrorMessage(error) });
+            continue;
+          }
         }
       }
+      if (session === undefined) {
+        results.push({ id, status: 'failed', reason: 'session unavailable' });
+        continue;
+      }
+      try {
+        await session.setModel(alias);
+        results.push({ id, status: 'succeeded' });
+      } catch (error) {
+        results.push({ id, status: classifyModelError(error), reason: formatErrorMessage(error) });
+      }
     }
-    if (session === undefined) {
-      results.push({ id, status: 'failed', reason: 'session unavailable' });
-      continue;
+
+    if (currentId !== undefined) {
+      const currentResult = results.find((r) => r.id === currentId);
+      if (currentResult?.status === 'succeeded') {
+        host.setAppState({ model: alias });
+      }
     }
     try {
-      await session.setModel(alias);
-      results.push({ id, status: 'succeeded' });
+      await host.harness.setConfig({ defaultModel: alias });
     } catch (error) {
-      results.push({ id, status: classifyModelError(error), reason: formatErrorMessage(error) });
+      host.showError(`Switched sessions to ${displayName}, but failed to save default: ${formatErrorMessage(error)}`);
+    }
+
+    reportBulkResult(host, displayName, results);
+  } finally {
+    for (const id of resumedSessions) {
+      const session = host.harness.getSession(id);
+      if (session !== undefined) {
+        await session.close().catch(() => {});
+      }
     }
   }
-
-  if (currentId !== undefined) {
-    host.setAppState({ model: alias });
-  }
-  try {
-    await host.harness.setConfig({ defaultModel: alias });
-  } catch (error) {
-    host.showError(`Switched sessions to ${displayName}, but failed to save default: ${formatErrorMessage(error)}`);
-  }
-
-  reportBulkResult(host, displayName, results);
 }
 
 function reportBulkResult(
@@ -456,7 +470,8 @@ function reportBulkResult(
   const parts = [`Updated ${String(succeeded)} session${succeeded === 1 ? '' : 's'} to ${displayName}`];
   if (skipped > 0) parts.push(`${String(skipped)} skipped`);
   if (failed > 0) parts.push(`${String(failed)} failed`);
-  host.showStatus(`${parts.join(' · ')}.`, 'success');
+  const statusColor = succeeded === 0 ? 'error' : (skipped > 0 || failed > 0) ? 'warning' : 'success';
+  host.showStatus(`${parts.join(' · ')}.`, statusColor);
 
   if (skipped > 0 || failed > 0) {
     const lines = results
