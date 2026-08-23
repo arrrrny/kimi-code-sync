@@ -30,6 +30,7 @@ import { handleCopyCommand } from './copy';
 import {
   handleAutoCommand,
   handleCompactCommand,
+  handleCompactThresholdCommand,
   handleEditorCommand,
   handleEffortCommand,
   handleModelCommand,
@@ -86,6 +87,7 @@ export { handleAddDirCommand } from './add-dir';
 export {
   handleAutoCommand,
   handleCompactCommand,
+  handleCompactThresholdCommand,
   handleEditorCommand,
   handleEffortCommand,
   handleModelCommand,
@@ -592,6 +594,9 @@ async function handleBuiltInSlashCommand(
       return;
     case 'compact':
       await handleCompactCommand(host, args);
+      return;
+    case 'compact-threshold':
+      await handleCompactThresholdCommand(host, args);
       return;
     case 'goal':
       await handleGoalCommand(host, args);
