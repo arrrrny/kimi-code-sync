@@ -337,6 +337,15 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
   begin(input: FullCompactionInput): boolean {
     if (this._compacting) return false;
     const data: CompactionBeginData = { source: input.source, instruction: input.instruction };
+    const currentModelAlias = this.profile.resolveModelContext().modelAlias;
+    if (currentModelAlias !== undefined) {
+      const binding = compactionModelBindingFor(this.configService, this.flags, {
+        modelAlias: currentModelAlias,
+        thinkingLevel: this.profile.data().thinkingLevel,
+      });
+      data.model = binding.model !== currentModelAlias ? binding.model : currentModelAlias;
+      data.modelDisplay = compactionDisplayModel(this.configService, data.model);
+    }
     if (!this.reserveCompactionSlot(data.source)) return false;
 
     const tokenCount = this.validateCompactionStart(data.source);

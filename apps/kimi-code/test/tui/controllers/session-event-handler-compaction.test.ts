@@ -34,6 +34,7 @@ function makeHost() {
       flushThinkingToTranscript: vi.fn(),
       appendAssistantDelta: vi.fn(),
       scheduleFlush: vi.fn(),
+      finalizeLiveTextBuffers: vi.fn(),
       beginCompaction: vi.fn(),
       endCompaction: vi.fn(),
       cancelCompaction: vi.fn(),
@@ -92,5 +93,40 @@ describe('SessionEventHandler compaction cache bookkeeping', () => {
     handler.handleEvent(compactionCancelled, vi.fn());
     expect(host.noteCompactionFinished).not.toHaveBeenCalled();
     expect(host.recordSessionActivity).not.toHaveBeenCalled();
+  });
+});
+
+describe('SessionEventHandler compaction started indicator', () => {
+  it('threads the resolved model into the live compaction indicator', () => {
+    const { host } = makeHost();
+    const handler = new SessionEventHandler(host);
+    handler.handleEvent(
+      {
+        type: 'compaction.started',
+        sessionId: 's1',
+        agentId: 'main',
+        trigger: 'manual',
+        instruction: 'keep the recent files',
+        model: 'kimi-k2',
+        model_display: 'Kimi K2',
+      } as any,
+      vi.fn(),
+    );
+    expect(host.streamingUI.beginCompaction).toHaveBeenCalledWith('keep the recent files', 'kimi-k2');
+  });
+
+  it('passes undefined model when the started event omits it', () => {
+    const { host } = makeHost();
+    const handler = new SessionEventHandler(host);
+    handler.handleEvent(
+      {
+        type: 'compaction.started',
+        sessionId: 's1',
+        agentId: 'main',
+        trigger: 'auto',
+      } as any,
+      vi.fn(),
+    );
+    expect(host.streamingUI.beginCompaction).toHaveBeenCalledWith(undefined, undefined);
   });
 });
