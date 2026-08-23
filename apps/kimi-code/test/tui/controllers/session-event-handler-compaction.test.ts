@@ -112,7 +112,24 @@ describe('SessionEventHandler compaction started indicator', () => {
       } as any,
       vi.fn(),
     );
-    expect(host.streamingUI.beginCompaction).toHaveBeenCalledWith('keep the recent files', 'kimi-k2');
+    // The indicator prefers the user-facing display name and falls back to the raw alias.
+    expect(host.streamingUI.beginCompaction).toHaveBeenCalledWith('keep the recent files', 'Kimi K2');
+  });
+
+  it('falls back to the raw model alias when no display name is provided', () => {
+    const { host } = makeHost();
+    const handler = new SessionEventHandler(host);
+    handler.handleEvent(
+      {
+        type: 'compaction.started',
+        sessionId: 's1',
+        agentId: 'main',
+        trigger: 'manual',
+        model: 'kimi-k2',
+      } as any,
+      vi.fn(),
+    );
+    expect(host.streamingUI.beginCompaction).toHaveBeenCalledWith(undefined, 'kimi-k2');
   });
 
   it('passes undefined model when the started event omits it', () => {
