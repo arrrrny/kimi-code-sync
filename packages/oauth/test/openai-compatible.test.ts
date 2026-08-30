@@ -221,4 +221,98 @@ describe('refreshProviderModels — OpenAI-compatible branch (3.5)', () => {
     expect(calls).toBe(1);
     expect(result.changed.map((c) => c.providerId)).toEqual(['opencode']);
   });
+
+  it('refreshes an openai_responses provider from its /models endpoint', async () => {
+    const config: ManagedKimiConfigShape = {
+      providers: {
+        opencode: {
+          type: 'openai_responses',
+          baseUrl,
+          apiKey: 'sk-test-token',
+        },
+      },
+      telemetry: true,
+    };
+    const host = makeRefreshHost(config);
+    const fetchMock = vi.fn<FetchMock>(async (input, init) => {
+      expect(fetchInputUrl(input)).toBe(`${baseUrl}/models`);
+      expect(new Headers(init?.headers).get('authorization')).toBe('Bearer sk-test-token');
+      return new Response(
+        JSON.stringify({ data: [{ id: 'oai-resp-model' }] }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await refreshProviderModels(host, { scope: 'all' });
+
+    expect(result.failed).toEqual([]);
+    expect(result.changed).toEqual([
+      { providerId: 'opencode', providerName: 'opencode', added: 1, removed: 0 },
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('resolves a named apiKey via activeApiKeyId', async () => {
+    const config: ManagedKimiConfigShape = {
+      providers: {
+        kilo: {
+          type: 'openai',
+          baseUrl: 'https://api.kilo.ai/api/gateway',
+          apiKeys: { kilo1: { key: 'kilo-named-key', name: 'kilo1' } },
+          activeApiKeyId: 'kilo1',
+        },
+      },
+      telemetry: true,
+    };
+    const host = makeRefreshHost(config);
+    const fetchMock = vi.fn<FetchMock>(async (input, init) => {
+      expect(fetchInputUrl(input)).toBe('https://api.kilo.ai/api/gateway/models');
+      expect(new Headers(init?.headers).get('authorization')).toBe('Bearer kilo-named-key');
+      return new Response(
+        JSON.stringify({ data: [{ id: 'kilo-model' }] }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await refreshProviderModels(host, { scope: 'all' });
+
+    expect(result.failed).toEqual([]);
+    expect(result.changed).toEqual([
+      { providerId: 'kilo', providerName: 'kilo', added: 1, removed: 0 },
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to env.KIMI_API_KEY when no inline key is set', async () => {
+    const config: ManagedKimiConfigShape = {
+      providers: {
+        opencode: {
+          type: 'openai',
+          baseUrl,
+          env: { KIMI_API_KEY: 'sk-env-key' },
+        },
+      },
+      telemetry: true,
+    };
+    const host = makeRefreshHost(config);
+    const fetchMock = vi.fn<FetchMock>(async (input, init) => {
+      expect(fetchInputUrl(input)).toBe(`${baseUrl}/models`);
+      expect(new Headers(init?.headers).get('authorization')).toBe('Bearer sk-env-key');
+      return new Response(
+        JSON.stringify({ data: [{ id: 'env-model' }] }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await refreshProviderModels(host, { scope: 'all' });
+
+    expect(result.failed).toEqual([]);
+    expect(result.changed).toEqual([
+      { providerId: 'opencode', providerName: 'opencode', added: 1, removed: 0 },
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });

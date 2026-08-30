@@ -818,7 +818,7 @@ export async function refreshProviderModels(
     // (branch 2.5) own this id already; don't double-refresh.
     if (readCustomRegistrySource(provider) !== undefined) continue;
     if (provider.baseUrl === undefined || provider.baseUrl.length === 0) continue;
-    const apiKey = getActiveProviderApiKey(provider);
+    const apiKey = resolveProviderApiKey(provider);
     if (apiKey === undefined) continue;
 
     try {

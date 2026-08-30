@@ -25,7 +25,7 @@ export async function fetchOpenAIProviderModels(
   apiKey: string,
   options: FetchOpenAIProviderModelsOptions = {},
 ): Promise<ManagedKimiCodeModelInfo[]> {
-  const { signal, fetchImpl = fetch, userAgent } = options;
+  const { signal = AbortSignal.timeout(15_000), fetchImpl = fetch, userAgent } = options;
   const trimmedBase = (baseUrl ?? '').replace(/\/+$/, '');
   if (trimmedBase.length === 0) {
     throw new Error('Provider baseUrl is empty; cannot fetch models.');
