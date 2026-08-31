@@ -1388,6 +1388,42 @@ describe('applyManagedApiKeyProviderModels', () => {
       );
     }).toThrow('context_length');
   });
+
+  it('preserves an existing maxContextSize when the fetched context is unknown', () => {
+    const config: ManagedKimiConfigShape = {
+      providers: { 'my-kimi': { type: 'kimi', baseUrl: 'https://api.example.test/coding/v1', apiKey: 'sk' } },
+      models: {
+        'my-kimi/glm-5.3': { provider: 'my-kimi', model: 'glm-5.3', maxContextSize: 1000000 },
+      },
+    };
+
+    applyManagedApiKeyProviderModels(
+      config,
+      'my-kimi',
+      [makeModelInfo('glm-5.3', { contextLength: undefined })],
+      'my-kimi/',
+    );
+
+    expect(config.models?.['my-kimi/glm-5.3']?.['maxContextSize']).toBe(1000000);
+  });
+
+  it('overrides an existing maxContextSize when the fetched context is known', () => {
+    const config: ManagedKimiConfigShape = {
+      providers: { 'my-kimi': { type: 'kimi', baseUrl: 'https://api.example.test/coding/v1', apiKey: 'sk' } },
+      models: {
+        'my-kimi/glm-5.3': { provider: 'my-kimi', model: 'glm-5.3', maxContextSize: 1000000 },
+      },
+    };
+
+    applyManagedApiKeyProviderModels(
+      config,
+      'my-kimi',
+      [makeModelInfo('glm-5.3', { contextLength: 200000 })],
+      'my-kimi/',
+    );
+
+    expect(config.models?.['my-kimi/glm-5.3']?.['maxContextSize']).toBe(200000);
+  });
 });
 
 function makeModelInfo(

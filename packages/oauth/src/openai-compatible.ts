@@ -2,9 +2,12 @@ import type { ManagedKimiCodeModelInfo } from './managed-kimi-code';
 import { isRecord } from './utils';
 
 // Honor a provider-supplied context length (OpenRouter's `context_length`,
-// OpenAI's `context_window`) when present; fall back to a conservative 128K
-// window only when the value is missing or invalid. Users can still override
-// per-model in config.toml.
+// OpenAI's `context_window`) when present. When the value is missing or
+// invalid the model's context is reported as `undefined` (unknown) rather
+// than a guessed default, so a provider refresh cannot clobber a user's
+// curated `maxContextSize` (e.g. from a models.dev catalog import). The 128K
+// default in `OPENAI_COMPATIBLE_DEFAULT_CONTEXT` is applied downstream only
+// when neither the provider nor an existing alias supplies a context size.
 export const OPENAI_COMPATIBLE_DEFAULT_CONTEXT = 131072;
 
 export interface FetchOpenAIProviderModelsOptions {
@@ -62,9 +65,7 @@ export async function fetchOpenAIProviderModels(
     const rawCtx = raw['context_length'] ?? raw['context_window'];
     const parsedCtx = Number(rawCtx);
     const contextLength =
-      Number.isInteger(parsedCtx) && parsedCtx > 0
-        ? parsedCtx
-        : OPENAI_COMPATIBLE_DEFAULT_CONTEXT;
+      Number.isInteger(parsedCtx) && parsedCtx > 0 ? parsedCtx : undefined;
     out.push({
       id,
       contextLength,

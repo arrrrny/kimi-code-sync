@@ -57,7 +57,7 @@ describe('fetchOpenAIProviderModels', () => {
     expect(fetchInputUrl(url)).toBe('https://api.example.test/v1/models');
     expect(new Headers(init?.headers).get('authorization')).toBe('Bearer sk-test');
     expect(models.map((m) => m.id)).toEqual(['gpt-4o', 'gpt-4o-mini']);
-    expect(models[0]?.contextLength).toBeGreaterThan(0);
+    expect(models[0]?.contextLength).toBeUndefined();
   });
 
   it('throws on a non-OK response', async () => {
@@ -113,7 +113,7 @@ describe('fetchOpenAIProviderModels', () => {
     expect(models[0]?.contextLength).toBe(1048576);
   });
 
-  it('falls back to the default when context_length is absent', async () => {
+  it('returns undefined when context_length is absent', async () => {
     const fetchMock = vi.fn<FetchMock>(async () =>
       new Response(
         JSON.stringify({ data: [{ id: 'm1' }] }),
@@ -124,7 +124,7 @@ describe('fetchOpenAIProviderModels', () => {
 
     const models = await fetchOpenAIProviderModels('https://api.example.test/v1', 'sk-test', {});
 
-    expect(models[0]?.contextLength).toBe(131072);
+    expect(models[0]?.contextLength).toBeUndefined();
   });
 
   it('prefers context_length over context_window', async () => {
@@ -141,7 +141,7 @@ describe('fetchOpenAIProviderModels', () => {
     expect(models[0]?.contextLength).toBe(1048576);
   });
 
-  it('falls back to the default for non-positive context lengths', async () => {
+  it('returns undefined for non-positive context lengths', async () => {
     const fetchMock = vi.fn<FetchMock>(async () =>
       new Response(
         JSON.stringify({ data: [{ id: 'm1', context_length: 0 }] }),
@@ -152,7 +152,7 @@ describe('fetchOpenAIProviderModels', () => {
 
     const models = await fetchOpenAIProviderModels('https://api.example.test/v1', 'sk-test', {});
 
-    expect(models[0]?.contextLength).toBe(131072);
+    expect(models[0]?.contextLength).toBeUndefined();
   });
 });
 
@@ -410,5 +410,104 @@ describe('refreshProviderModels — OpenAI-compatible branch (3.5)', () => {
     expect(carried).toBeDefined();
     expect(carried?.provider).toBe('openrouter');
     expect(carried?.model).toBe('minimax/minimax-m3:free');
+  });
+
+  it('preserves a curated maxContextSize when the provider omits context_length', async () => {
+    const config: ManagedKimiConfigShape = {
+      providers: {
+        zai: {
+          type: 'openai',
+          baseUrl: 'https://api.z.ai/coding/paas/v4',
+          apiKey: 'sk-zai-test',
+        },
+      },
+      models: {
+        'zai/glm-5.3': {
+          provider: 'zai',
+          model: 'glm-5.3',
+          maxContextSize: 1000000,
+          capabilities: ['tool_use'],
+        },
+      },
+      telemetry: true,
+    };
+    const host = makeRefreshHost(config);
+    const fetchMock = vi.fn<FetchMock>(async (input, init) => {
+      expect(fetchInputUrl(input)).toBe('https://api.z.ai/coding/paas/v4/models');
+      expect(new Headers(init?.headers).get('authorization')).toBe('Bearer sk-zai-test');
+      return new Response(
+        JSON.stringify({ data: [{ id: 'glm-5.3' }] }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await refreshProviderModels(host, { scope: 'all' });
+
+    expect(result.failed).toEqual([]);
+    const models = (await host.getConfig()).models ?? {};
+    expect(models['zai/glm-5.3']?.maxContextSize).toBe(1000000);
+  });
+
+  it('applies the 128K default when the provider omits context and no alias exists', async () => {
+    const config: ManagedKimiConfigShape = {
+      providers: {
+        zai: {
+          type: 'openai',
+          baseUrl: 'https://api.z.ai/coding/paas/v4',
+          apiKey: 'sk-zai-test',
+        },
+      },
+      telemetry: true,
+    };
+    const host = makeRefreshHost(config);
+    const fetchMock = vi.fn<FetchMock>(async () =>
+      new Response(
+        JSON.stringify({ data: [{ id: 'glm-5.3' }] }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await refreshProviderModels(host, { scope: 'all' });
+
+    expect(result.failed).toEqual([]);
+    const models = (await host.getConfig()).models ?? {};
+    expect(models['zai/glm-5.3']?.maxContextSize).toBe(131072);
+  });
+
+  it('overrides a curated maxContextSize when the provider reports context_length', async () => {
+    const config: ManagedKimiConfigShape = {
+      providers: {
+        zai: {
+          type: 'openai',
+          baseUrl: 'https://api.z.ai/coding/paas/v4',
+          apiKey: 'sk-zai-test',
+        },
+      },
+      models: {
+        'zai/glm-5.3': {
+          provider: 'zai',
+          model: 'glm-5.3',
+          maxContextSize: 1000000,
+          capabilities: ['tool_use'],
+        },
+      },
+      telemetry: true,
+    };
+    const host = makeRefreshHost(config);
+    const fetchMock = vi.fn<FetchMock>(async () =>
+      new Response(
+        JSON.stringify({ data: [{ id: 'glm-5.3', context_length: 200000 }] }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await refreshProviderModels(host, { scope: 'all' });
+
+    expect(result.failed).toEqual([]);
+    const models = (await host.getConfig()).models ?? {};
+    expect(models['zai/glm-5.3']?.maxContextSize).toBe(200000);
   });
 });

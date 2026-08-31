@@ -5,6 +5,7 @@ import { DEFAULT_KIMI_CODE_OAUTH_HOST } from './constants';
 import { OAuthUnauthorizedError } from './errors';
 import { parseKimiCodeCustomHeaders } from './identity';
 import { DEFAULT_KIMI_CODE_BASE_URL, kimiCodeBaseUrl } from './managed-usage';
+import { OPENAI_COMPATIBLE_DEFAULT_CONTEXT } from './openai-compatible';
 import { MANAGED_KIMI_MODEL_FIELDS, mergeRefreshedModelAlias } from './model-alias-merge';
 import { isRecord } from './utils';
 
@@ -30,7 +31,7 @@ export type SupportsThinkingType = 'only' | 'no' | 'both';
 
 export interface ManagedKimiCodeModelInfo {
   readonly id: string;
-  readonly contextLength: number;
+  readonly contextLength: number | undefined;
   readonly supportsReasoning: boolean;
   readonly supportsImageIn: boolean;
   readonly supportsVideoIn: boolean;
@@ -530,6 +531,7 @@ export async function fetchManagedKimiCodeModels(
 export function toManagedModelAlias(
   providerId: string,
   model: ManagedKimiCodeModelInfo,
+  existingMaxContextSize?: number,
 ): ManagedKimiModelAlias {
   const capabilities = capabilitiesForModel(model);
   // Kimi's Anthropic-compatible endpoint only accepts adaptive thinking
@@ -545,7 +547,7 @@ export function toManagedModelAlias(
   return {
     provider: providerId,
     model: model.id,
-    maxContextSize: model.contextLength,
+    maxContextSize: model.contextLength ?? existingMaxContextSize ?? OPENAI_COMPATIBLE_DEFAULT_CONTEXT,
     capabilities,
     ...(model.displayName !== undefined ? { displayName: model.displayName } : {}),
     ...(model.supportEfforts !== undefined ? { supportEfforts: model.supportEfforts } : {}),
@@ -679,9 +681,11 @@ export function applyManagedApiKeyProviderModels(
   for (const model of models) {
     const key = `${aliasPrefix}${model.id}`;
     const existing = isRecord(existingModels[key]) ? existingModels[key] : {};
+    const existingMaxContextSize =
+      typeof existing['maxContextSize'] === 'number' ? existing['maxContextSize'] : undefined;
     existingModels[key] = mergeRefreshedModelAlias(
       existing,
-      toManagedModelAlias(providerId, model),
+      toManagedModelAlias(providerId, model, existingMaxContextSize),
       MANAGED_KIMI_MODEL_FIELDS,
     );
   }
@@ -824,7 +828,7 @@ export function clearManagedKimiCodeConfig(
 }
 
 function assertPositiveContextLength(model: ManagedKimiCodeModelInfo): void {
-  if (!Number.isInteger(model.contextLength) || model.contextLength <= 0) {
+  if (model.contextLength !== undefined && (!Number.isInteger(model.contextLength) || model.contextLength <= 0)) {
     throw new Error(`Kimi Code model "${model.id}" must include a positive context_length.`);
   }
 }
