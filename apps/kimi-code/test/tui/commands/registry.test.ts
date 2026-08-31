@@ -43,6 +43,29 @@ describe('built-in slash command registry', () => {
     expect(findBuiltInSlashCommand('unknown')).toBeUndefined();
   });
 
+  it('resolves fork-session to the fork command entry', () => {
+    const command = findBuiltInSlashCommand('fork-session');
+    expect(command).toBeDefined();
+    expect(command?.name).toBe('fork');
+    expect(command?.aliases).toContain('fork-session');
+  });
+
+  it('treats fork-session as the same entry as fork', () => {
+    const byAlias = findBuiltInSlashCommand('fork-session');
+    const byName = findBuiltInSlashCommand('fork');
+    expect(byAlias).toBeDefined();
+    expect(byName).toBeDefined();
+    expect(byAlias).toBe(byName);
+  });
+
+  it('does not register fork-session on any non-fork command', () => {
+    for (const command of BUILTIN_SLASH_COMMANDS) {
+      if (command.name === 'fork') continue;
+      expect(command.name).not.toBe('fork-session');
+      expect(command.aliases).not.toContain('fork-session');
+    }
+  });
+
   it('marks plan clear as idle-only while normal plan toggles are always available', () => {
     const plan = findBuiltInSlashCommand('plan');
     expect(plan).toBeDefined();
