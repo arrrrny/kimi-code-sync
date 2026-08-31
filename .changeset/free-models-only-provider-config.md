@@ -1,5 +1,5 @@
 ---
-"@moonshot-ai/kimi-code": patch
+"@moonshot-ai/kimi-code-oauth": patch
 ---
 
-Add a per-provider `free_models_only` setting for OpenAI-compatible providers. Set `free_models_only = true` in a provider's `[providers.<id>]` section so that `/refresh-catalog` keeps only free models (ids containing `free`).
+Fix `free_models_only` filter not applied on catalog refresh. The config TOML key was being read with snake_case (`free_models_only`) after TOML parsing converts all keys to camelCase (`freeModelsOnly`), so the filter was silently never triggered.

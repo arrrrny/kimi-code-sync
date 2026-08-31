@@ -125,7 +125,7 @@ function readProvider(
   const provider = config.providers[providerId];
   if (provider === undefined) return undefined;
   const view = provider as ProviderView;
-  const rawFree = (provider as Record<string, unknown>)['free_models_only'];
+  const rawFree = (provider as Record<string, unknown>)['freeModelsOnly'];
   const freeModelsOnly = typeof rawFree === 'boolean' ? rawFree : undefined;
   return { ...view, freeModelsOnly };
 }
