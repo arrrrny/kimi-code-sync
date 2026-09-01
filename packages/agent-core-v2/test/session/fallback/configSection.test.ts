@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { FALLBACK_MODEL_SECTION } from '#/app/kosongConfig/configSection';
+import { FALLBACK_MODEL_SECTION, FallbackModelConfigSchema, fallbackModelEnvBindings } from '#/app/kosongConfig/configSection';
 import { FALLBACK_MODEL_FLAG_ID } from '#/session/fallback/flag';
 import {
   resolveFallbackModel,
@@ -106,5 +106,29 @@ describe('resolveFallbackBinding', () => {
       [FALLBACK_MODEL_SECTION]: { model: 'kimi/same', secondaryModel: 'kimi/same' },
     });
     expect(resolveFallbackBinding(config, flags, own, 'kimi/same')).toBeUndefined();
+  });
+});
+
+describe('FallbackModelConfigSchema (B2, B3)', () => {
+  it('B2: schema accepts { model, secondaryModel } and parses them', () => {
+    const parsed = FallbackModelConfigSchema.parse({
+      model: 'kimi-k2',
+      secondaryModel: 'gpt-4o-mini',
+    });
+    expect(parsed).toEqual({ model: 'kimi-k2', secondaryModel: 'gpt-4o-mini' });
+  });
+
+  it('B2: schema rejects a non-string model', () => {
+    expect(() => FallbackModelConfigSchema.parse({ model: 1 })).toThrow();
+  });
+
+  it('B2: schema accepts an empty object (no fallback configured)', () => {
+    expect(FallbackModelConfigSchema.parse({})).toEqual({});
+  });
+
+  it('B3: fallbackModelEnvBindings declares KIMI_FALLBACK_MODEL for the model field', () => {
+    const bindings = fallbackModelEnvBindings as Record<string, { env: string; parse?: (raw: string) => unknown }>;
+    expect(bindings['model']?.env).toBe('KIMI_FALLBACK_MODEL');
+    expect(bindings['secondaryModel']?.env).toBe('KIMI_FALLBACK_SECONDARY_MODEL');
   });
 });

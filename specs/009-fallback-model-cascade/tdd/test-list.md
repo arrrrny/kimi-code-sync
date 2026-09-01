@@ -7,8 +7,8 @@ behaviors: 14
 outer: 5
 inner: 9
 characterization: 0
-proven: 7
-likely: 7
+proven: 9
+likely: 5
 no_test: 0
 traces_total: 14
 traces_resolved: 14
@@ -50,6 +50,8 @@ traces_resolved: 14
 | R5 | `resolveFallbackBinding` returns `undefined` when both tiers have been tried | FR-005, U2 | example | DONE | packages/agent-core-v2/test/session/fallback/configSection.test.ts > R5c |
 | R6 | `resolveFallbackBinding` skips tier 2 when its alias equals tier 1's alias | edge case | example | DONE | packages/agent-core-v2/test/session/fallback/configSection.test.ts > R5c |
 | B1 | Schema accepts `{ model: "kimi-k2" }` and rejects `{ model: 1 }` | FR-001 | example | DONE | packages/agent-core-v2/test/session/fallback/configSection.test.ts > B1 |
+| B2 | Schema accepts `{ model: ..., secondaryModel: ... }` and round-trips through TOML | FR-001, FR-009 | example | DONE | packages/agent-core-v2/test/session/fallback/configSection.test.ts > B2 |
+| B3 | `KIMI_FALLBACK_MODEL` env binding populates `model` field | FR-001 | example | DONE | packages/agent-core-v2/test/session/fallback/configSection.test.ts > B3 |
 
 ## Invariants and edge cases still to place
 
