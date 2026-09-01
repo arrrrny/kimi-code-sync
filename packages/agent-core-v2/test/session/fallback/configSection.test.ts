@@ -131,4 +131,14 @@ describe('FallbackModelConfigSchema (B2, B3)', () => {
     expect(bindings['model']?.env).toBe('KIMI_FALLBACK_MODEL');
     expect(bindings['secondaryModel']?.env).toBe('KIMI_FALLBACK_SECONDARY_MODEL');
   });
+
+  it('U4: setting fallbackModel via config store returns the same values on get', () => {
+    const config = new StubConfigService({
+      [FALLBACK_MODEL_SECTION]: { model: 'kimi/fallback', secondaryModel: 'kimi/fallback-2' },
+    });
+    const value = config.get<{ model?: string; secondaryModel?: string } | undefined>(
+      FALLBACK_MODEL_SECTION,
+    );
+    expect(value).toEqual({ model: 'kimi/fallback', secondaryModel: 'kimi/fallback-2' });
+  });
 });
