@@ -70,6 +70,7 @@ import {
 import {
   handleExportDebugZipCommand,
   handleExportMdCommand,
+  handleForkAndSwitchCommand,
   handleForkCommand,
   handleInitCommand,
   handleTitleCommand,
@@ -114,14 +115,6 @@ export { handleFeedbackCommand, showMcpServers, showStatusReport, showUsage } fr
 export { handlePluginsCommand } from './plugins';
 export { handleReloadCommand, handleReloadTuiCommand } from './reload';
 export { handleGoalCommand } from './goal';
-export {
-  handleExportDebugZipCommand,
-  handleExportMdCommand,
-  handleForkAndSwitchCommand,
-  handleForkCommand,
-  handleInitCommand,
-  handleTitleCommand,
-} from './session';
 export { handleUndoCommand } from './undo';
 export { handleRemoteControlCommand, handleWebCommand } from './web';
 
