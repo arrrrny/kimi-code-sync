@@ -70,7 +70,7 @@ describe('built-in slash command registry', () => {
     const command = findBuiltInSlashCommand('fork-and-switch');
     expect(command).toBeDefined();
     expect(command?.name).toBe('fork-and-switch');
-    expect(command?.aliases).not.toContain('fork-session');
+    expect(command?.aliases.length).toBe(0);
     expect(resolveSlashCommandAvailability(command!, '')).toBe('idle-only');
   });
 

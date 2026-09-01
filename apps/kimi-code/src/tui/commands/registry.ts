@@ -411,6 +411,7 @@ export const BUILTIN_SLASH_COMMANDS = [
     aliases: [],
     description: 'Fork the current session and switch into the fork immediately',
     priority: 80,
+    availability: 'idle-only',
   },
   {
     name: 'title',
