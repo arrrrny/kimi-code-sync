@@ -121,6 +121,23 @@
 - [ ] T029 [P] Update `docs/en/release-notes` and `docs/zh/release-notes` with a one-line note about the new slash commands.
 - [ ] T030 Run `pnpm lint` and `pnpm test packages/agent-core-v2` to confirm no regressions.
 
+## Phase 8: TDD Remediation (from tdd-verify FAIL)
+
+**Purpose**: Resolve the HIGH finding (7 of 14 behaviors uncovered) and confirm the integration layer is test-driven.
+
+- [ ] T031 [P] [B2] TOML round-trip test for `[fallback_model]` in `packages/agent-core-v2/test/app/kosongConfig/configSection.test.ts` — assert that `{ model = "kimi-k2" }` parses and writes back unchanged.
+- [ ] T032 [P] [B3] Env-binding test asserting `KIMI_FALLBACK_MODEL=kimi-k2` populates `resolveFallbackModel(...).model === "kimi-k2"`.
+- [ ] T033 [P] [U1] Outer-loop test: with primary model failing 10x and tier 1 configured, `AgentStepRetryService.recover` calls `tryFallback` and swaps the active profile to the tier 1 alias.
+- [ ] T034 [P] [U2] Outer-loop test: with primary + tier 1 both failing 10x, the cascade advances to tier 2 and swaps the profile.
+- [ ] T035 [P] [U3] Outer-loop test: with no fallback configured, `tryFallback` is never called and the existing terminal-error path runs.
+- [ ] T036 [P] [U5] TUI test: tab autocompletion for `/fallback-model` and `/fallback-model-secondary` returns the same model list as `/model` in `apps/kimi-code/test/tui/commands/fallback-model.test.ts`.
+- [ ] T037 [US1] Implement `tryFallback` in `AgentStepRetryService.recover` — call after `failedAttempts >= maxAttempts`, swap profile, reset counter, retry.
+- [ ] T038 [US1] Add `/fallback-model` slash command in `apps/kimi-code/src/tui/commands/config.ts` mirroring `handleSqueezeModelCommand`.
+- [ ] T039 [US1] Register `handleFallbackModelCommand` in `apps/kimi-code/src/tui/commands/registry.ts`.
+- [ ] T040 [US2] Add `/fallback-model-secondary` slash command in `apps/kimi-code/src/tui/commands/config.ts` mirroring `handleSqueezeModelSecondaryCommand`.
+- [ ] T041 [US2] Register `handleFallbackModelSecondaryCommand` in `apps/kimi-code/src/tui/commands/registry.ts`.
+- [ ] T042 Re-run `pnpm test packages/agent-core-v2` and confirm no regressions in pre-existing tests.
+
 ---
 
 ## Dependencies & Execution Order
