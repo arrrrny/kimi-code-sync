@@ -66,6 +66,26 @@ describe('built-in slash command registry', () => {
     }
   });
 
+  it('registers fork-and-switch as its own command, idle-only', () => {
+    const command = findBuiltInSlashCommand('fork-and-switch');
+    expect(command).toBeDefined();
+    expect(command?.name).toBe('fork-and-switch');
+    expect(command?.aliases).not.toContain('fork-session');
+    expect(resolveSlashCommandAvailability(command!, '')).toBe('idle-only');
+  });
+
+  it('keeps fork-and-switch distinct from fork and fork-session', () => {
+    const forkSwitch = findBuiltInSlashCommand('fork-and-switch');
+    const fork = findBuiltInSlashCommand('fork');
+    const forkSession = findBuiltInSlashCommand('fork-session');
+    expect(forkSwitch).toBeDefined();
+    expect(fork).toBeDefined();
+    expect(forkSession).toBeDefined();
+    expect(forkSwitch).not.toBe(fork);
+    expect(forkSession).toBe(fork);
+    expect(forkSwitch).not.toBe(forkSession);
+  });
+
   it('marks plan clear as idle-only while normal plan toggles are always available', () => {
     const plan = findBuiltInSlashCommand('plan');
     expect(plan).toBeDefined();
@@ -196,6 +216,7 @@ describe('built-in slash command registry', () => {
         'exit',
         'export-debug-zip',
         'fork',
+        'fork-and-switch',
         'help',
         'init',
         'login',

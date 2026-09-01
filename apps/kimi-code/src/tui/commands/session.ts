@@ -105,6 +105,44 @@ export async function handleForkCommand(host: SlashCommandHost, args: string): P
   }
 }
 
+export async function handleForkAndSwitchCommand(host: SlashCommandHost, args: string): Promise<void> {
+  void args;
+  const session = host.session;
+  if (session === undefined) {
+    host.showError(NO_ACTIVE_SESSION_MESSAGE);
+    return;
+  }
+  if (host.state.appState.streamingPhase !== 'idle') {
+    host.showError('Cannot fork-and-switch while streaming — press Esc or Ctrl-C first.');
+    return;
+  }
+
+  const sourceTitle = forkSourceTitle(host, session);
+  let forked: Session;
+  try {
+    forked = await host.harness.forkSession({
+      id: session.id,
+      title: `Fork: ${sourceTitle}`,
+    });
+  } catch (error) {
+    const msg = formatErrorMessage(error);
+    host.showError(`Failed to fork session: ${msg}`);
+    return;
+  }
+
+  try {
+    await host.switchToSession(forked, `Switched to fork (${forked.id}) of "${sourceTitle}".`);
+  } catch (error) {
+    const msg = formatErrorMessage(error);
+    try {
+      await forked.close();
+    } catch {
+      /* swallow: we already have a more informative error from the switch */
+    }
+    host.showError(`Forked (${forked.id}) but failed to switch: ${msg}`);
+  }
+}
+
 function forkResumeCommand(workDir: string, forkId: string): string {
   const dir = quoteShellArg(workDir);
   // cmd.exe's `cd` only updates the given drive's remembered directory — a

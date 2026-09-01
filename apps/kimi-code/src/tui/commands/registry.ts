@@ -407,6 +407,12 @@ export const BUILTIN_SLASH_COMMANDS = [
     priority: 80,
   },
   {
+    name: 'fork-and-switch',
+    aliases: [],
+    description: 'Fork the current session and switch into the fork immediately',
+    priority: 80,
+  },
+  {
     name: 'title',
     aliases: ['rename'],
     description: 'Set or show session title',
