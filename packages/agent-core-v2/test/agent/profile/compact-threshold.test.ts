@@ -254,7 +254,6 @@ describe('AgentProfileService.setCompactionTriggerRatio', () => {
   });
 
   it('getEffectiveCompactionTriggerRatio resolves precedence without a bound model', () => {
-    // getStatus reads this accessor on model-less sessions; it must not throw.
     configValues['loopControl'] = { compactionTriggerRatio: 0.7 };
     expect(svc.getEffectiveCompactionTriggerRatio()).toBe(0.7);
     svc.setCompactionTriggerRatio(0.3);
@@ -266,8 +265,6 @@ describe('AgentProfileService.setCompactionTriggerRatio', () => {
 
 describe('AgentProfileService compaction trigger ratio precedence', () => {
   beforeEach(() => {
-    // resolveModelContext requires a model to be configured; a plain state
-    // update is enough (no full bind / system-prompt rendering needed).
     svc.update({ modelAlias: MOCK_MODEL });
   });
 

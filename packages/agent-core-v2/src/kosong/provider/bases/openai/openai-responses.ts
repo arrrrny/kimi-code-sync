@@ -1044,7 +1044,6 @@ export class OpenAIResponsesChatProvider implements ChatProvider {
     this._clientFactory = options.clientFactory;
     this._convertErrorHook = options.convertError;
 
-    // Create proxy dispatcher if proxy URL is configured
     if (this._proxyUrl !== undefined && this._proxyUrl.length > 0) {
       try {
         this._proxyDispatcher = new ProxyAgent(this._proxyUrl);
@@ -1180,15 +1179,14 @@ export class OpenAIResponsesChatProvider implements ChatProvider {
         throw convertOpenAIError({
           status: response.status,
           message: JSON.stringify(errorData),
+          headers: response.headers,
         }, this._convertErrorHook);
       }
 
       if (this._stream) {
-        // Parse SSE stream for streaming responses
         const streamIterable = this._parseSSEStream(response);
         return new OpenAIResponsesStreamedMessage(streamIterable, this._stream, this._convertErrorHook);
       } else {
-        // Parse JSON for non-streaming responses
         const data = await response.json();
         return new OpenAIResponsesStreamedMessage(data, this._stream, this._convertErrorHook);
       }
@@ -1251,7 +1249,7 @@ export class OpenAIResponsesChatProvider implements ChatProvider {
         for (const line of lines) {
           const trimmed = line.trim();
           if (trimmed.startsWith('data: ')) {
-            const data = trimmed.slice(6); // Remove 'data: ' prefix
+            const data = trimmed.slice(6);
             if (data === '[DONE]') {
               return;
             }
@@ -1265,7 +1263,6 @@ export class OpenAIResponsesChatProvider implements ChatProvider {
         }
       }
 
-      // Process any remaining buffer
       if (buffer.trim().startsWith('data: ')) {
         const data = buffer.trim().slice(6);
         if (data !== '[DONE]') {

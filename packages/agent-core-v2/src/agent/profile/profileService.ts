@@ -144,7 +144,6 @@ export class AgentProfileService extends Disposable implements IAgentProfileServ
 
   private activeProfile: ResolvedAgentProfile | undefined;
 
-  /** Session-scoped auto-compaction trigger ratio override; undefined = use config. */
   private compactionTriggerRatioOverride: number | undefined;
 
   private frozenSkillListing: string | undefined;
