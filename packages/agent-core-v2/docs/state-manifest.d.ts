@@ -27,7 +27,7 @@
 // references become '(circular)', and class instances collapse to a '(ClassName)'
 // marker — the wire shape of an entry is the JSON projection of the type here.
 //
-// Index (App: 0 keys · Workspace: 6 keys · Session: 9 keys · Agent: 83 keys)
+// Index (App: 0 keys · Workspace: 6 keys · Session: 9 keys · Agent: 85 keys)
 //   App
 //   Workspace
 //     workspaceDirs.ephemeralDirs          src/workspace/workspaceDirs/workspaceDirsService.ts
@@ -60,6 +60,7 @@
 //     contextMemory                                   src/agent/contextMemory/contextOps.ts
 //     contextProjector.lastRepairSignature            src/agent/contextProjector/contextProjectorService.ts
 //     externalHooks.stopHookContinuationUsed          src/features/externalHooks/agent/agentExternalHooksService.ts
+//     fallbackModel.active                            src/session/fallback/state.ts
 //     fileHistory                                     src/features/fileHistory/fileHistoryOps.ts
 //     fullCompaction                                  src/agent/fullCompaction/compactionOps.ts
 //     fullCompaction.activeTurnId                     src/agent/fullCompaction/fullCompactionService.ts
@@ -105,6 +106,7 @@
 //     staleGuard                                      src/features/staleGuard/staleGuardOps.ts
 //     stepRetry.failedAttempts                        src/agent/stepRetry/stepRetryService.ts
 //     stepRetry.lastFailedDriverId                    src/agent/stepRetry/stepRetryService.ts
+//     substituteModel.active                          src/session/substitute/state.ts
 //     swarm                                           src/features/swarm/swarmOps.ts
 //     task                                            src/agent/task/taskOps.ts
 //     task.activeTaskReminderPending                  src/agent/task/taskService.ts
@@ -1217,6 +1219,7 @@ export interface AgentStateSnapshot {
       readonly thinkingLevel: /* ThinkingEffort — packages/agent-core-v2/src/kosong/contract/provider.ts */ 'off' | 'on' | (string & {});
       readonly reservedContextSize: number | undefined;
       readonly compactionTriggerRatio: number | undefined;
+      readonly compactionTokenBudget: number | undefined;
     };
     readonly params: /* ModelRequestParams — packages/agent-core-v2/src/kosong/model/modelRequester.ts */ {
       readonly cacheKey?: string;
@@ -1530,6 +1533,17 @@ export interface AgentStateSnapshot {
   'tower.base': string | null;
   // replayable · durable — folds: TowerModeEnter, TowerModeExit
   'tower.owner': string | undefined;
+  // src/session/fallback/state.ts
+  'fallbackModel.active': /* ActiveFallbackModel — packages/agent-core-v2/src/session/fallback/state.ts */ {
+    readonly alias: string;
+    readonly tier: 'primary' | 'secondary';
+  } | undefined;
+  // src/session/substitute/state.ts
+  'substituteModel.active': /* ActiveSubstituteModel — packages/agent-core-v2/src/session/substitute/state.ts */ {
+    readonly alias: string;
+    readonly primaryAlias: string;
+    readonly until: number;
+  } | undefined;
 }
 
 export type AgentStateKey = keyof AgentStateSnapshot;
