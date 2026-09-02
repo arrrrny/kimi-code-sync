@@ -1734,6 +1734,18 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
     agent.accessor.get(IAgentProfileService).setCompactionTriggerRatio(input.ratio);
   }
 
+  /**
+   * Through the agent scope (`IAgentProfileService.setCompactionTokenBudget`).
+   * The profile service validates the input (positive integer ≥ 1) and
+   * multiplies by 1 000 to convert "thousands of tokens" to raw tokens.
+   */
+  override async setCompactionTokenBudget(
+    input: SetSessionCompactionTokenBudgetRpcInput,
+  ): Promise<void> {
+    const agent = await this.agentScope(input.sessionId);
+    agent.accessor.get(IAgentProfileService).setCompactionTokenBudget(input.tokens);
+  }
+
   override async setPermission(input: SetSessionPermissionRpcInput): Promise<void> {
     const agent = await this.agentFacade(input.sessionId);
     return agent.setPermission(input.mode);
@@ -1841,6 +1853,12 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
         : {}),
       ...(profileService.getCompactionTriggerRatioOverride() !== undefined
         ? { compactionTriggerRatioOverridden: true }
+        : {}),
+      ...(profileService.getEffectiveCompactionTokenBudget() !== undefined
+        ? { compactionTokenBudget: profileService.getEffectiveCompactionTokenBudget() }
+        : {}),
+      ...(profileService.getCompactionTokenBudgetOverride() !== undefined
+        ? { compactionTokenBudgetOverridden: true }
         : {}),
       contextTokens,
       maxContextTokens,

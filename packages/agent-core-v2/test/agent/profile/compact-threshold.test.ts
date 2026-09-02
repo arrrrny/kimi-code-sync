@@ -296,3 +296,54 @@ describe('AgentProfileService compaction trigger ratio precedence', () => {
     expect(svc.resolveModelContext().compactionTriggerRatio).toBe(0.05);
   });
 });
+describe('AgentProfileService.setCompactionTokenBudget', () => {
+  it('stores the override as tokens (input N means N * 1000)', () => {
+    svc.setCompactionTokenBudget(120);
+    expect(svc.getCompactionTokenBudgetOverride()).toBe(120_000);
+  });
+
+  it('clears the override when called with undefined', () => {
+    svc.setCompactionTokenBudget(120);
+    expect(svc.getCompactionTokenBudgetOverride()).toBe(120_000);
+    svc.setCompactionTokenBudget(undefined);
+    expect(svc.getCompactionTokenBudgetOverride()).toBeUndefined();
+  });
+
+  it('rejects 0 (below the 1 000-token floor)', () => {
+    expect(() => svc.setCompactionTokenBudget(0)).toThrow(ProfileError);
+    expect(svc.getCompactionTokenBudgetOverride()).toBeUndefined();
+  });
+
+  it('rejects negative values', () => {
+    expect(() => svc.setCompactionTokenBudget(-1)).toThrow(ProfileError);
+    expect(svc.getCompactionTokenBudgetOverride()).toBeUndefined();
+  });
+
+  it('rejects NaN', () => {
+    expect(() => svc.setCompactionTokenBudget(Number.NaN)).toThrow(ProfileError);
+    expect(svc.getCompactionTokenBudgetOverride()).toBeUndefined();
+  });
+
+  it('rejects non-integer values', () => {
+    expect(() => svc.setCompactionTokenBudget(2.5)).toThrow(ProfileError);
+    expect(svc.getCompactionTokenBudgetOverride()).toBeUndefined();
+  });
+
+  it('getEffectiveCompactionTokenBudget resolves precedence: override > config > default', () => {
+    configValues['loopControl'] = { compactionTokenBudget: 200_000 };
+    expect(svc.getEffectiveCompactionTokenBudget()).toBe(200_000);
+    svc.setCompactionTokenBudget(120);
+    expect(svc.getEffectiveCompactionTokenBudget()).toBe(120_000);
+    svc.setCompactionTokenBudget(undefined);
+    expect(svc.getEffectiveCompactionTokenBudget()).toBe(200_000);
+  });
+
+  it('token override and ratio override are independent', () => {
+    svc.setCompactionTriggerRatio(0.5);
+    svc.setCompactionTokenBudget(120);
+    expect(svc.getCompactionTriggerRatioOverride()).toBe(0.5);
+    expect(svc.getCompactionTokenBudgetOverride()).toBe(120_000);
+    svc.setCompactionTokenBudget(undefined);
+    expect(svc.getCompactionTriggerRatioOverride()).toBe(0.5);
+  });
+});

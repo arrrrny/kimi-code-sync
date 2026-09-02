@@ -108,6 +108,7 @@ export interface ProfileModelContext {
   readonly thinkingLevel: ThinkingEffort;
   readonly reservedContextSize: number | undefined;
   readonly compactionTriggerRatio: number | undefined;
+  readonly compactionTokenBudget: number | undefined;
 }
 
 export interface ProfileSetModelResult {
@@ -134,6 +135,9 @@ export interface IAgentProfileService {
   setCompactionTriggerRatio(ratio: number | undefined): void;
   getCompactionTriggerRatioOverride(): number | undefined;
   getEffectiveCompactionTriggerRatio(): number | undefined;
+  setCompactionTokenBudget(tokens: number | undefined): void;
+  getCompactionTokenBudgetOverride(): number | undefined;
+  getEffectiveCompactionTokenBudget(): number | undefined;
   republishStatus(): void;
   getModel(): string;
   useProfile(profile: ResolvedAgentProfile, context: SystemPromptContext): void;
