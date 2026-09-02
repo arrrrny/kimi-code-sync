@@ -23,8 +23,8 @@ function makeHost(options: { hasSession?: boolean; status?: SessionStatusLike } 
       contextTokens: 0,
       maxContextTokens: 1000,
       contextUsage: 0,
-      ...(options.status ?? {}),
-    })),
+      ...options.status,
+    } as SessionStatusLike)),
   };
   const hasSession = options.hasSession ?? true;
   const host = {
