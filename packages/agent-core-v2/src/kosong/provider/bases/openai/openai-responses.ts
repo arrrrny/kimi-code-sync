@@ -1223,8 +1223,10 @@ export class OpenAIResponsesChatProvider implements ChatProvider {
     return fetch(`${this._baseUrl}${path}`, {
       ...options,
       headers,
-      dispatcher: this._proxyDispatcher as any,
-    });
+      ...(this._proxyDispatcher !== undefined
+        ? { dispatcher: this._proxyDispatcher as never }
+        : {}),
+    } as RequestInit);
   }
 
   private async *_parseSSEStream(response: Response): AsyncGenerator<RawObject> {
