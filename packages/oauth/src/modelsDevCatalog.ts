@@ -28,6 +28,7 @@ type ModelsDevCatalog = Record<string, ModelsDevProviderEntry>;
 export interface ModelsDevModelInfo {
   readonly displayName?: string;
   readonly capabilities: string[];
+  readonly context?: number;
 }
 
 const MODELS_DEV_URL = 'https://models.dev/api.json';
@@ -82,7 +83,10 @@ function modelInfoFrom(
   const rawName = raw['name'];
   const displayName =
     typeof rawName === 'string' && rawName.length > 0 ? rawName : undefined;
-  return { displayName, capabilities };
+  const limit = isRecord(raw['limit']) ? (raw['limit'] as Record<string, unknown>) : undefined;
+  const rawContext = limit?.['context'];
+  const context = typeof rawContext === 'number' && rawContext > 0 ? rawContext : undefined;
+  return { displayName, capabilities, context };
 }
 
 /**
