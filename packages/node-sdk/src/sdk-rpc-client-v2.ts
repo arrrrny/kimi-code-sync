@@ -264,6 +264,7 @@ import {
   type SetSessionModelRpcInput,
   type SetSessionModelRpcResult,
   type SetSessionCompactionTriggerRatioRpcInput,
+  type SetSessionCompactionTokenBudgetRpcInput,
   type SetSessionPermissionRpcInput,
   type SetSessionPlanModeRpcInput,
   type SetSessionSwarmModeRpcInput,
