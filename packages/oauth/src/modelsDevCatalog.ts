@@ -27,7 +27,7 @@ type ModelsDevCatalog = Record<string, ModelsDevProviderEntry>;
 
 export interface ModelsDevModelInfo {
   readonly displayName?: string;
-  readonly capabilities: string[];
+  readonly capabilities?: string[];
   readonly context?: number;
 }
 
@@ -78,15 +78,27 @@ function modelInfoFrom(
   if (entry?.models === undefined) return undefined;
   const raw = entry.models[modelId];
   if (!isRecord(raw)) return undefined;
-  const capabilities = toCapabilities(raw as ModelsDevModelEntry);
-  if (capabilities === undefined) return undefined;
   const rawName = raw['name'];
   const displayName =
     typeof rawName === 'string' && rawName.length > 0 ? rawName : undefined;
+  // `capabilities` and `context` are independent signals — a model that is
+  // flagged `deprecated` / `alpha` in the catalog has no capabilities here
+  // (so we drop the capabilities hint) but can still carry a `limit.context`
+  // we want to surface. Read both, then return only the fields that have a
+  // value so the caller does not have to distinguish "absent" from
+  // "explicitly undefined".
+  const capabilities = toCapabilities(raw as ModelsDevModelEntry);
   const limit = isRecord(raw['limit']) ? (raw['limit'] as Record<string, unknown>) : undefined;
   const rawContext = limit?.['context'];
   const context = typeof rawContext === 'number' && rawContext > 0 ? rawContext : undefined;
-  return { displayName, capabilities, context };
+  if (displayName === undefined && capabilities === undefined && context === undefined) {
+    return undefined;
+  }
+  return {
+    ...(displayName !== undefined ? { displayName } : {}),
+    ...(capabilities !== undefined ? { capabilities } : {}),
+    ...(context !== undefined ? { context } : {}),
+  };
 }
 
 /**
