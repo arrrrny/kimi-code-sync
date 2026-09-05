@@ -18,7 +18,6 @@ export {
   handleModelCommand,
   handlePlanCommand,
   handleThemeCommand,
-  handleYoloCommand,
   showExperimentsPanel,
   showModelPicker,
   showPermissionPicker,
