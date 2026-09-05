@@ -148,6 +148,27 @@ exit code: 0 (clean — no conflicts, no output)
 Compare with RED (exit 1, 7 conflicting files) — future syncs merge cleanly because the
 fork-owned logic now lives in dedicated modules and the tree is linear on upstream/main.
 
+## CI comparison (GitHub Actions, real runs)
+
+Master CI was already red before this change (runs on 032a4494 / 40b9b99e / 2185de30 all
+conclude `failure`). Normalized comparison of unique `##[error]` signatures across the five
+test shards:
+
+- master CI run `33959456283` (032a4494): 53 unique error signatures
+- PR CI run `33971295071` (3e3098c2f): 50 unique error signatures
+- signatures only in master (fixed by this PR): the two stale-manifest AssertionErrors
+  (state-manifest, wire-manifest) + the config.test.ts fixture AssertionError — exactly
+  the 3 fixes above
+- **signatures only in the PR (new): none**
+
+Remaining PR CI redness is inherited master debt: the 97 pre-existing test failures
+(vitest exits non-zero on any failure, so all 5 shards conclude `failure` exactly as
+master's do) and 20 pre-existing `oxlint --type-aware` diagnostics in 10 files this
+branch does not modify (unmasked by fixing the 9 comment-rule violations that used to
+short-circuit lint earlier; check-no-comments now reports `OK (1623 files)`).
+Green on this PR's CI: build, typecheck, test-pi-tui (953/953), test-vscode-legacy,
+Nix Build, flake.nix sync check.
+
 ## Success criteria — PROVED vs NOT
 
 - PROVED: 5 recurring conflict files reproduced conflicting under the old strategy (RED).
