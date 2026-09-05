@@ -816,10 +816,6 @@ describe('BashTool', () => {
     const properties = (tool.parameters as { properties: Record<string, { default?: number; description?: string }> })
       .properties;
 
-    // The schema intentionally omits a JSON-schema `default` so the tool can
-    // distinguish "model omitted `timeout`" (use configured background default)
-    // from "model passed an explicit value" (use that value). The default value
-    // is still surfaced via the human-readable description.
     expect(properties['timeout']?.default).toBeUndefined();
     expect(properties['timeout']?.description).toMatch(/Foreground default 60s/);
   });
