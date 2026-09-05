@@ -81,7 +81,7 @@ import {
   FullCompactionComplete,
 } from './compactionOps';
 import { resolveSqueezeModelAliasWithCascade } from './squeezeCascade';
-import { SqueezeModelDecided } from './squeezeForkOps';
+import { SqueezeModelDecided, squeezeModelKey } from './squeezeForkOps';
 import {
   type CompactionBeginData,
   type CompactionResult,
@@ -184,6 +184,7 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
     this.states.contributeState(fullCompactionLastCompactedTokenCountKey);
     this.states.contributeState(fullCompactionConsecutiveOverflowCompactionsKey);
     this.states.contributeState(fullCompactionActiveTurnIdKey);
+    this.states.contributeState(squeezeModelKey);
     this.strategy = new RuntimeCompactionStrategy(
       () => this.resolveModelContextWithEffectiveMax(),
       (message) => this.tokenCounting.estimateMessage(message),
