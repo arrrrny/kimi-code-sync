@@ -80,6 +80,8 @@ import {
   FullCompactionCancel,
   FullCompactionComplete,
 } from './compactionOps';
+import { resolveSqueezeModelAliasWithCascade } from './squeezeCascade';
+import { SqueezeModelDecided } from './squeezeForkOps';
 import {
   type CompactionBeginData,
   type CompactionResult,
@@ -351,47 +353,11 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
     this.observedMaxContextTokensByModel.set(modelAlias, observed);
   }
 
-  private resolveSqueezeModelAliasWithCascade(currentModelAlias: string): string {
-    const overrides = this.profile.getAllSessionModelOverrides();
-    const binding = compactionModelBindingFor(this.configService, this.flags, {
-      modelAlias: currentModelAlias,
-      thinkingLevel: this.profile.data().thinkingLevel,
-    }, { compactionAlias: overrides.compaction });
-    const primaryAlias = binding.model;
-    if (primaryAlias !== currentModelAlias) {
-      try {
-        this.profile.resolveModelContextFor(primaryAlias);
-        return primaryAlias;
-      } catch {
-      }
-    }
-    const secondaryAlias = resolveCompactionSecondaryModel(this.configService, this.flags, {
-      compactionSecondaryAlias: overrides.compactionSecondary,
-    });
-    if (
-      secondaryAlias !== undefined &&
-      secondaryAlias !== currentModelAlias &&
-      secondaryAlias !== primaryAlias
-    ) {
-      try {
-        this.profile.resolveModelContextFor(secondaryAlias);
-        return secondaryAlias;
-      } catch {
-      }
-    }
-    return currentModelAlias;
-  }
-
   begin(input: FullCompactionInput): boolean {
     if (this._compacting) return false;
     const data: CompactionBeginData = { source: input.source, instruction: input.instruction };
     const profileData = this.profile.data();
     const currentModelAlias = profileData.modelAlias;
-    if (currentModelAlias !== undefined) {
-      const squeezeAlias = this.resolveSqueezeModelAliasWithCascade(currentModelAlias);
-      data.model = squeezeAlias;
-      data.modelDisplay = compactionDisplayModel(this.configService, squeezeAlias);
-    }
     if (!this.reserveCompactionSlot(data.source)) return false;
 
     const tokenCount = this.validateCompactionStart(data.source);
@@ -408,6 +374,22 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
       void this.dispatcher.dispatch(
         new FullCompactionBegin({ ...data, agentId: this.agent.agentId }),
       );
+
+      if (currentModelAlias !== undefined) {
+        const squeezeResult = resolveSqueezeModelAliasWithCascade({
+          currentModelAlias,
+          profile: this.profile,
+          configService: this.configService,
+          flags: this.flags,
+        });
+        void this.dispatcher.dispatch(
+          new SqueezeModelDecided({
+            agentId: this.agent.agentId,
+            model: squeezeResult.alias,
+            modelDisplay: compactionDisplayModel(this.configService, squeezeResult.alias),
+          }),
+        );
+      }
 
       const active = this.createActiveCompaction(
         data.source,
