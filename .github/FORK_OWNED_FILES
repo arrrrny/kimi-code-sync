@@ -59,3 +59,8 @@ scripts/check-no-comments.mjs                                           :: check
 # --- Fork-owned deps (root package.json has http-proxy-agent@^9 which
 #     upstream removed; this is what the pnpm-lockfile guard is for) ---
 package.json                                                            :: http-proxy-agent
+
+# --- squeeze-model fork modules (refactor: isolated from upstream hotspots) ---
+packages/agent-core-v2/src/agent/fullCompaction/squeezeForkOps.ts       :: SqueezeModelDecided
+packages/agent-core-v2/src/agent/fullCompaction/squeezeCascade.ts       :: resolveSqueezeModelAliasWithCascade
+packages/agent-core-v2/src/app/telemetry/forkEvents.ts                  :: forkTelemetryEventDefinitions
