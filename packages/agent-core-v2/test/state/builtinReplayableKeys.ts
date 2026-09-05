@@ -2,6 +2,7 @@ import type { ReplayableStateKey } from '#/state/state';
 
 import { contextMemoryKey } from '#/agent/contextMemory/contextOps';
 import { fullCompactionKey, fullCompactionWireRangesKey } from '#/agent/fullCompaction/compactionOps';
+import { squeezeModelKey } from '#/agent/fullCompaction/squeezeForkOps';
 import { interruptionReminderKey } from '#/agent/interruptionReminder/interruptionReminderOps';
 import { llmRequestTraceKey } from '#/agent/llmRequester/llmRequestOps';
 import { turnKey } from '#/agent/loop/turnOps';
@@ -28,6 +29,7 @@ export const BUILTIN_REPLAYABLE_STATE_KEYS: readonly ReplayableStateKey<any>[] =
   contextMemoryKey,
   fullCompactionKey,
   fullCompactionWireRangesKey,
+  squeezeModelKey,
   interruptionReminderKey,
   llmRequestTraceKey,
   turnKey,

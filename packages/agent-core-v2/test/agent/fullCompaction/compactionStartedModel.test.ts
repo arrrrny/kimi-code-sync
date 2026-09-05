@@ -34,19 +34,19 @@ const SECONDARY_MODEL = {
   capabilities: ['thinking', 'tool_use'],
 } as const;
 
-interface StartedModelArgs {
+interface SqueezeModelArgs {
   readonly model?: string;
-  readonly model_display?: string;
+  readonly modelDisplay?: string;
 }
 
-function findStartedModel(ctx: ReturnType<typeof testAgent>): StartedModelArgs {
+function findSqueezeModelDecided(ctx: ReturnType<typeof testAgent>): SqueezeModelArgs {
   const events = ctx.newEvents() as unknown as Array<{
     readonly type?: string;
     readonly event?: string;
     readonly args?: unknown;
   }>;
-  const event = events.find((e) => e.type === '[rpc]' && e.event === 'compaction.started');
-  return (event?.args as StartedModelArgs | undefined) ?? {};
+  const event = events.find((e) => e.type === '[wire]' && e.event === 'squeeze_model.decided');
+  return (event?.args as SqueezeModelArgs | undefined) ?? {};
 }
 
 function makeAgent(initialConfig: Record<string, unknown> = {}) {
@@ -72,7 +72,7 @@ async function runCompaction(ctx: ReturnType<typeof testAgent>): Promise<void> {
   await completed;
 }
 
-describe('FullCompaction started model', () => {
+describe('SqueezeModelDecided', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
   });
@@ -82,9 +82,9 @@ describe('FullCompaction started model', () => {
     const expectedAlias = ctx.get(IAgentProfileService).resolveModelContext().modelAlias;
     await runCompaction(ctx);
 
-    const { model, model_display } = findStartedModel(ctx);
+    const { model, modelDisplay } = findSqueezeModelDecided(ctx);
     expect(model).toBe(expectedAlias);
-    expect(model_display).toBe(expectedAlias);
+    expect(modelDisplay).toBe(expectedAlias);
   });
 
   it('carries the dedicated compaction model when [compaction_model] is configured', async () => {
@@ -92,9 +92,9 @@ describe('FullCompaction started model', () => {
     const ctx = makeAgent({ compactionModel: { model: 'kimi/compaction' } });
     await runCompaction(ctx);
 
-    const { model, model_display } = findStartedModel(ctx);
+    const { model, modelDisplay } = findSqueezeModelDecided(ctx);
     expect(model).toBe('kimi/compaction');
-    expect(model_display).toBe('kimi/compaction');
+    expect(modelDisplay).toBe('kimi/compaction');
   });
 
   it('honors the legacy default_model pointer written by an older TUI', async () => {
@@ -102,9 +102,9 @@ describe('FullCompaction started model', () => {
     const ctx = makeAgent({ compactionModel: { defaultModel: 'kimi/compaction' } });
     await runCompaction(ctx);
 
-    const { model, model_display } = findStartedModel(ctx);
+    const { model, modelDisplay } = findSqueezeModelDecided(ctx);
     expect(model).toBe('kimi/compaction');
-    expect(model_display).toBe('kimi/compaction');
+    expect(modelDisplay).toBe('kimi/compaction');
   });
 
   it('cascades to the secondary squeeze model when the primary is unresolvable', async () => {
@@ -112,9 +112,9 @@ describe('FullCompaction started model', () => {
     const ctx = makeAgent({ compactionModel: { model: 'kimi/ghost', secondaryModel: 'kimi/backup' } });
     await runCompaction(ctx);
 
-    const { model, model_display } = findStartedModel(ctx);
+    const { model, modelDisplay } = findSqueezeModelDecided(ctx);
     expect(model).toBe('kimi/backup');
-    expect(model_display).toBe('kimi/backup');
+    expect(modelDisplay).toBe('kimi/backup');
   });
 
   it('uses the secondary squeeze model when no primary is configured', async () => {
@@ -122,9 +122,9 @@ describe('FullCompaction started model', () => {
     const ctx = makeAgent({ compactionModel: { secondaryModel: 'kimi/backup' } });
     await runCompaction(ctx);
 
-    const { model, model_display } = findStartedModel(ctx);
+    const { model, modelDisplay } = findSqueezeModelDecided(ctx);
     expect(model).toBe('kimi/backup');
-    expect(model_display).toBe('kimi/backup');
+    expect(modelDisplay).toBe('kimi/backup');
   });
 
   it('falls back to the current model when both squeeze tiers are unresolvable', async () => {
@@ -135,9 +135,9 @@ describe('FullCompaction started model', () => {
     const expectedAlias = ctx.get(IAgentProfileService).resolveModelContext().modelAlias;
     await runCompaction(ctx);
 
-    const { model, model_display } = findStartedModel(ctx);
+    const { model, modelDisplay } = findSqueezeModelDecided(ctx);
     expect(model).toBe(expectedAlias);
-    expect(model_display).toBe(expectedAlias);
+    expect(modelDisplay).toBe(expectedAlias);
   });
 
   it('prefers the primary squeeze model when both tiers resolve', async () => {
@@ -147,8 +147,8 @@ describe('FullCompaction started model', () => {
     });
     await runCompaction(ctx);
 
-    const { model, model_display } = findStartedModel(ctx);
+    const { model, modelDisplay } = findSqueezeModelDecided(ctx);
     expect(model).toBe('kimi/compaction');
-    expect(model_display).toBe('kimi/compaction');
+    expect(modelDisplay).toBe('kimi/compaction');
   });
 });

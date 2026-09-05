@@ -65,6 +65,7 @@ auto_install = false
       disablePasteBurst: false,
       cacheExpiryHint: true,
       disableFeedbackSurvey: false,
+      editorCommand: 'code --wait',
       favoriteModels: [],
       notifications: { enabled: false, condition: 'always' },
       upgrade: { autoInstall: false },
