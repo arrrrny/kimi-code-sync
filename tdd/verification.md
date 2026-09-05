@@ -77,6 +77,20 @@ Phases executed (branch commits, newest last):
 5. `feat(vis): render squeeze_model.decided wire record` — vis server `AgentRecord`
    union + vis-web `WIRE_RENDERERS` entry so the "covers every durable record" guard
    stays green.
+6. `merge: reconcile legacy master (merge-based history) into rebased line` — because
+   master's history is merge-based, GitHub's merge of this (rebased) branch into master
+   conflicts on files where the rebased content improves on master (add/add
+   FORK_OWNED_FILES; refactor-vs-inline hunks). Reconciled by merging master with
+   `-X ours` and restoring the refactored `fullCompactionService.ts` (the 3-way merge
+   had resurrected the inline cascade method from a theirs-only hunk). Result: master
+   is an ancestor of the PR head, the tree is byte-identical to the rebased content
+   (`git diff <pre-merge-head> HEAD` empty), GitHub reports `mergeable: true`, and the
+   PR "Files changed" is exactly the intended 15-file delta.
+7. `chore(agent-core-v2): strip comments from synced test files` — the 09-05 sync had
+   merged upstream test files containing 9 comment lines that violate the fork-owned
+   no-comment rule, leaving master's CI lint red (3 consecutive master CI failures).
+   Removed the lines; `node scripts/check-no-comments.mjs` now reports
+   `OK (1623 files)` and both affected test files pass (62/62).
 
 **Fork features verified present after rebase** (grep over the rebased tree):
 `resolveSqueezeModelAliasWithCascade` (now in `squeezeCascade.ts`, dispatched via
