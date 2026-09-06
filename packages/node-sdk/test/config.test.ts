@@ -356,6 +356,28 @@ describe('KimiHarness config API', () => {
         enabled: false,
         source: 'default',
       },
+      {
+        id: 'substitute-model',
+        title: 'Substitute model for rate-limit fallback',
+        description:
+          'When the primary model hits a provider rate limit (e.g. 429 from account quota), automatically switch to a configured substitute model and continue until the primary recovers.',
+        surface: 'core',
+        env: 'KIMI_CODE_EXPERIMENTAL_SUBSTITUTE_MODEL',
+        defaultEnabled: false,
+        enabled: false,
+        source: 'default',
+      },
+      {
+        id: 'update-all-session-models',
+        title: 'Bulk model switch for all sessions',
+        description:
+          'Expose the /update-all-session-models command: switch the working model of every active session at once (with confirmation) and update the new-session default.',
+        surface: 'core',
+        env: 'KIMI_CODE_EXPERIMENTAL_UPDATE_ALL_SESSION_MODELS',
+        defaultEnabled: false,
+        enabled: false,
+        source: 'default',
+      },
     ]);
   });
 
