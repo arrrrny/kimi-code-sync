@@ -265,7 +265,7 @@ describe('applyCustomRegistryProvider', () => {
       maxContextSize: CUSTOM_REGISTRY_DEFAULT_MAX_CONTEXT,
       displayName: 'GPT 5.5',
     });
-    expect(gpt).toMatchObject({ maxContextSize: 131072 });
+    expect(gpt).toMatchObject({ maxContextSize: 262144 });
     expect((gpt as { capabilities: string[] }).capabilities).toEqual([
       ...CUSTOM_REGISTRY_DEFAULT_CAPABILITIES,
     ]);
