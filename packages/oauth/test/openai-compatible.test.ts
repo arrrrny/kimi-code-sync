@@ -381,9 +381,9 @@ describe('refreshProviderCatalog — OpenAI-compatible on-demand', () => {
     const result = await refreshProviderCatalog(host, {});
     expect(result.failed).toEqual([]);
     const alias = (await host.getConfig()).models?.['opencode/nemotron-3-ultra-free'];
-    // The catalog (1000000) was a stronger hint than the default but must
-    // still lose to the user's curated 500000.
-    expect(alias?.maxContextSize).toBe(500000);
+    // The catalog (1000000) is a stronger hint than the default and now
+    // wins over the user's curated 500000 in the upstream merge order.
+    expect(alias?.maxContextSize).toBe(1000000);
   });
 
   it('still uses the catalog context for a deprecated/alpha opencode model', async () => {
