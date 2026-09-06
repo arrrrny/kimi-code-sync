@@ -75,6 +75,7 @@ import { IAgentToolRegistryService } from '#/agent/toolRegistry/toolRegistry';
 import { getAgentToolContributions } from '#/agent/toolRegistry/toolContribution';
 import {
   profileActiveToolsKey,
+  CompactionConfigChanged,
   ConfigUpdate,
   ProfileBind,
   profileKey,
@@ -385,6 +386,7 @@ export class AgentProfileService extends Disposable implements IAgentProfileServ
     if (ratio === undefined) {
       this.compactionTriggerRatioOverride = undefined;
       forkTrack2(this.telemetry, 'compaction_threshold_override', { action: 'clear' });
+      void this.dispatcher.dispatch(new CompactionConfigChanged());
       return;
     }
     if (
@@ -399,6 +401,7 @@ export class AgentProfileService extends Disposable implements IAgentProfileServ
     }
     this.compactionTriggerRatioOverride = ratio;
     forkTrack2(this.telemetry, 'compaction_threshold_override', { ratio, action: 'set' });
+    void this.dispatcher.dispatch(new CompactionConfigChanged());
   }
 
   getCompactionTriggerRatioOverride(): number | undefined {
@@ -414,6 +417,7 @@ export class AgentProfileService extends Disposable implements IAgentProfileServ
     if (tokens === undefined) {
       this.compactionTokenBudgetOverride = undefined;
       forkTrack2(this.telemetry, 'compaction_token_budget_override', { action: 'clear' });
+      void this.dispatcher.dispatch(new CompactionConfigChanged());
       return;
     }
     if (!Number.isInteger(tokens) || tokens < 1) {
@@ -427,6 +431,7 @@ export class AgentProfileService extends Disposable implements IAgentProfileServ
       tokens: this.compactionTokenBudgetOverride,
       action: 'set',
     });
+    void this.dispatcher.dispatch(new CompactionConfigChanged());
   }
 
   getCompactionTokenBudgetOverride(): number | undefined {
