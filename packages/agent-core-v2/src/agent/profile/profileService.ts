@@ -42,6 +42,7 @@ import { IAgentScopeContext } from '#/agent/scopeContext/scopeContext';
 import { IAgentStateService } from '#/agent/state/agentState';
 import { IAgentAgentsMdReminderService } from '#/agent/agentsMdReminder/agentsMdReminder';
 
+import { forkTrack2 } from '#/app/telemetry/forkEvents';
 import { ITelemetryService } from '#/app/telemetry/telemetry';
 import { IEventDispatcher } from '#/state/eventDispatcher';
 import {
@@ -383,7 +384,7 @@ export class AgentProfileService extends Disposable implements IAgentProfileServ
   setCompactionTriggerRatio(ratio: number | undefined): void {
     if (ratio === undefined) {
       this.compactionTriggerRatioOverride = undefined;
-      this.telemetry.track2('compaction_threshold_override', { action: 'clear' });
+      forkTrack2(this.telemetry, 'compaction_threshold_override', { action: 'clear' });
       return;
     }
     if (
@@ -397,7 +398,7 @@ export class AgentProfileService extends Disposable implements IAgentProfileServ
       );
     }
     this.compactionTriggerRatioOverride = ratio;
-    this.telemetry.track2('compaction_threshold_override', { ratio, action: 'set' });
+    forkTrack2(this.telemetry, 'compaction_threshold_override', { ratio, action: 'set' });
   }
 
   getCompactionTriggerRatioOverride(): number | undefined {
@@ -412,7 +413,7 @@ export class AgentProfileService extends Disposable implements IAgentProfileServ
   setCompactionTokenBudget(tokens: number | undefined): void {
     if (tokens === undefined) {
       this.compactionTokenBudgetOverride = undefined;
-      this.telemetry.track2('compaction_token_budget_override', { action: 'clear' });
+      forkTrack2(this.telemetry, 'compaction_token_budget_override', { action: 'clear' });
       return;
     }
     if (!Number.isInteger(tokens) || tokens < 1) {
@@ -422,7 +423,7 @@ export class AgentProfileService extends Disposable implements IAgentProfileServ
       );
     }
     this.compactionTokenBudgetOverride = tokens * 1_000;
-    this.telemetry.track2('compaction_token_budget_override', {
+    forkTrack2(this.telemetry, 'compaction_token_budget_override', {
       tokens: this.compactionTokenBudgetOverride,
       action: 'set',
     });

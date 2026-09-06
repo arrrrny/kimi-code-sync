@@ -85,6 +85,7 @@ import type {
 import type { PermissionSetMode } from '@moonshot-ai/agent-core-v2/agent/permissionMode/permissionModeOps';
 import type { PermissionRecordApprovalResult } from '@moonshot-ai/agent-core-v2/agent/permissionRules/permissionRulesOps';
 import type { RuntimeSetBinding } from '@moonshot-ai/agent-core-v2/agent/runtimeBinding/runtimeBindingOps';
+import type { SqueezeModelDecided } from '@moonshot-ai/agent-core-v2/agent/fullCompaction/squeezeForkOps';
 import type { SwarmModeEnter, SwarmModeExit } from '@moonshot-ai/agent-core-v2/features/swarm/swarmOps';
 import type { TowerModeEnter, TowerModeExit } from '@moonshot-ai/agent-core-v2/features/tower/towerOps';
 import type { ToolsUpdateStore } from '@moonshot-ai/agent-core-v2/features/todo/todoOps';
@@ -186,6 +187,7 @@ export type AgentRecord =
   | WireRecordOf<'prompt.completed', PromptCompleted>
   | WireRecordOf<'prompt.steered', PromptSteered>
   | WireRecordOf<'runtime.set_binding', RuntimeSetBinding>
+  | WireRecordOf<'squeeze_model.decided', SqueezeModelDecided>
   | WireRecordOf<'swarm_mode.enter', SwarmModeEnter>
   | WireRecordOf<'swarm_mode.exit', SwarmModeExit>
   | WireRecordOf<'task.started', TaskStarted>

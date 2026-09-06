@@ -1421,6 +1421,19 @@ export const WIRE_RENDERERS: RendererMap = {
     }),
   },
 
+  'squeeze_model.decided': {
+    tone: 'compaction',
+    label: 'squeeze',
+    headline: (r) => ({
+      main: (
+        <span className="flex items-center gap-2 min-w-0">
+          <Mono>{r.model}</Mono>
+          {r.modelDisplay ? <Dim className="truncate">{r.modelDisplay}</Dim> : null}
+        </span>
+      ),
+    }),
+  },
+
   'staleGuard.recorded': {
     tone: 'meta',
     label: 'stale',
