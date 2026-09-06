@@ -17,7 +17,7 @@ import { TurnStarted } from '#/agent/loop/turnEvents';
 import { TurnEnded } from '#/agent/loop/turnOps';
 import { isAbortError } from '#/_base/utils/abort';
 import { IAgentProfileService, type ProfileModelContext } from '#/agent/profile/profile';
-import { WarningIssued } from '#/agent/profile/profileOps';
+import { CompactionConfigChanged, WarningIssued } from '#/agent/profile/profileOps';
 import { IConfigService } from '#/app/config/config';
 import { IFlagService } from '#/app/flag/flag';
 import {
@@ -201,6 +201,11 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
     this._register(
       this.eventBus.subscribe(TurnEnded, () => {
         this.activeTurnId = undefined;
+      }),
+    );
+    this._register(
+      this.eventBus.subscribe(CompactionConfigChanged, () => {
+        this.observedMaxContextTokensByModel.clear();
       }),
     );
     this._register(
