@@ -225,3 +225,14 @@ export const profileActiveToolsKey = defineState(
       ? (nothing as unknown as ActiveToolsState)
       : e.activeToolNames,
   );
+
+const compactionConfigChangedSchema = z.object({});
+
+export class CompactionConfigChanged extends AgentEvent2<
+  z.infer<typeof compactionConfigChangedSchema>
+> {
+  static override readonly type = 'compaction.configChanged';
+  static override readonly observable = true;
+  static override readonly schema = compactionConfigChangedSchema;
+}
+export interface CompactionConfigChanged {}
