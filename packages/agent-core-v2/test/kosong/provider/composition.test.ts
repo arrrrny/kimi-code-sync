@@ -861,6 +861,39 @@ describe('x-opencode-session header (OpenCode Go session affinity)', () => {
     expect(headers?.['x-opencode-session']).toBe('session-probe');
   });
 
+  it('sets x-opencode-session on Anthropic for opencode provider type', async () => {
+    const provider = registry.createChatProvider({
+      protocol: 'anthropic',
+      providerType: 'opencode',
+      modelName: 'kimi-k2',
+      apiKey: 'sk-probe',
+    });
+
+    const { requestOptions } = await captureAnthropicBody(provider, {
+      cacheKey: 'session-probe',
+      includeSessionHeader: true,
+    });
+
+    const headers = requestOptions?.['headers'] as Record<string, string> | undefined;
+    expect(headers?.['x-opencode-session']).toBe('session-probe');
+  });
+
+  it('sets x-opencode-session on OpenAI legacy for opencode provider type', async () => {
+    const provider = new OpenAILegacyChatProvider({
+      model: 'kimi-k2',
+      apiKey: 'sk-probe',
+      stream: false,
+      defaultHeaders: {},
+    });
+
+    const headers = await captureFetchHeaders(provider, {
+      cacheKey: 'session-probe',
+      includeSessionHeader: true,
+    });
+
+    expect(headers['x-opencode-session']).toBe('session-probe');
+  });
+
   it('does not set x-opencode-session on non-Kimi Anthropic provider', async () => {
     const provider = registry.createChatProvider({
       protocol: 'anthropic',

@@ -1062,6 +1062,7 @@ export interface AgentStateSnapshot {
       imageUrl: {
         url: string;
         id?: string;
+        name?: string;
       };
     } | /* AudioURLPart — packages/agent-core-v2/src/kosong/contract/message.ts */ {
       type: 'audio_url';
@@ -1074,6 +1075,7 @@ export interface AgentStateSnapshot {
       videoUrl: {
         url: string;
         id?: string;
+        name?: string;
       };
     })[];
     readonly toolCalls: /* ToolCall — packages/agent-core-v2/src/kosong/contract/message.ts */ {
@@ -1284,6 +1286,7 @@ export interface AgentStateSnapshot {
     imageUrl: {
       url: string;
       id?: string;
+      name?: string;
     };
   } | /* AudioURLPart — packages/agent-core-v2/src/kosong/contract/message.ts */ {
     type: 'audio_url';
@@ -1296,6 +1299,7 @@ export interface AgentStateSnapshot {
     videoUrl: {
       url: string;
       id?: string;
+      name?: string;
     };
   }>;
   // src/agent/media/mediaToolsRegistrar.ts
