@@ -64,3 +64,10 @@ package.json                                                            :: http-
 packages/agent-core-v2/src/agent/fullCompaction/squeezeForkOps.ts       :: SqueezeModelDecided
 packages/agent-core-v2/src/agent/fullCompaction/squeezeCascade.ts       :: resolveSqueezeModelAliasWithCascade
 packages/agent-core-v2/src/app/telemetry/forkEvents.ts                  :: forkTelemetryEventDefinitions
+# --- x-opencode-session header in agent-core-v2 (OpenCode Go session affinity) ---
+packages/agent-core-v2/src/kosong/contract/provider.ts                :: includeSessionHeader
+packages/agent-core-v2/src/kosong/model/modelRequesterImpl.ts        :: includeSessionHeader
+packages/agent-core-v2/src/kosong/provider/bases/openai/openai-legacy.ts :: x-opencode-session
+packages/agent-core-v2/src/kosong/provider/bases/openai/openai-responses.ts :: x-opencode-session
+packages/agent-core-v2/src/kosong/provider/bases/anthropic/anthropic.ts :: x-opencode-session
+packages/agent-core-v2/test/kosong/provider/composition.test.ts     :: x-opencode-session

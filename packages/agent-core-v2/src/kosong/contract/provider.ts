@@ -75,6 +75,7 @@ export interface GenerateOptions {
   auth?: ProviderRequestAuth;
   responseFormat?: ResponseFormat;
   cacheKey?: string;
+  includeSessionHeader?: boolean;
   sampling?: SamplingOptions;
   thinking?: ThinkingRequestOptions;
   maxCompletionTokens?: number;

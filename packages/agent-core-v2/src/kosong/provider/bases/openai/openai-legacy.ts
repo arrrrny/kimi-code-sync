@@ -642,10 +642,16 @@ export class OpenAILegacyChatProvider implements ChatProvider {
         throw new Error('API key is required');
       }
 
+      const sessionHeaders: Record<string, string> = {};
+      if (options?.includeSessionHeader === true && options?.cacheKey !== undefined) {
+        sessionHeaders['x-opencode-session'] = options.cacheKey;
+      }
+
       const response = await this._fetchWithProxy('/chat/completions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...sessionHeaders,
         },
         body: JSON.stringify(finalParams),
         signal: options?.signal,

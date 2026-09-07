@@ -91,6 +91,7 @@ export class ModelRequesterImpl implements ModelRequester {
     const options: GenerateOptions = {
       signal,
       cacheKey: params?.cacheKey,
+      includeSessionHeader: this.model.providerType === 'kimi',
       sampling: params?.sampling,
       thinking:
         params?.thinkingEffort === undefined
