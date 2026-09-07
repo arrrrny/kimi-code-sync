@@ -411,6 +411,12 @@ export interface OpenAIResponsesRequestParams {
   readonly headers?: Record<string, string>;
 }
 
+function sessionHeadersForRequest(input: FormatRequestInput): Record<string, string> | undefined {
+  const { cacheKey } = input;
+  if (cacheKey === undefined) return undefined;
+  return { 'x-opencode-session': cacheKey };
+}
+
 export const openAIResponsesFormat: ProtocolFormat<OpenAIResponsesRequestParams> = {
   formatRequest(input) {
     const { messages, systemPrompt, tools, trait, ctx } = input;
@@ -436,7 +442,11 @@ export const openAIResponsesFormat: ProtocolFormat<OpenAIResponsesRequestParams>
       ...kwargs,
     };
     const finalParams = trait?.buildParams?.(createParams, ctx) ?? createParams;
-    return { params: finalParams as unknown as OpenAI.Responses.ResponseCreateParamsStreaming };
+    const headers = sessionHeadersForRequest(input);
+    return {
+      params: finalParams as unknown as OpenAI.Responses.ResponseCreateParamsStreaming,
+      ...(headers !== undefined ? { headers } : {}),
+    };
   },
 
   createStreamParser(options?: StreamParserOptions) {

@@ -225,6 +225,12 @@ export interface OpenAIRequestParams {
   readonly headers?: Record<string, string>;
 }
 
+function sessionHeadersForRequest(input: FormatRequestInput): Record<string, string> | undefined {
+  const { cacheKey } = input;
+  if (cacheKey === undefined) return undefined;
+  return { 'x-opencode-session': cacheKey };
+}
+
 export const openAIFormat: ProtocolFormat<OpenAIRequestParams, RawResponse, RawChunk> = {
   formatRequest(input, options?: FormatRequestOptions) {
     const { messages, systemPrompt, tools, trait, ctx } = input;
@@ -261,7 +267,11 @@ export const openAIFormat: ProtocolFormat<OpenAIRequestParams, RawResponse, RawC
       ...kwargs,
     };
     const finalParams = trait?.buildParams?.(createParams, ctx) ?? createParams;
-    return { params: finalParams as unknown as OpenAI.Chat.ChatCompletionCreateParamsStreaming };
+    const headers = sessionHeadersForRequest(input);
+    return {
+      params: finalParams as unknown as OpenAI.Chat.ChatCompletionCreateParamsStreaming,
+      ...(headers !== undefined ? { headers } : {}),
+    };
   },
 
   createStreamParser(options?: StreamParserOptions) {
@@ -444,6 +454,22 @@ export function convertOpenAIError(
   }
   if (error instanceof Error) {
     return toLlmTransportErrorMessage(error.message);
+  }
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    typeof (error as { status?: unknown }).status === 'number'
+  ) {
+    const e = error as { status: number; message?: unknown; headers?: unknown };
+    const message = typeof e.message === 'string' ? e.message : '';
+    const retryAfterMs = parseRetryAfterMs(e.headers);
+    const headers = headersToRecord(e.headers);
+    return toLlmStatusErrorMessage({
+      statusCode: e.status,
+      message,
+      retryAfterMs,
+      headers,
+    });
   }
   return { kind: 'unknown', message: String(error) };
 }

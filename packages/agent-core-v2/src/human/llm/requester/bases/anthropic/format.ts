@@ -243,10 +243,17 @@ export interface AnthropicRequestParams {
   readonly params: Anthropic.MessageCreateParamsStreaming;
   readonly betas: readonly string[];
   readonly useBetaApi: boolean;
+  readonly headers?: Record<string, string>;
 }
 
 export interface AnthropicFormatOptions {
   readonly betaApi?: boolean;
+}
+
+function sessionHeadersForRequest(input: FormatRequestInput): Record<string, string> | undefined {
+  const { cacheKey } = input;
+  if (cacheKey === undefined) return undefined;
+  return { 'x-opencode-session': cacheKey };
 }
 
 export function createAnthropicFormat(
@@ -299,10 +306,12 @@ export function createAnthropicFormat(
         stream: true,
       };
       const finalParams = trait?.buildParams?.(createParams, ctx) ?? createParams;
+      const headers = sessionHeadersForRequest(input);
       return {
         params: finalParams as unknown as Anthropic.MessageCreateParamsStreaming,
         betas,
         useBetaApi,
+        ...(headers !== undefined ? { headers } : {}),
       };
     },
 

@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { ProxyAgent, type Dispatcher } from 'undici';
 
 import { headersToRecord } from '#/llm/errors';
 import type { LlmModel } from '#/llm/model';
@@ -64,13 +65,20 @@ function buildDefaultHeaders(
   return defaultHeaders;
 }
 
+function buildProxyDispatcher(proxyUrl: string | undefined): Dispatcher | undefined {
+  if (proxyUrl === undefined || proxyUrl.length === 0) return undefined;
+  return new ProxyAgent(proxyUrl);
+}
+
 function createClient(model: LlmModel, headers: Record<string, string> | undefined): Anthropic {
+  const dispatcher = buildProxyDispatcher(model.proxyUrl);
   return new Anthropic({
     apiKey: model.apiKey ?? 'unused',
     authToken: null,
     baseURL: model.baseUrl ?? null,
     defaultHeaders: buildDefaultHeaders(headers),
     maxRetries: 0,
+    ...(dispatcher !== undefined ? { fetchOptions: { dispatcher: dispatcher as never } } : {}),
   });
 }
 
@@ -97,7 +105,12 @@ async function internalGenerate(
     !request.useBetaApi && request.betas.length > 0
       ? { 'anthropic-beta': request.betas.join(',') }
       : undefined;
-  const requestOptions = { signal, headers: betaHeaders };
+  const sessionHeaders = request.headers;
+  const mergedHeaders =
+    betaHeaders === undefined && sessionHeaders === undefined
+      ? undefined
+      : { ...(sessionHeaders ?? {}), ...(betaHeaders ?? {}) };
+  const requestOptions = { signal, ...(mergedHeaders !== undefined ? { headers: mergedHeaders } : {}) };
   const { data: stream, response } = request.useBetaApi
     ? await client.beta.messages.create(request.params, requestOptions).withResponse()
     : await client.messages.create(request.params, requestOptions).withResponse();
