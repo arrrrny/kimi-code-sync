@@ -1165,10 +1165,16 @@ export class OpenAIResponsesChatProvider implements ChatProvider {
         throw new Error('API key is required');
       }
 
+      const sessionHeaders: Record<string, string> = {};
+      if (options?.includeSessionHeader === true && options?.cacheKey !== undefined) {
+        sessionHeaders['x-opencode-session'] = options.cacheKey;
+      }
+
       const response = await this._fetchWithProxy('/responses', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...sessionHeaders,
         },
         body: JSON.stringify(createParams),
         signal: options?.signal,

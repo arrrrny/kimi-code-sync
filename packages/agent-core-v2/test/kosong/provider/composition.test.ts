@@ -701,6 +701,183 @@ describe('per-turn intent wire encoding (behavior probes)', () => {
   });
 });
 
+async function captureFetchHeaders(
+  provider: ChatProvider,
+  options?: GenerateOptions,
+): Promise<Record<string, string>> {
+  let capturedHeaders: Record<string, string> = {};
+  const orig = (provider as unknown as { _fetchWithProxy: unknown })._fetchWithProxy;
+  const mockCompletion = {
+    id: 'chatcmpl-probe',
+    object: 'chat.completion',
+    created: 1,
+    model: 'probe',
+    choices: [{ index: 0, message: { role: 'assistant', content: 'Hello' }, finish_reason: 'stop' }],
+    usage: { prompt_tokens: 3, completion_tokens: 1, total_tokens: 4 },
+  };
+  const chatSse = [
+    `data: ${JSON.stringify(mockCompletion)}`,
+    '',
+    'data: [DONE]',
+    '',
+  ].join('\n');
+  const responsesSse = [
+    'data: {"type":"response.created","response":{"id":"resp_probe","status":"in_progress"}}',
+    '',
+    'data: {"type":"response.output_text.delta","delta":"Hello","output_index":0}',
+    '',
+    'data: {"type":"response.completed","response":{"id":"resp_probe","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Hello"}]}],"usage":{"input_tokens":3,"output_tokens":1,"total_tokens":4}}}',
+    '',
+    'data: [DONE]',
+    '',
+  ].join('\n');
+  const spy = vi.fn().mockImplementation(function (
+    this: unknown,
+    path: string,
+    init: RequestInit,
+    auth?: unknown,
+  ) {
+    capturedHeaders = Object.fromEntries(new Headers(init.headers).entries());
+    const bodyStr = typeof init.body === 'string' ? init.body : '';
+    const wantsStream = bodyStr.includes('"stream":true');
+    if (wantsStream) {
+      const sseData = path.includes('/responses') ? responsesSse : chatSse;
+      const sseBytes = new TextEncoder().encode(sseData);
+      let pos = 0;
+      return Promise.resolve({
+        ok: true,
+        headers: new Headers({ 'x-request-id': 'req-probe' }),
+        body: {
+          getReader: () => ({
+            read: () => {
+              if (pos < sseBytes.length) {
+                const chunk = sseBytes.slice(pos, pos + sseBytes.length);
+                pos = sseBytes.length;
+                return Promise.resolve({ value: chunk, done: false });
+              }
+              return Promise.resolve({ value: undefined, done: true });
+            },
+            cancel: () => Promise.resolve(),
+            releaseLock: () => {},
+          }),
+        },
+      });
+    }
+    const responseData = path.includes('/responses')
+      ? { id: 'resp_probe', object: 'response', status: 'completed', output: [], usage: { input_tokens: 3, output_tokens: 1, total_tokens: 4 } }
+      : mockCompletion;
+    return Promise.resolve({
+      ok: true,
+      headers: new Headers({ 'x-request-id': 'req-probe' }),
+      json: () => Promise.resolve(responseData),
+    });
+  });
+  (provider as unknown as { _fetchWithProxy: typeof spy })._fetchWithProxy = spy;
+  try {
+    await drain(await provider.generate('', [], PROBE_HISTORY, options));
+  } finally {
+    (provider as unknown as { _fetchWithProxy: unknown })._fetchWithProxy = orig;
+  }
+  return capturedHeaders;
+}
+
+describe('x-opencode-session header (OpenCode Go session affinity)', () => {
+  it('sets x-opencode-session on OpenAI legacy when includeSessionHeader and cacheKey are set', async () => {
+    const provider = new OpenAILegacyChatProvider({
+      model: 'kimi-k2',
+      apiKey: 'sk-probe',
+      stream: false,
+      defaultHeaders: {},
+    });
+
+    const headers = await captureFetchHeaders(provider, {
+      cacheKey: 'session-probe',
+      includeSessionHeader: true,
+    });
+
+    expect(headers['x-opencode-session']).toBe('session-probe');
+  });
+
+  it('does not set x-opencode-session when includeSessionHeader is false', async () => {
+    const provider = new OpenAILegacyChatProvider({
+      model: 'kimi-k2',
+      apiKey: 'sk-probe',
+      stream: false,
+      defaultHeaders: {},
+    });
+
+    const headers = await captureFetchHeaders(provider, {
+      cacheKey: 'session-probe',
+      includeSessionHeader: false,
+    });
+
+    expect(headers['x-opencode-session']).toBeUndefined();
+  });
+
+  it('does not set x-opencode-session when cacheKey is absent', async () => {
+    const provider = new OpenAILegacyChatProvider({
+      model: 'kimi-k2',
+      apiKey: 'sk-probe',
+      stream: false,
+      defaultHeaders: {},
+    });
+
+    const headers = await captureFetchHeaders(provider, {
+      includeSessionHeader: true,
+    });
+
+    expect(headers['x-opencode-session']).toBeUndefined();
+  });
+
+  it('sets x-opencode-session on OpenAI responses when includeSessionHeader and cacheKey are set', async () => {
+    const provider = new OpenAIResponsesChatProvider({
+      model: 'kimi-k2',
+      apiKey: 'sk-probe',
+      defaultHeaders: {},
+    });
+
+    const headers = await captureFetchHeaders(provider, {
+      cacheKey: 'session-probe',
+      includeSessionHeader: true,
+    });
+
+    expect(headers['x-opencode-session']).toBe('session-probe');
+  });
+
+  it('sets x-opencode-session on Anthropic when includeSessionHeader and cacheKey are set', async () => {
+    const provider = registry.createChatProvider({
+      protocol: 'anthropic',
+      providerType: 'kimi',
+      modelName: 'kimi-k2',
+      apiKey: 'sk-probe',
+    });
+
+    const { requestOptions } = await captureAnthropicBody(provider, {
+      cacheKey: 'session-probe',
+      includeSessionHeader: true,
+    });
+
+    const headers = requestOptions?.['headers'] as Record<string, string> | undefined;
+    expect(headers?.['x-opencode-session']).toBe('session-probe');
+  });
+
+  it('does not set x-opencode-session on non-Kimi Anthropic provider', async () => {
+    const provider = registry.createChatProvider({
+      protocol: 'anthropic',
+      modelName: 'claude-opus-4-6',
+      apiKey: 'sk-probe',
+    });
+
+    const { requestOptions } = await captureAnthropicBody(provider, {
+      cacheKey: 'session-probe',
+      includeSessionHeader: false,
+    });
+
+    const headers = requestOptions?.['headers'] as Record<string, string> | undefined;
+    expect(headers?.['x-opencode-session']).toBeUndefined();
+  });
+});
+
 describe('reasoning-only assistant history projection', () => {
   it('adds empty content on the OpenAI Chat Completions wire without dropping reasoning', async () => {
     const provider = new OpenAILegacyChatProvider({

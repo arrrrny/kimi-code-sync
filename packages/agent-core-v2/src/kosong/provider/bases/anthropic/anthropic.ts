@@ -947,6 +947,9 @@ export class AnthropicChatProvider implements ChatProvider {
     if (!useBetaApi && betas.length > 0) {
       extraHeaders['anthropic-beta'] = betas.join(',');
     }
+    if (options?.includeSessionHeader === true && options?.cacheKey !== undefined) {
+      extraHeaders['x-opencode-session'] = options.cacheKey;
+    }
 
     const anthropicTools: AnthropicToolParam[] = tools.map((t) => convertTool(t));
     if (anthropicTools.length > 0) {
