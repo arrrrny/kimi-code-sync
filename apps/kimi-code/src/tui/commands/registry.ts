@@ -225,7 +225,6 @@ export const BUILTIN_SLASH_COMMANDS = [
     description: 'Configure the secondary model for subagents',
     priority: 90,
     availability: 'always',
-    experimentalFlag: 'secondary-model',
   },
   {
     name: 'visual-model',
