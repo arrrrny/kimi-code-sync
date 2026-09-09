@@ -16,6 +16,7 @@ import {
   APIProviderQuotaExhaustedError,
   isProviderRateLimitError,
   isRetryableGenerateError,
+  isTerminalProviderApiError,
 } from '#/kosong/contract/errors';
 import { IConfigService } from '#/app/config/config';
 import { IFlagService } from '#/app/flag/flag';
@@ -112,7 +113,10 @@ export class AgentStepRetryService extends Disposable implements IAgentStepRetry
         match: (context) => {
           const raw = unwrapErrorCause(context.error);
           if (isRetryableGenerateError(raw)) return true;
-          return raw instanceof APIProviderQuotaExhaustedError && this.substituteCandidate() !== undefined;
+          if (raw instanceof APIProviderQuotaExhaustedError) {
+            return this.substituteCandidate() !== undefined;
+          }
+          return isTerminalProviderApiError(raw);
         },
         handle: (context) => this.recover(context),
       }),
@@ -173,6 +177,12 @@ export class AgentStepRetryService extends Disposable implements IAgentStepRetry
     }
     if (!isRetryableGenerateError(raw)) {
       this.resetAttempts();
+      if (
+        isTerminalProviderApiError(raw) &&
+        (await this.activateFallback(driver, context, 'terminal-error'))
+      ) {
+        return true;
+      }
       return false;
     }
     if (this.failedAttempts >= maxAttempts) {
@@ -248,8 +258,10 @@ export class AgentStepRetryService extends Disposable implements IAgentStepRetry
   private async activateFallback(
     driver: NonNullable<LoopErrorContext['failedDriver']>,
     context: LoopErrorContext,
+    cause: 'retry-budget' | 'terminal-error' = 'retry-budget',
   ): Promise<boolean> {
     const currentActive = this.states.get(fallbackModelActiveKey);
+    if (currentActive?.tier === 'secondary') return false;
     const lastTriedAlias =
       currentActive !== undefined ? currentActive.alias : this.profile.data().modelAlias;
     const own = {
@@ -270,11 +282,15 @@ export class AgentStepRetryService extends Disposable implements IAgentStepRetry
     this.states.set(fallbackModelActiveKey, { alias: binding.model, tier });
     this.lastFailedDriverId = driver.id;
     this.failedAttempts = 0;
+    const switchReason =
+      cause === 'terminal-error'
+        ? 'failed with a terminal provider error'
+        : 'exhausted its retry budget';
     void this.dispatcher.dispatch(
       new WarningIssued({
         agentId: this.scopeContext.agentId,
         code: 'fallback-model',
-        message: `Model ${lastTriedAlias} exhausted its retry budget, switching to fallback model ${binding.model} (tier: ${tier})`,
+        message: `Model ${lastTriedAlias} ${switchReason}, switching to fallback model ${binding.model} (tier: ${tier})`,
       }),
     );
     if (context.currentStep?.signal.aborted === true) return false;
