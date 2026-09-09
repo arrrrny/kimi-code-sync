@@ -40,6 +40,9 @@ apps/kimi-code/test/tui/commands/model-favorites.test.ts                :: model
 # --- compaction-model display (compactionModel overlay) ---
 packages/agent-core-v2/src/app/kosongConfig/compactionModelOverlay.ts   :: compactionModel
 packages/agent-core-v2/src/agent/fullCompaction/fullCompactionService.ts :: compactionModel
+# compaction.started model/model_display fields — relocated from the deleted
+# packages/protocol/src/events.ts into agent-core-v2 in sync 2026-09-09.
+packages/agent-core-v2/src/agent/fullCompaction/compactionOps.ts        :: model_display
 
 # --- substitute-model on rate limit ---
 packages/agent-core-v2/src/agent/llmRequester/llmRequesterService.ts    :: substituteModelActiveKey

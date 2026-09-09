@@ -112,8 +112,7 @@
  *   driven by the same session wiring: v1's push callbacks
  *   (`requestApproval` / `requestQuestion` / `toolCall`) are fed from the v2
  *   interaction kernel's pending set (`onDidChangePending`), and the outcome
- *   is written back through `ISessionApprovalService.decide` /
- *   `ISessionQuestionService.answer|dismiss` / the kernel's `respond`.
+ *   is written back through the kernel's `respond`.
  * - `exportSession` → `ISessionExportService` (app scope, the v2 port of v1's
  *   export) through {@link engineAccessor}; `listSkills` → the session
  *   scope's `ISessionSkillCatalog`; `startBtw` → the session scope's
@@ -170,6 +169,7 @@ import {
   ISessionTokenCountingService,
   IAgentToolPolicyService,
   IAgentToolRegistryService,
+  type HostUiCapability,
   IAgentTowerService,
   IBootstrapService,
   IConfigService,
@@ -231,7 +231,6 @@ import {
 } from '@moonshot-ai/agent-core-v2';
 import type { SessionModelOverrides } from '@moonshot-ai/agent-core-v2/agent/profile/profile';
 import type { AgentHandle, Klient } from '@moonshot-ai/klient';
-import type { SessionModelOverrideKind } from '@moonshot-ai/klient/core/facade/agent';
 import { createKlient } from '@moonshot-ai/klient/memory';
 import { assertKimiHostIdentity, createKimiDefaultHeaders } from '@moonshot-ai/kimi-code-oauth';
 
@@ -360,6 +359,8 @@ export interface SDKRpcClientV2Options {
   readonly telemetry?: TelemetryClient;
   readonly onOAuthRefresh?: (outcome: OAuthRefreshOutcome) => void;
   readonly uiMode?: string;
+  /** UI surfaces this host renders; forwarded as `BootstrapInput.args.uiCapabilities`. */
+  readonly uiCapabilities?: readonly HostUiCapability[];
 }
 
 /**
@@ -459,6 +460,7 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
           // `--skills-dir` (v1 parity): explicit skill dirs replace default
           // user / project discovery for every session this client hosts.
           skillDirs: options.skillDirs,
+          uiCapabilities: options.uiCapabilities,
         },
       },
       [...logSeed(resolveLoggingConfig({ homeDir: this.homeDir, env: process.env }))],
@@ -959,9 +961,9 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
    * cannot deadlock.
    */
   private runSessionAccessAll<T>(sessionIds: readonly string[], work: () => Promise<T>): Promise<T> {
-    const keys = [...new Set(sessionIds)].sort();
+    const keys = [...new Set(sessionIds)].toSorted();
     let chained: () => Promise<T> = work;
-    for (const key of [...keys].reverse()) {
+    for (const key of [...keys].toReversed()) {
       const inner = chained;
       chained = () => this.runSessionAccess(key, inner);
     }
@@ -1739,7 +1741,7 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
 
   override async setSessionModelOverride(input: SetSessionModelOverrideRpcInput): Promise<void> {
     const agent = await this.agentFacade(input.sessionId);
-    agent.setSessionModelOverride(input.kind, input.alias);
+    await agent.setSessionModelOverride(input.kind, input.alias);
   }
 
   override async getSessionModelOverride(input: GetSessionModelOverrideRpcInput): Promise<string | undefined> {

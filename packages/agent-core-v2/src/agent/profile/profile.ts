@@ -171,6 +171,7 @@ export interface IAgentProfileService {
   resolveModelContextFor(modelAlias: string): ProfileModelContext;
   resolveRequestParams(): ModelRequestParams;
   getModelCapabilities(): ModelCapability;
+  getModelProviderType(alias?: string): string | undefined;
   getMaxOutputSize(): number | undefined;
   hasModel(): boolean;
   isRunnable(): boolean;

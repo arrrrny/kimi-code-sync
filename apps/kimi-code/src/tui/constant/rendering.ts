@@ -6,9 +6,9 @@ export const MESSAGE_INDENT = '  ';
 // transcript messages. The fullscreen renderer strips them at paint and uses
 // the A marker for previous/next-prompt navigation (Ctrl-Shift-Up/Down); in
 // regular mode they pass through to native scrollback invisibly.
-export const OSC133_ZONE_START = '\x1b]133;A\x07';
-export const OSC133_ZONE_END = '\x1b]133;B\x07';
-export const OSC133_ZONE_FINAL = '\x1b]133;C\x07';
+export const OSC133_ZONE_START = '\x1B]133;A\x07';
+export const OSC133_ZONE_END = '\x1B]133;B\x07';
+export const OSC133_ZONE_FINAL = '\x1B]133;C\x07';
 
 // Outer left/right padding applied to the transcript, panels, and the
 // statusline so the chrome's left edge lines up with the input box's
@@ -22,6 +22,7 @@ export const RESULT_PREVIEW_LINES = 3;
 export const SHELL_OUTPUT_PREVIEW_LINES = 10;
 export const THINKING_PREVIEW_LINES = 2;
 export const COMMAND_PREVIEW_LINES = 10;
+export const NOTIFY_PANEL_PAGE_LINES = 8;
 
 // The ellipsis marking a single-row line (card header, outcome row) that was
 // cut to the terminal width or that stands in for hidden output lines.
@@ -29,7 +30,7 @@ export const TRUNCATION_ELLIPSIS = '…';
 // ANSI escape sequences (CSI, OSC) — tool output can carry them — that a
 // width-aware cut must treat as zero-width atomic units: never counted toward
 // the budget, never split in half.
-export const ANSI_ESCAPE_PATTERN = /\x1b(?:\[[0-9;?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\))/g;
+export const ANSI_ESCAPE_PATTERN = /\x1B(?:\[[0-9;?]*[ -/]*[@-~]|\][^\x07\x1B]*(?:\x07|\x1B\\))/g;
 // Code units a single terminal cell may hold before a tail-preserving cut's
 // window can no longer see it: a ZWJ family emoji is about eleven per two
 // cells, and combining sequences run longer.

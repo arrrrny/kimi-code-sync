@@ -42,6 +42,7 @@ import '#/agent/permissionMode/configSection';
 import { DEFAULT_PERMISSION_MODE_SECTION } from '#/agent/permissionMode/configSection';
 import '#/agent/media/configSection';
 import { IMAGE_SECTION, type ImageConfig } from '#/agent/media/configSection';
+import { READ_SECTION } from '#/agent/tools/os/read/configSection';
 import '#/agent/tokenCounting/configSection';
 import {
   TOKEN_COUNTING_SECTION,
@@ -345,6 +346,7 @@ describe('Agent config', () => {
       [wire] context.append_loop_event       { "agentId": "main", "event": { "type": "content.part", "uuid": "<uuid-2>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "part": { "type": "text", "text": "I will look it up." } }, "time": "<time>" }
       [emit] permission.approval.requested   { "time": "<time>", "id": "<approval-1>", "sessionId": "test-session", "agentId": "main", "turnId": 0, "toolCallId": "call_lookup", "toolName": "Lookup", "action": "Approve Lookup", "display": { "kind": "generic", "summary": "Approve Lookup", "detail": { "query": "original" } }, "toolInput": { "query": "original" } }
       [emit] agent.activity.updated          { "time": "<time>", "lifecycle": "ready", "turn": { "turnId": 0, "origin": { "kind": "user" }, "phase": "streaming", "stream": "tool_call", "step": 1, "ending": false, "pendingApprovals": [ { "approvalId": "<approval-1>", "toolCallId": "call_lookup", "since": "<time>" } ], "activeToolCalls": [], "since": "<time>" }, "background": [], "agentId": "main" }
+      [wire] interaction.request             { "agentId": "main", "id": "<approval-1>", "kind": "approval", "toolCallId": "call_lookup", "request": { "id": "<approval-1>", "sessionId": "test-session", "agentId": "main", "turnId": 0, "toolCallId": "call_lookup", "toolName": "Lookup", "action": "Approve Lookup", "display": { "kind": "generic", "summary": "Approve Lookup", "detail": { "query": "original" } } }, "time": "<time>" }
       [emit] requestApproval                 { "id": "<approval-1>", "turnId": 0, "toolCallId": "call_lookup", "toolName": "Lookup", "action": "Approve Lookup", "display": { "kind": "generic", "summary": "Approve Lookup", "detail": { "query": "original" } } }
     `);
     expect(ctx.lastLlmInput()).toMatchInlineSnapshot(`
@@ -789,6 +791,20 @@ describe('defaultPermissionMode config section', () => {
     expect(() => registry.validate(DEFAULT_PERMISSION_MODE_SECTION, 'bogus')).toThrow();
 
     expect(registry.getSection('yolo')).toBeUndefined();
+  });
+});
+
+describe('Read config section', () => {
+  it('accepts positive character budgets and rejects invalid limits', () => {
+    const registry = new ConfigRegistry();
+
+    expect(registry.validate(READ_SECTION, { defaultMaxChars: 200_000, maxChars: 750_000 }))
+      .toEqual({ defaultMaxChars: 200_000, maxChars: 750_000 });
+    expect(registry.validate(READ_SECTION, { maxChars: 1_000 })).toEqual({ maxChars: 1_000 });
+    expect(() => registry.validate(READ_SECTION, { defaultMaxChars: 0 })).toThrow();
+    expect(() => registry.validate(READ_SECTION, { maxChars: -1 })).toThrow();
+    expect(() => registry.validate(READ_SECTION, { maxChars: 1.5 })).toThrow();
+    expect(() => registry.validate(READ_SECTION, { maxChars: Infinity })).toThrow();
   });
 });
 
@@ -2458,7 +2474,7 @@ describe('config section collection fold (D12)', () => {
     parse(value: unknown): RuntimeFoldDemo {
       const demo = value as RuntimeFoldDemo;
       if (typeof demo?.enabled !== 'boolean') {
-        throw new Error('runtimeFoldDemo.enabled must be a boolean');
+        throw new TypeError('runtimeFoldDemo.enabled must be a boolean');
       }
       return demo;
     },
@@ -2744,8 +2760,8 @@ describe('ConfigService replaceSections', () => {
       defaultModel: undefined,
       thinking: {},
     });
-    expect([...domains].sort()).toEqual(
-      [PROVIDERS_SECTION, MODELS_SECTION, DEFAULT_MODEL_SECTION, THINKING_SECTION].sort(),
+    expect([...domains].toSorted()).toEqual(
+      [PROVIDERS_SECTION, MODELS_SECTION, DEFAULT_MODEL_SECTION, THINKING_SECTION].toSorted(),
     );
 
     disposables.dispose();
@@ -2823,7 +2839,7 @@ describe('ConfigService persistence guards', () => {
   async function expectPersistBlocked(promise: Promise<unknown>): Promise<void> {
     const error = await promise.then(
       () => undefined,
-      (e: unknown) => e,
+      (error: unknown) => error,
     );
     expect(isError2(error)).toBe(true);
     expect((error as Error2).code).toBe(ErrorCodes.CONFIG_PERSIST_BLOCKED);
