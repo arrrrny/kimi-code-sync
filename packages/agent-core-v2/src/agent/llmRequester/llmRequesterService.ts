@@ -761,6 +761,7 @@ export class AgentLLMRequesterService implements IAgentLLMRequesterService {
       fallbackSecondaryAlias: this.profile.getSessionModelOverride('fallbackSecondary'),
     });
     if (binding === undefined) return false;
+    if (binding.model === lastTriedAlias) return false;
     try {
       this.profile.resolveModelContextFor(binding.model);
     } catch {

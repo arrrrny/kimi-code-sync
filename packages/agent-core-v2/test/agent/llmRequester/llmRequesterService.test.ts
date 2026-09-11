@@ -16,7 +16,9 @@ import { AgentContextProjectorService } from '#/agent/contextProjector/contextPr
 import { AgentLLMRequesterService, KIMI_CODE_INFINITE_RETRY_ENV } from '#/agent/llmRequester/llmRequesterService';
 import { IAgentLLMRequesterService } from '#/agent/llmRequester/llmRequester';
 import { IBootstrapService } from '#/app/bootstrap/bootstrap';
+import { FALLBACK_MODEL_SECTION } from '#/app/kosongConfig/configSection';
 import { IFlagService } from '#/app/flag/flag';
+import { FALLBACK_MODEL_FLAG_ID } from '#/session/fallback/flag';
 import { ISessionTokenCountingService } from '#/session/tokenCounting/sessionTokenCounting';
 import { IAgentProfileService } from '#/agent/profile/profile';
 import { IAgentStateService } from '#/agent/state/agentState';
@@ -162,6 +164,9 @@ function createService(
     readonly mediaResolver?: Partial<IAgentMediaResolverService>;
     readonly contextMessages?: Message[];
     readonly env?: Record<string, string>;
+    readonly fallbackFlag?: boolean;
+    readonly fallbackConfig?: { readonly model?: string; readonly secondaryModel?: string };
+    readonly sessionModelOverrides?: { readonly fallback?: string; readonly fallbackSecondary?: string };
   } = {},
 ) {
   const ix = disposables.add(new TestInstantiationService());
@@ -179,8 +184,8 @@ function createService(
       compactionTriggerRatio: undefined,
       compactionTokenBudget: undefined,
     }),
-    resolveModelContextFor: () => ({
-      modelAlias: 'm',
+    resolveModelContextFor: (modelAlias) => ({
+      modelAlias,
       modelCapabilities: capabilities,
       maxOutputSize: undefined,
       alwaysThinking: undefined,
@@ -190,7 +195,12 @@ function createService(
       compactionTokenBudget: undefined,
     }),
     getEffectiveThinkingLevel: () => thinkingLevel,
-    getSessionModelOverride: () => undefined,
+    getSessionModelOverride: (kind) =>
+      kind === 'fallback'
+        ? options.sessionModelOverrides?.fallback
+        : kind === 'fallbackSecondary'
+          ? options.sessionModelOverrides?.fallbackSecondary
+          : undefined,
     resolveRequestParams: () => ({}),
     getSystemPrompt: () => 'system',
     data: () => ({
@@ -219,9 +229,12 @@ function createService(
   };
   const tools = { list: () => [] };
   const config: Partial<IConfigService> = {
-    get: (() => undefined) as IConfigService['get'],
+    get: ((section: string) =>
+      section === FALLBACK_MODEL_SECTION ? options.fallbackConfig : undefined) as IConfigService['get'],
   };
-  ix.stub(IFlagService, { enabled: () => false });
+  ix.stub(IFlagService, {
+    enabled: (id) => id === FALLBACK_MODEL_FLAG_ID && (options.fallbackFlag ?? false),
+  });
   const log = { info: () => undefined, warn: () => undefined };
   const telemetryRecords: TelemetryRecord[] = [];
   const telemetry = recordingTelemetry(telemetryRecords);
@@ -1118,5 +1131,37 @@ describe('AgentLLMRequesterService tool call id normalization', () => {
 
     const result = await service.request();
     expect(result.message.toolCalls[0]!.id).toBe('Bash_0__2');
+  });
+});
+
+describe('AgentLLMRequesterService terminal-error fallback', () => {
+  it('retries on the configured fallback model after a terminal 400', async () => {
+    const calls = { value: 0 };
+    const requester = createRequester(calls, new APIStatusError(400, 'endpoint broken'));
+    const { service, events } = createService(requester, undefined, {
+      fallbackFlag: true,
+      fallbackConfig: { model: 'fallback-alias' },
+    });
+
+    const result = await service.request();
+
+    expect(result.message.content).toEqual([{ type: 'text', text: 'ok' }]);
+    expect(calls.value).toBe(2);
+    expect(result.model).toBe('fallback-alias');
+    expect(events.filter((event) => event.type === 'warning')).toEqual([
+      expect.objectContaining({ type: 'warning', code: 'fallback-model' }),
+    ]);
+  });
+
+  it('propagates the terminal error when the fallback binding does not change the model', async () => {
+    const calls = { value: 0 };
+    const requester = createRequester(calls, new APIStatusError(400, 'endpoint broken'));
+    const { service, events } = createService(requester, undefined, {
+      sessionModelOverrides: { fallback: 'm' },
+    });
+
+    await expect(service.request()).rejects.toMatchObject({ statusCode: 400 });
+    expect(calls.value).toBe(1);
+    expect(events.filter((event) => event.type === 'warning')).toEqual([]);
   });
 });
