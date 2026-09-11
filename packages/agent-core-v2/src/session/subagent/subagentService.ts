@@ -41,6 +41,7 @@ import {
 } from './subagent';
 import { runAgentTurn } from './runAgentTurn';
 import {
+  inheritFallbackOverrides,
   resolveSubagentBinding,
   resolveSubagentThinking,
   wrapSubagentModelError,
@@ -186,6 +187,10 @@ export class SessionSubagentService extends Service implements ISessionSubagentS
       created.accessor
         .get(IAgentPermissionModeService)
         .setMode(caller.accessor.get(IAgentPermissionModeService).mode);
+      inheritFallbackOverrides(
+        created.accessor.get(IAgentProfileService),
+        caller.accessor.get(IAgentProfileService),
+      );
       const createdUserTools = created.accessor.get(IAgentUserToolService);
       const callerUserTools = caller.accessor.get(IAgentUserToolService);
       if (plan.fork) {

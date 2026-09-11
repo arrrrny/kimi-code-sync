@@ -11,9 +11,11 @@ import { IAgentLifecycleService } from '#/session/agentLifecycle/agentLifecycle'
 import {
   isSubagentMeta,
   subagentLabels,
+  subagentModelSource,
   subagentParentAgentId,
   subagentSwarmItem,
 } from '#/session/agentLifecycle/subagentMetadata';
+import { inheritFallbackOverrides } from '#/session/subagent/configSection';
 import { emitAgentRunSpawned, mirrorAgentRun } from '#/session/subagent/mirrorAgentRun';
 import { ISessionSubagentService } from '#/session/subagent/subagent';
 import { ISessionMetadata, type AgentMeta } from '#/session/sessionMetadata/sessionMetadata';
@@ -118,7 +120,10 @@ export class SessionSwarmService implements ISessionSwarmService {
     const spawned = await this.subagents.spawn({
       callerAgentId,
       plan,
-      labels: subagentLabels(callerAgentId, { swarmItem: options.swarmItem }),
+      labels: subagentLabels(callerAgentId, {
+        swarmItem: options.swarmItem,
+        modelSource: plan.modelSource,
+      }),
       prompt: options.prompt,
     });
     emitAgentRunSpawned(caller, spawned.agentId, {
@@ -152,14 +157,17 @@ export class SessionSwarmService implements ISessionSwarmService {
     retryTurn: boolean,
   ): Promise<AgentRunAttemptHandle> {
     options.signal.throwIfAborted();
-    await this.requireOwnedSubagent(callerAgentId, agentId);
+    const meta = await this.requireOwnedSubagent(callerAgentId, agentId);
     const caller = this.requireHandle(callerAgentId, 'Caller agent');
     const child = this.requireHandle(agentId, 'Agent instance');
     this.requireIdleSubagent(agentId, child);
-    const profileName =
-      child.accessor.get(IAgentProfileService).data().profileName ?? RESUMED_PROFILE_FALLBACK;
+    const profile = child.accessor.get(IAgentProfileService);
+    const callerProfile = caller.accessor.get(IAgentProfileService);
+    inheritFallbackOverrides(profile, callerProfile);
+    await this.rebindInheritedModel(meta, callerProfile, profile);
+    const profileName = profile.data().profileName ?? RESUMED_PROFILE_FALLBACK;
     if (!retryTurn) {
-      const resumedModel = child.accessor.get(IAgentProfileService).data().modelAlias;
+      const resumedModel = profile.data().modelAlias;
       emitAgentRunSpawned(caller, agentId, {
         profileName,
         parentToolCallId: options.parentToolCallId,
@@ -225,7 +233,10 @@ export class SessionSwarmService implements ISessionSwarmService {
     }
   }
 
-  private async requireOwnedSubagent(callerAgentId: string, agentId: string): Promise<void> {
+  private async requireOwnedSubagent(
+    callerAgentId: string,
+    agentId: string,
+  ): Promise<AgentMeta | undefined> {
     const meta = await this.agentMeta(agentId);
     if (!isSubagentMeta(meta)) {
       throw new Error2(ErrorCodes.AGENT_NOT_A_SUBAGENT, `Agent instance "${agentId}" is not a subagent`, {
@@ -239,6 +250,19 @@ export class SessionSwarmService implements ISessionSwarmService {
         { details: { agentId, callerAgentId } },
       );
     }
+    return meta;
+  }
+
+  private async rebindInheritedModel(
+    meta: AgentMeta | undefined,
+    callerProfile: IAgentProfileService,
+    childProfile: IAgentProfileService,
+  ): Promise<void> {
+    const source = subagentModelSource(meta);
+    if (source !== 'inherited' && source !== 'primary_override') return;
+    const callerModel = callerProfile.data().modelAlias;
+    if (callerModel === undefined || childProfile.data().modelAlias === callerModel) return;
+    await childProfile.setModel(callerModel);
   }
 
   private async agentMeta(agentId: string): Promise<AgentMeta | undefined> {

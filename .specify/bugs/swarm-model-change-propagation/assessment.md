@@ -76,3 +76,19 @@ The design decision was that subagents should keep their bound model (v2 semanti
 - [NEEDS CLARIFICATION: Should model propagation be automatic on parent model change, or explicit via a command/API?]
 - [NEEDS CLARIFICATION: Should this apply to both v1 and v2 swarm implementations, or only v2 (agent-core-v2)?]
 - [NEEDS CLARIFICATION: What happens to in-flight requests on subagents when the model changes mid-turn?]
+
+## Additional Scope (user-provided, 2026-09-11)
+
+> in addition to this, when a swarm agent fails, it should follow the same fallback mechanism
+
+Beyond model-change propagation, a swarm subagent that **fails** its turn (rate limit, quota, or model error) must cascade through the same fallback-model mechanism as the main agent loop — `/fallback-model` → `/fallback-model-secondary` → error — instead of failing the swarm item outright.
+
+- **Fallback on failure**: a failed subagent turn should retry on the configured fallback model before the swarm item is marked failed.
+- **Relation to propagation**: the two requirements share the quota-exhaustion trigger. If the parent already switched models (propagation), a subagent that still fails should additionally cascade to the fallback model.
+- **Related bug / spec**: `.specify/bugs/fallback-model-retry-mechanism/` (issue #16) and `specs/009-fallback-model-cascade/`.
+- **Open question**: whether the fallback applies only to subagent turns driven by the parent swarm, or to every subagent kind.
+
+### Additional Suspected Code Paths
+
+- Swarm resume/retry path in `packages/agent-core-v2/src/features/swarm/session/sessionSwarmService.ts` — `resumeAttempt()` / failure handling, where the fallback cascade would need to be invoked.
+- The fallback-cascade implementation from `specs/009-fallback-model-cascade/` — needs to be reachable from the swarm subagent turn loop, not only the main agent loop.

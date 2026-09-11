@@ -11,7 +11,11 @@ import type { AgentContext } from '#/agent/agentContext/agentContext';
 import { userCancellationReason } from '#/_base/utils/abort';
 import { IAgentPermissionModeService } from '#/agent/permissionMode/permissionMode';
 import { IAgentScopeContext } from '#/agent/scopeContext/scopeContext';
-import { IAgentProfileService, type ProfileData } from '#/agent/profile/profile';
+import {
+  IAgentProfileService,
+  type ProfileData,
+  type SessionModelOverrideKind,
+} from '#/agent/profile/profile';
 import { IAgentLoopService } from '#/agent/loop/loop';
 import { IAgentUserToolService } from '#/agent/userTool/userTool';
 import { IEventBus } from '#/app/event/eventBus';
@@ -1061,6 +1065,89 @@ describe('SessionSwarmService metadata compatibility', () => {
     );
   });
 
+  it('rebinds an inherited child model to the caller model on resume', async () => {
+    agents['agent-existing'] = {
+      labels: { parentAgentId: 'main', modelSource: 'inherited' },
+    };
+    const child = agentHandle('agent-existing', lifecycle, eventBus, {
+      profileName: 'explore',
+      modelAlias: 'stale-model',
+    });
+    handles.set('agent-existing', child);
+    const service = ix.get(ISessionSwarmService);
+
+    await expect(
+      service.run({
+        callerAgentId: 'main',
+        tasks: [resumeSessionTask('agent-existing')],
+      }),
+    ).resolves.toMatchObject([{ status: 'completed', agentId: 'agent-existing' }]);
+
+    expect(child.accessor.get(IAgentProfileService).data().modelAlias).toBe('kimi-test');
+    expect(eventBus.publish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'subagent.spawned',
+        subagentId: 'agent-existing',
+        model: 'kimi-test',
+      }),
+    );
+  });
+
+  it('keeps a pool-bound child model on resume', async () => {
+    agents['agent-existing'] = {
+      labels: { parentAgentId: 'main', modelSource: 'secondary_pool' },
+    };
+    const child = agentHandle('agent-existing', lifecycle, eventBus, {
+      profileName: 'explore',
+      modelAlias: 'pool-model',
+    });
+    handles.set('agent-existing', child);
+    const service = ix.get(ISessionSwarmService);
+
+    await expect(
+      service.run({
+        callerAgentId: 'main',
+        tasks: [resumeSessionTask('agent-existing')],
+      }),
+    ).resolves.toMatchObject([{ status: 'completed', agentId: 'agent-existing' }]);
+
+    expect(child.accessor.get(IAgentProfileService).data().modelAlias).toBe('pool-model');
+    expect(eventBus.publish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'subagent.spawned',
+        subagentId: 'agent-existing',
+        model: 'pool-model',
+      }),
+    );
+  });
+
+  it('inherits the caller fallback model overrides on resume', async () => {
+    agents['agent-existing'] = {
+      labels: { parentAgentId: 'main', modelSource: 'inherited' },
+    };
+    const child = agentHandle('agent-existing', lifecycle, eventBus, {
+      profileName: 'explore',
+      modelAlias: 'stale-model',
+    });
+    handles.set('agent-existing', child);
+    handles
+      .get('main')!
+      .accessor.get(IAgentProfileService)
+      .setSessionModelOverride('fallback', 'fb-model');
+    const service = ix.get(ISessionSwarmService);
+
+    await expect(
+      service.run({
+        callerAgentId: 'main',
+        tasks: [resumeSessionTask('agent-existing')],
+      }),
+    ).resolves.toMatchObject([{ status: 'completed', agentId: 'agent-existing' }]);
+
+    expect(child.accessor.get(IAgentProfileService).getSessionModelOverride('fallback')).toBe(
+      'fb-model',
+    );
+  });
+
   it('prefers the spawn task plan over the caller model', async () => {
     const service = ix.get(ISessionSwarmService);
     const spawnTask: SessionSwarmSpawnTask = {
@@ -1384,12 +1471,25 @@ function agentHandle(
 
 function profileService(data: ProfileData): IAgentProfileService {
   let current = data;
+  const overrides: Partial<Record<SessionModelOverrideKind, string>> = {};
   return {
     _serviceBrand: undefined,
     data: () => current,
     update: (changed) => {
       current = { ...current, ...changed };
     },
+    setModel: async (model: string) => {
+      current = { ...current, modelAlias: model };
+      return { model };
+    },
+    setSessionModelOverride: (kind: SessionModelOverrideKind, alias: string | undefined) => {
+      if (alias === undefined) {
+        delete overrides[kind];
+      } else {
+        overrides[kind] = alias;
+      }
+    },
+    getSessionModelOverride: (kind: SessionModelOverrideKind) => overrides[kind],
     republishStatus: () => {},
     getEffectiveThinkingLevel: () => current.thinkingLevel,
   } as IAgentProfileService;

@@ -2,11 +2,14 @@ import type { AgentMeta } from '#/session/sessionMetadata/sessionMetadata';
 
 export function subagentLabels(
   parentAgentId: string,
-  options: { readonly swarmItem?: string } = {},
+  options: { readonly swarmItem?: string; readonly modelSource?: string } = {},
 ): Readonly<Record<string, string>> {
   const labels: Record<string, string> = { parentAgentId };
   if (options.swarmItem !== undefined) {
     labels['swarmItem'] = options.swarmItem;
+  }
+  if (options.modelSource !== undefined) {
+    labels['modelSource'] = options.modelSource;
   }
   return labels;
 }
@@ -53,6 +56,10 @@ export function subagentSwarmItem(meta: AgentMeta | undefined): string | undefin
 export function subagentProfileName(meta: AgentMeta | undefined): string | undefined {
   if (meta === undefined) return undefined;
   return firstNonEmpty(meta.labels?.['profileName']);
+}
+
+export function subagentModelSource(meta: AgentMeta | undefined): string | undefined {
+  return firstNonEmpty(meta?.labels?.['modelSource']);
 }
 
 function firstNonEmpty(...values: readonly (string | undefined)[]): string | undefined {
