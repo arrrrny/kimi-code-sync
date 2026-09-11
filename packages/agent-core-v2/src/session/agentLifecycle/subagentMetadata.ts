@@ -1,12 +1,16 @@
 import type { AgentMeta } from '#/session/sessionMetadata/sessionMetadata';
+import type { SubagentModelSource } from '#/session/subagent/configSection';
 
 export function subagentLabels(
   parentAgentId: string,
-  options: { readonly swarmItem?: string } = {},
+  options: { readonly swarmItem?: string; readonly modelSource?: SubagentModelSource } = {},
 ): Readonly<Record<string, string>> {
   const labels: Record<string, string> = { parentAgentId };
   if (options.swarmItem !== undefined) {
     labels['swarmItem'] = options.swarmItem;
+  }
+  if (options.modelSource !== undefined) {
+    labels['modelSource'] = options.modelSource;
   }
   return labels;
 }
@@ -55,6 +59,18 @@ export function subagentProfileName(meta: AgentMeta | undefined): string | undef
   return firstNonEmpty(meta.labels?.['profileName']);
 }
 
+export function subagentModelSource(meta: AgentMeta | undefined): SubagentModelSource | undefined {
+  const value = meta?.labels?.['modelSource'];
+  return SUBAGENT_MODEL_SOURCES.find((source) => source === value);
+}
+
 function firstNonEmpty(...values: readonly (string | undefined)[]): string | undefined {
   return values.find((value) => value !== undefined && value.length > 0);
 }
+
+const SUBAGENT_MODEL_SOURCES: readonly SubagentModelSource[] = [
+  'forced',
+  'primary_override',
+  'inherited',
+  'secondary_pool',
+];

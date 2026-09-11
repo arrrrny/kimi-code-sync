@@ -283,6 +283,8 @@ function createAgentLifecycleStub(options: AgentLifecycleStubOptions = {}): Agen
             getEffectiveThinkingLevel: () => 'off',
             getActiveToolNames: () => [],
             isToolActive: () => false,
+            setSessionModelOverride: () => {},
+            getSessionModelOverride: () => undefined,
           } as never;
         }
         if (serviceId === IAgentLoopService) {
