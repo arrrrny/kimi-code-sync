@@ -5,7 +5,7 @@
 - **Assessment**: ./assessment.md
 - **Status**: applied
 - **Branch**: fix/swarm-model-change-propagation
-- **Revision**: uncommitted
+- **Revision**: 485600bf
 
 ## Summary
 
