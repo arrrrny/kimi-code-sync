@@ -1258,6 +1258,68 @@ describe('SessionSwarmService metadata compatibility', () => {
     }
   });
 
+  it('emits spawned with the rebound model when a rate-limited child retries after a caller model change', async () => {
+    vi.useFakeTimers();
+    try {
+      agents['agent-retry'] = {
+        labels: { parentAgentId: 'main', modelSource: 'inherited' },
+      };
+      agents['agent-blocker'] = {
+        labels: { parentAgentId: 'main' },
+      };
+      handles.set(
+        'agent-retry',
+        agentHandle('agent-retry', lifecycle, eventBus, { modelAlias: 'stale-model' }),
+      );
+      handles.set('agent-blocker', agentHandle('agent-blocker', lifecycle, eventBus));
+      const rateLimited = createControlledPromise<{ summary: string }>();
+      const blocker = createControlledPromise<{ summary: string }>();
+      const published: Event2[] = [];
+      (eventBus.publish as ReturnType<typeof vi.fn>).mockImplementation((event: Event2) => {
+        published.push(event);
+      });
+      let retryRuns = 0;
+      runAgent.mockImplementation((agent, request, options) => {
+        options?.onReady?.();
+        const agentId = (agent as AgentContext).agentId;
+        if (agentId === 'agent-retry') {
+          retryRuns += 1;
+          return {
+            agentId,
+            turn: {} as never,
+            completion:
+              retryRuns === 1 ? rateLimited : Promise.resolve({ summary: 'recovered summary' }),
+          };
+        }
+        return { agentId, turn: {} as never, completion: blocker };
+      });
+      const service = ix.get(ISessionSwarmService);
+
+      const running = service.run({
+        callerAgentId: 'main',
+        tasks: [resumeSessionTask('agent-retry'), resumeSessionTask('agent-blocker')],
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      rateLimited.reject(new APIProviderRateLimitError('Rate limited'));
+      await vi.advanceTimersByTimeAsync(0);
+      await handles.get('main')!.accessor.get(IAgentProfileService).setModel('new-model');
+      blocker.resolve({ summary: 'blocker summary' });
+      await vi.advanceTimersByTimeAsync(3_000);
+      await running;
+
+      const retrySpawns = published.filter(
+        (event) =>
+          event.type === 'subagent.spawned' &&
+          (event as Event2 & { readonly subagentId: string }).subagentId === 'agent-retry',
+      );
+      expect(
+        retrySpawns.map((event) => (event as Event2 & { readonly model?: string }).model),
+      ).toEqual(['kimi-test', 'new-model']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('rejects resume of an already running child before launching or emitting spawned', async () => {
     agents['agent-existing'] = {
       labels: { parentAgentId: 'main' },

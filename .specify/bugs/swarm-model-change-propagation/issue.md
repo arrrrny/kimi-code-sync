@@ -2,10 +2,11 @@
 
 - **Slug**: swarm-model-change-propagation
 - **Fetched**: 2026-09-11T14:05:22Z
+- **Reported**: 2025-08-26T08:00:02.053Z
 - **Issue**: 14
 - **URL**: https://github.com/arrrrny/kimi-code-sync/issues/14
 - **State**: open
-- **Severity**: unknown
+- **Severity**: high
 - **Author**: arrrrny
 - **Labels**: bug
 

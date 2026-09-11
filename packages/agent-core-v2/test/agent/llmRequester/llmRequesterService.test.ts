@@ -172,10 +172,11 @@ function createService(
   const ix = disposables.add(new TestInstantiationService());
   ix.stub(IBootstrapService, stubBootstrap('/tmp/kimi-code-llm-requester-test', options.env ?? {}));
   const thinkingLevel = options.thinkingLevel ?? 'off';
+  let profileModelAlias = 'm';
   const profile: Partial<IAgentProfileService> = {
     hasProvider: () => true,
     resolveModelContext: () => ({
-      modelAlias: 'm',
+      modelAlias: profileModelAlias,
       modelCapabilities: capabilities,
       maxOutputSize: undefined,
       alwaysThinking: undefined,
@@ -205,7 +206,7 @@ function createService(
     getSystemPrompt: () => 'system',
     data: () => ({
       cwd: '',
-      modelAlias: 'm',
+      modelAlias: profileModelAlias,
       modelCapabilities: capabilities,
       thinkingLevel,
       systemPrompt: 'system',
@@ -298,6 +299,9 @@ function createService(
     telemetry,
     telemetryRecords,
     measuredCalls,
+    setModelAlias: (alias: string) => {
+      profileModelAlias = alias;
+    },
   };
 }
 
@@ -1163,5 +1167,34 @@ describe('AgentLLMRequesterService terminal-error fallback', () => {
     await expect(service.request()).rejects.toMatchObject({ statusCode: 400 });
     expect(calls.value).toBe(1);
     expect(events.filter((event) => event.type === 'warning')).toEqual([]);
+  });
+
+  it('retries on the inherited fallback override after a terminal 400', async () => {
+    const calls = { value: 0 };
+    const requester = createRequester(calls, new APIStatusError(400, 'endpoint broken'));
+    const { service } = createService(requester, undefined, {
+      sessionModelOverrides: { fallback: 'inherited-fallback' },
+    });
+
+    const result = await service.request();
+
+    expect(calls.value).toBe(2);
+    expect(result.model).toBe('inherited-fallback');
+  });
+
+  it('drops the active fallback when the profile model is rebound', async () => {
+    const calls = { value: 0 };
+    const requester = createRequester(calls, new APIStatusError(400, 'endpoint broken'));
+    const { service, setModelAlias } = createService(requester, undefined, {
+      fallbackFlag: true,
+      fallbackConfig: { model: 'fallback-alias' },
+    });
+
+    const fallbackResult = await service.request();
+    expect(fallbackResult.model).toBe('fallback-alias');
+
+    setModelAlias('m2');
+    const reboundResult = await service.request();
+    expect(reboundResult.model).toBe('m2');
   });
 });

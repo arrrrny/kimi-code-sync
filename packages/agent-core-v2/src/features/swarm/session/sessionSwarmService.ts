@@ -164,10 +164,9 @@ export class SessionSwarmService implements ISessionSwarmService {
     const profile = child.accessor.get(IAgentProfileService);
     const callerProfile = caller.accessor.get(IAgentProfileService);
     inheritFallbackOverrides(profile, callerProfile);
-    await this.rebindInheritedModel(meta, callerProfile, profile);
+    const rebound = await this.rebindInheritedModel(meta, callerProfile, profile);
     const profileName = profile.data().profileName ?? RESUMED_PROFILE_FALLBACK;
-    if (!retryTurn) {
-      const resumedModel = profile.data().modelAlias;
+    if (!retryTurn || rebound) {
       emitAgentRunSpawned(caller, agentId, {
         profileName,
         parentToolCallId: options.parentToolCallId,
@@ -175,7 +174,8 @@ export class SessionSwarmService implements ISessionSwarmService {
         description: options.description,
         swarmIndex: options.swarmIndex,
         runInBackground: options.runInBackground,
-        model: resumedModel,
+        model: profile.data().modelAlias,
+        modelSource: subagentModelSource(meta),
       });
     }
     const request = retryTurn
@@ -257,12 +257,13 @@ export class SessionSwarmService implements ISessionSwarmService {
     meta: AgentMeta | undefined,
     callerProfile: IAgentProfileService,
     childProfile: IAgentProfileService,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const source = subagentModelSource(meta);
-    if (source !== 'inherited' && source !== 'primary_override') return;
+    if (source !== 'inherited' && source !== 'primary_override') return false;
     const callerModel = callerProfile.data().modelAlias;
-    if (callerModel === undefined || childProfile.data().modelAlias === callerModel) return;
+    if (callerModel === undefined || childProfile.data().modelAlias === callerModel) return false;
     await childProfile.setModel(callerModel);
+    return true;
   }
 
   private async agentMeta(agentId: string): Promise<AgentMeta | undefined> {
