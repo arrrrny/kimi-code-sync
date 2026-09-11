@@ -290,7 +290,7 @@ export class AgentStepRetryService extends Disposable implements IAgentStepRetry
       new WarningIssued({
         agentId: this.scopeContext.agentId,
         code: 'fallback-model',
-        message: `Model ${lastTriedAlias} ${switchReason}, switching to fallback model ${binding.model} (tier: ${tier})`,
+        message: `Model ${lastTriedAlias ?? '<unknown>'} ${switchReason}, switching to fallback model ${binding.model} (tier: ${tier})`,
       }),
     );
     if (context.currentStep?.signal.aborted === true) return false;
