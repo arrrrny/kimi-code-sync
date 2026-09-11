@@ -16,6 +16,7 @@ import { AgentContextProjectorService } from '#/agent/contextProjector/contextPr
 import { AgentLLMRequesterService, KIMI_CODE_INFINITE_RETRY_ENV } from '#/agent/llmRequester/llmRequesterService';
 import { IAgentLLMRequesterService } from '#/agent/llmRequester/llmRequester';
 import { IBootstrapService } from '#/app/bootstrap/bootstrap';
+import { IFlagService } from '#/app/flag/flag';
 import { ISessionTokenCountingService } from '#/session/tokenCounting/sessionTokenCounting';
 import { IAgentProfileService } from '#/agent/profile/profile';
 import { IAgentStateService } from '#/agent/state/agentState';
@@ -178,6 +179,18 @@ function createService(
       compactionTriggerRatio: undefined,
       compactionTokenBudget: undefined,
     }),
+    resolveModelContextFor: () => ({
+      modelAlias: 'm',
+      modelCapabilities: capabilities,
+      maxOutputSize: undefined,
+      alwaysThinking: undefined,
+      thinkingLevel,
+      reservedContextSize: undefined,
+      compactionTriggerRatio: undefined,
+      compactionTokenBudget: undefined,
+    }),
+    getEffectiveThinkingLevel: () => thinkingLevel,
+    getSessionModelOverride: () => undefined,
     resolveRequestParams: () => ({}),
     getSystemPrompt: () => 'system',
     data: () => ({
@@ -208,6 +221,7 @@ function createService(
   const config: Partial<IConfigService> = {
     get: (() => undefined) as IConfigService['get'],
   };
+  ix.stub(IFlagService, { enabled: () => false });
   const log = { info: () => undefined, warn: () => undefined };
   const telemetryRecords: TelemetryRecord[] = [];
   const telemetry = recordingTelemetry(telemetryRecords);
