@@ -76,3 +76,7 @@ packages/agent-core-v2/src/human/llm/requester/bases/openai/requester.ts :: buil
 packages/agent-core-v2/src/human/llm/requester/bases/openai-responses/requester.ts :: buildProxyDispatcher
 packages/agent-core-v2/src/human/llm/requester/bases/anthropic/requester.ts :: buildProxyDispatcher
 packages/agent-core-v2/test/human/llm/requester/bases/x-opencode-session.test.ts :: x-opencode-session
+
+# --- fallback cascade terminal-400 extension (bug fallback-model-skipped) ---
+packages/agent-core-v2/src/agent/llmRequester/llmRequesterService.ts :: activateFallback
+packages/agent-core-v2/src/llm-adapter/contract/errors.ts           :: isTerminalProviderApiError

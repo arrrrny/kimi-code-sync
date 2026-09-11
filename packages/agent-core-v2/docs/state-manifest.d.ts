@@ -27,7 +27,7 @@
 // references become '(circular)', and class instances collapse to a '(ClassName)'
 // marker — the wire shape of an entry is the JSON projection of the type here.
 //
-// Index (App: 0 keys · Workspace: 6 keys · Session: 9 keys · Agent: 76 keys)
+// Index (App: 0 keys · Workspace: 6 keys · Session: 9 keys · Agent: 77 keys)
 //   App
 //   Workspace
 //     workspaceDirs.ephemeralDirs          src/workspace/workspaceDirs/workspaceDirsService.ts
@@ -54,6 +54,7 @@
 //     contextMemory                                   src/agent/contextMemory/contextOps.ts
 //     contextProjector.lastRepairSignature            src/agent/contextProjector/contextProjectorService.ts
 //     externalHooks.stopHookContinuationUsed          src/features/externalHooks/agent/agentExternalHooksService.ts
+//     fallbackModel.active                            src/session/fallback/state.ts
 //     fileHistory                                     src/features/fileHistory/fileHistoryOps.ts
 //     fullCompaction                                  src/agent/fullCompaction/compactionOps.ts
 //     fullCompaction.activeTurnId                     src/agent/fullCompaction/fullCompactionService.ts
@@ -1276,6 +1277,11 @@ export interface AgentStateSnapshot {
   'tower.base': string | null;
   // replayable · durable — folds: TowerModeEnter, TowerModeExit
   'tower.owner': string | undefined;
+  // src/session/fallback/state.ts
+  'fallbackModel.active': /* ActiveFallbackModel — packages/agent-core-v2/src/session/fallback/state.ts */ {
+    readonly alias: string;
+    readonly tier: 'primary' | 'secondary';
+  } | undefined;
 }
 
 export type AgentStateKey = keyof AgentStateSnapshot;

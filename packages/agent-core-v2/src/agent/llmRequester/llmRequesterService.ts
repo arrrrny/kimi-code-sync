@@ -24,6 +24,7 @@ import {
   isImageFormatError,
   isRecoverableRequestStructureError,
   isRetryableGenerateError,
+  isTerminalProviderApiError,
 } from '#/llm-adapter/contract/errors';
 import type { Message } from '#/llm-adapter/contract/message';
 import { type ThinkingEffort } from '#human/llm/thinking';
@@ -86,8 +87,10 @@ import {
   sleepForRetry,
 } from '#/_base/utils/retry';
 import { IBootstrapService } from '#/app/bootstrap/bootstrap';
+import { IFlagService } from '#/app/flag/flag';
 import { substituteModelActiveKey } from '#/session/substitute/state';
-import { fallbackModelActiveKey } from '#/session/fallback/state';
+import { fallbackModelActiveKey, type ActiveFallbackModel } from '#/session/fallback/state';
+import { resolveFallbackBinding } from '#/session/fallback/configSection';
 
 const EMPTY_TOOL_PARAMETERS: Record<string, unknown> = {
   type: 'object',
@@ -174,6 +177,7 @@ export class AgentLLMRequesterService implements IAgentLLMRequesterService {
     @IAgentScopeContext private readonly scopeContext: IAgentScopeContext,
     @IAgentStateService private readonly states: IAgentStateService,
     @IBootstrapService private readonly bootstrap: IBootstrapService,
+    @IFlagService private readonly flags: IFlagService,
   ) {
     this.states.contributeState(llmRequestTraceKey);
     this.states.contributeState(llmRequesterLastConfigLogSignatureKey);
@@ -181,6 +185,7 @@ export class AgentLLMRequesterService implements IAgentLLMRequesterService {
     this.states.contributeState(llmRequesterMediaDegradedTurnsKey);
     this.states.contributeState(llmRequesterMediaStrippedTurnsKey);
     this.states.contributeState(llmRequesterEmittedThinkingEffortWarningsKey);
+    this.states.contributeState(fallbackModelActiveKey);
   }
 
   private get lastConfigLogSignature(): string | undefined {
@@ -260,12 +265,7 @@ export class AgentLLMRequesterService implements IAgentLLMRequesterService {
     };
     setTrace(undefined);
     try {
-      return await this.runRequest(
-        this.resolveRequest(overrides),
-        onPart,
-        signal,
-        setTrace,
-      );
+      return await this.runRequest(overrides, onPart, signal, setTrace);
     } catch (error) {
       this.logRequestFailure(error, overrides, signal);
       setTrace(this.trackApiError(error, startedAt, signal, overrides.source, trace.traceId));
@@ -333,11 +333,12 @@ export class AgentLLMRequesterService implements IAgentLLMRequesterService {
   }
 
   private async runRequest(
-    request: ResolvedLLMRequest,
+    overrides: AgentLLMRequestOverrides,
     onPart: AgentLLMRequestPartHandler,
     signal: AbortSignal | undefined,
     onRequestTrace: (traceId: string | undefined) => void,
   ): Promise<AgentLLMRequestFinish> {
+    let request = this.resolveRequest(overrides);
     this.toolCallIdNormalizer.seedFrom(this.context.get());
     const shaped = this.toolSelect.shapeHistory(request.messages);
     const recoveredStrip = this.mediaStripSnapshotForTurn(request.source);
@@ -483,6 +484,17 @@ export class AgentLLMRequesterService implements IAgentLLMRequesterService {
           continue;
         }
         const raw = unwrapErrorCause(error);
+        if (
+          isTerminalProviderApiError(raw) &&
+          overrides.model === undefined &&
+          signal?.aborted !== true &&
+          this.activateFallback('terminal-error')
+        ) {
+          request = this.resolveRequest(overrides);
+          policy = undefined;
+          infiniteRetryAttempt = 0;
+          continue;
+        }
         if (
           !this.infiniteRetryEnabled ||
           isAbortError(error) ||
@@ -733,6 +745,42 @@ export class AgentLLMRequesterService implements IAgentLLMRequesterService {
       return undefined;
     }
     return active.alias;
+  }
+
+  private activateFallback(cause: 'retry-budget' | 'terminal-error'): boolean {
+    const currentActive = this.states.get(fallbackModelActiveKey);
+    if (currentActive?.tier === 'secondary') return false;
+    const lastTriedAlias =
+      currentActive !== undefined ? currentActive.alias : this.profile.data().modelAlias;
+    const own = {
+      modelAlias: lastTriedAlias ?? '',
+      thinkingLevel: this.profile.getEffectiveThinkingLevel(),
+    };
+    const binding = resolveFallbackBinding(this.config, this.flags, own, lastTriedAlias, {
+      fallbackAlias: this.profile.getSessionModelOverride('fallback'),
+      fallbackSecondaryAlias: this.profile.getSessionModelOverride('fallbackSecondary'),
+    });
+    if (binding === undefined) return false;
+    if (binding.model === lastTriedAlias) return false;
+    try {
+      this.profile.resolveModelContextFor(binding.model);
+    } catch {
+      return false;
+    }
+    const tier: ActiveFallbackModel['tier'] = currentActive === undefined ? 'primary' : 'secondary';
+    this.states.set(fallbackModelActiveKey, { alias: binding.model, tier });
+    const switchReason =
+      cause === 'terminal-error'
+        ? 'failed with a terminal provider error'
+        : 'exhausted its retry budget';
+    void this.dispatcher.dispatch(
+      new WarningIssued({
+        agentId: this.scopeContext.agentId,
+        code: 'fallback-model',
+        message: `Model ${lastTriedAlias ?? '<unknown>'} ${switchReason}, switching to fallback model ${binding.model} (tier: ${tier})`,
+      }),
+    );
+    return true;
   }
 
   private resolveTurnConfig(source: AgentLLMRequestSource | undefined): TurnRequestConfig | undefined {
