@@ -2654,7 +2654,7 @@ describe('FullCompaction', () => {
     expect(events).toContainEqual(
       expect.objectContaining({
         event: 'turn.ended',
-        args: expect.objectContaining({ turnId: 1, reason: 'completed' }),
+        args: expect.objectContaining({ turnId: 2, reason: 'completed' }),
       }),
     );
     await ctx.expectResumeMatches();

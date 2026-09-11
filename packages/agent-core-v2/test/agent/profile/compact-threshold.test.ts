@@ -72,7 +72,6 @@ function createTestModel(): Model {
     alwaysThinking: false,
     providerType: 'kimi',
     providerName: 'kimi',
-    authProvider: { getAuth: async () => undefined },
   };
 }
 
@@ -86,7 +85,7 @@ function createModelCatalogStub(model: Model): IModelCatalog {
     getRequester: () => {
       throw new Error('not exercised');
     },
-    inspect: () => {
+    generate: () => {
       throw new Error('not exercised');
     },
     ping: () => {
@@ -418,7 +417,7 @@ describe('AgentProfileService.setCompactionTokenBudget telemetry (U11)', () => {
     spySvc.setCompactionTokenBudget(120);
     const matching = track2Calls.filter(([event]) => event === 'compaction_token_budget_override');
     expect(matching.length).toBeGreaterThan(0);
-    const last = matching[matching.length - 1] as [string, Record<string, unknown>];
+    const last = matching.at(-1) as [string, Record<string, unknown>];
     const [event, payload] = last;
     expect(event).toBe('compaction_token_budget_override');
     expect(payload['action']).toBe('set');
@@ -431,7 +430,7 @@ describe('AgentProfileService.setCompactionTokenBudget telemetry (U11)', () => {
     spySvc.setCompactionTokenBudget(undefined);
     const matching = track2Calls.filter(([event]) => event === 'compaction_token_budget_override');
     expect(matching.length).toBeGreaterThanOrEqual(2);
-    const last = matching[matching.length - 1] as [string, Record<string, unknown>];
+    const last = matching.at(-1) as [string, Record<string, unknown>];
     const [event, payload] = last;
     expect(event).toBe('compaction_token_budget_override');
     expect(payload['action']).toBe('clear');

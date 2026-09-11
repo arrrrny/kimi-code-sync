@@ -388,7 +388,7 @@ export class AgentLifecycleService extends Disposable implements IAgentLifecycle
     managed.closing = true;
     this.onWillCloseEmitter.fire(agent);
     const handle = managed.handle;
-    await handle.accessor.get(IAgentTaskService).stopAllOnExit('Session closed');
+    await handle.accessor.get(IAgentTaskService).suppressAllTerminalNotifications();
     const loop = handle.accessor.get(IAgentLoopService);
     const compaction = handle.accessor.get(IAgentFullCompactionService).compacting;
     const compactionSettled = compaction?.promise.catch(() => undefined) ?? Promise.resolve();
@@ -400,8 +400,8 @@ export class AgentLifecycleService extends Disposable implements IAgentLifecycle
     const promptIdleDeadline = Date.now() + REMOVE_PROMPT_QUIESCE_TIMEOUT_MS;
     let releaseQuiescence: (() => void) | undefined;
     for (;;) {
-      for (const turnId of loop.status().pendingTurnIds) {
-        loop.cancel(turnId, reason);
+      for (const queueId of loop.status().pendingPromptIds) {
+        loop.cancelQueued(queueId, reason);
       }
       loop.cancel(undefined, reason);
       await Promise.all([loop.settled(), compactionSettled, prompt.drain(reason)]);
@@ -428,6 +428,7 @@ export class AgentLifecycleService extends Disposable implements IAgentLifecycle
       await new Promise((resolve) => setTimeout(resolve, REMOVE_PROMPT_QUIESCE_POLL_MS));
     }
     try {
+      await handle.accessor.get(IAgentTaskService).stopAllOnExit('Session closed');
       await handle.accessor.get(IEventDispatcher).flush().catch(onUnexpectedError);
       managed.killSpace();
       await handle.dispose();

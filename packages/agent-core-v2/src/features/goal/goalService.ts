@@ -6,6 +6,7 @@ import { createDecorator, IInstantiationService } from '#/_base/di/instantiation
 import { MutableDisposable, type IDisposable } from '#/_base/di/lifecycle';
 import { abortError } from '#/_base/utils/abort';
 import { isPlainRecord } from '#/_base/utils/canonical-args';
+import type { AgentContext } from '#/agent/agentContext/agentContext';
 import { IAgentReminderService } from '#/features/reminder/reminderService';
 import {
   AgentActorService,
@@ -47,7 +48,7 @@ import {
   toKimiErrorPayload,
   type KimiErrorPayload,
 } from '#/errors';
-import { MAIN_AGENT_ID } from '#/session/agentLifecycle/agentLifecycle';
+import { IAgentLifecycleService, MAIN_AGENT_ID } from '#/session/agentLifecycle/agentLifecycle';
 import { ISessionUsageService } from '#/session/usage/sessionUsage';
 import { IEventDispatcher } from '#/state/eventDispatcher';
 import type { ExecutableToolResult } from '#/tool/toolContract';
@@ -497,6 +498,11 @@ function handleTurnLaunched(context: GoalOperationContext, turnId: number, origi
   context.effects.liveTurnId = turnId;
   context.effects.goalTurnTargets.delete(turnId);
   context.effects.exhaustedTurnBudgetGoals.delete(turnId);
+  const pending = context.effects.pendingContinuation;
+  if (pending !== undefined && pending.turnId === undefined && isGoalContinuationOrigin(origin)) {
+    pending.turnId = turnId;
+    context.effects.pendingContinuationGoals.set(turnId, pending.goalId);
+  }
   if (!context.effects.goalDrivenTurns.has(turnId)) {
     const state = context.runtime.getState().goal;
     const continuationGoalId = isGoalContinuationOrigin(origin)
@@ -725,10 +731,7 @@ function launchContinuationTurn(context: GoalOperationContext, goalId: string, s
   const { turn } = context.runtime.get(IAgentLoopService).submit({ message });
   const pending: PendingContinuation = { turn, goalId };
   context.effects.pendingContinuation = pending;
-  pending.turnId = turn.id;
-  if (!context.effects.goalDrivenTurns.has(turn.id)) {
-    context.effects.pendingContinuationGoals.set(turn.id, pending.goalId);
-  }
+  void turn.ready.then(() => { pending.turnId = turn.id; }).catch(() => undefined);
   void turn.result.finally(() => {
     if (pending.turnId !== undefined) context.effects.pendingContinuationGoals.delete(pending.turnId);
     if (context.effects.pendingContinuation === pending) context.effects.pendingContinuation = undefined;
@@ -884,9 +887,6 @@ function settleWallClock(context: GoalOperationContext, state: GoalState): numbe
       Math.max(0, context.runtime.get(IGoalDeadlineScheduler).now() - context.effects.liveWallClockStartedAt)
     );
   }
-  if (state.status === 'active' && state.wallClockResumedAt !== undefined) {
-    return state.wallClockMs + Math.max(0, Date.now() - state.wallClockResumedAt);
-  }
   return state.wallClockMs;
 }
 
@@ -896,9 +896,6 @@ function liveWallClockMs(context: GoalOperationContext, state: GoalState): numbe
       state.wallClockMs +
       Math.max(0, context.runtime.get(IGoalDeadlineScheduler).now() - context.effects.liveWallClockStartedAt)
     );
-  }
-  if (state.status === 'active' && state.wallClockResumedAt !== undefined) {
-    return state.wallClockMs + Math.max(0, Date.now() - state.wallClockResumedAt);
   }
   return state.wallClockMs;
 }
@@ -948,7 +945,7 @@ function wallClockDeadlineDelay(context: GoalOperationContext): number | undefin
     budgetMs === undefined ||
     context.effects.liveWallClockStartedAt === undefined
   ) return undefined;
-  return Math.max(0, budgetMs - liveWallClockMs(context, state));
+  return Math.min(2_147_483_647, Math.max(0, budgetMs - liveWallClockMs(context, state)));
 }
 
 function handleWallClockDeadline(context: GoalOperationContext): void {
@@ -1110,6 +1107,12 @@ function createGoalEffectHandlers(runtime: AgentActorContext<GoalRuntimeState>) 
       isWaitForEnabled: () => isWaitForAvailable(context),
     },
     normalize: () => { normalizeAfterReplay(context); },
+    closing: (agent: AgentContext) => {
+      if (agent !== runtime.agent) return;
+      const state = runtime.getState().goal;
+      if (state === null || state.status !== 'active') return;
+      applyLifecycle(context, state, 'paused', 'Paused after agent closed', 'runtime');
+    },
     turnStarted: (event: TurnStarted) => { handleTurnLaunched(context, event.turnId, event.origin); },
     usageRecorded: (usage: UsageRecordedContext) => {
       if (usage.agent === runtime.agent) handleUsageRecorded(context, usage);
@@ -1185,6 +1188,7 @@ const goalEffects = fromCallback(({
   });
   const disposables: IDisposable[] = [deadline];
   if (input.runtime.agent.agentId === MAIN_AGENT_ID) {
+    disposables.push(input.runtime.get(IAgentLifecycleService).onWillClose(handlers.closing));
     disposables.push(new GoalInjection(handlers.injection, reminderOf(input.runtime)));
     disposables.push(input.runtime.get(IEventBus).subscribe(TurnStarted, handlers.turnStarted));
     disposables.push(input.runtime.get(ISessionUsageService).onDidRecord(handlers.usageRecorded));

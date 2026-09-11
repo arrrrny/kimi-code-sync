@@ -113,7 +113,7 @@ export function createTUIState(options: KimiTUIOptions): TUIState {
               .getText()
               .then((text) => {
                 if (!text || ui.getFocusedComponent() !== target) return;
-                target.handleInput?.(`\x1B[200~${text}\x1B[201~`);
+                target.handleInput?.(`\u001B[200~${text}\u001B[201~`);
                 ui.requestRender();
               })
               .catch(() => {});

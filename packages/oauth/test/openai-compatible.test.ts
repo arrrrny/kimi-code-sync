@@ -19,7 +19,7 @@ function makeRefreshHost(initial: ManagedKimiConfigShape): RefreshProviderHost {
     removeProvider: async (providerId: string) => {
       const providers = { ...persisted.providers };
       delete providers[providerId];
-      const models = { ...(persisted.models ?? {}) };
+      const models = { ...persisted.models };
       for (const [alias, model] of Object.entries(models)) {
         if ((model as { provider?: string }).provider === providerId) delete models[alias];
       }

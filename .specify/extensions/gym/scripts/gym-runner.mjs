@@ -15,9 +15,8 @@ import fs from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import { globSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const __dirname = import.meta.dirname;
 const EXT_DIR = path.resolve(__dirname, '..'); // .specify/extensions/gym
 const CONFIG_PATH = path.join(EXT_DIR, 'gym-config.yml');
 const DEFAULTS = {
@@ -104,13 +103,13 @@ const ctx = {
 async function loadModules(dir) {
   const mods = [];
   if (!existsSync(dir)) return mods;
-  const files = globSync('*.mjs', { cwd: dir }).sort();
+  const files = globSync('*.mjs', { cwd: dir }).toSorted();
   for (const f of files) {
     try {
       const mod = await import(path.join(dir, f));
       if (mod.default) mods.push({ file: f, ...mod.default });
-    } catch (e) {
-      console.log(`    SKIP ${f} — ${e.message}`);
+    } catch (error) {
+      console.log(`    SKIP ${f} — ${error.message}`);
     }
   }
   return mods;
@@ -135,7 +134,7 @@ async function waitForSubmit(sandbox, timeoutSec) {
         setTimeout(tick, 2000);
       }
     };
-    tick();
+    void tick();
   });
 }
 
@@ -163,8 +162,8 @@ async function runWorkout(warmupOnly) {
       const res = await ex.verify(ctx);
       if (res && res.ok) { console.log('    GROWN\n'); grown++; }
       else { console.log(`    WEAK — ${res?.note || 'verify returned false'}\n`); }
-    } catch (e) {
-      console.log(`    WEAK — ${e.message}\n`);
+    } catch (error) {
+      console.log(`    WEAK — ${error.message}\n`);
     }
   }
   console.log(`BOARD: ${grown}/${reps.length} muscles grown.\n`);
@@ -185,8 +184,8 @@ async function runWorkout(warmupOnly) {
         const r = await ex.evaluate(SANDBOX);
         if (r && r.pass) { console.log(`    PASSED — ${r.notes || ''}\n`); passed++; }
         else { console.log(`    FAILED — ${r?.notes || 'evaluate returned false'}\n`); }
-      } catch (e) {
-        console.log(`    FAILED — ${e.message}\n`);
+      } catch (error) {
+        console.log(`    FAILED — ${error.message}\n`);
       }
     }
     console.log(`EXERCISES: ${passed}/${exercises.length} passed.`);
@@ -257,4 +256,4 @@ async function main() {
   process.exit(r.gate === 'open' ? 0 : 1);
 }
 
-main().catch((e) => { console.error(e); process.exit(1); });
+main().catch((error) => { console.error(error); process.exit(1); });

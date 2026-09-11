@@ -159,10 +159,9 @@ export type {
 export type { ThinkingEffort, ThinkingRequestOptions } from '#human/llm/thinking';
 export type { VideoUploadInput } from '#human/llm/media/upload';
 export type { ToolCallIdPolicy } from '#human/llm/requester/requester';
-export type { ProviderRequestAuth } from '#/llm-adapter/model/catalog';
 export type { SamplingOptions } from '#/llm-adapter/model/model-requester';
 export * from '#/llm-adapter/contract/request-trace';
-export type { ExtraBody, KimiThinkingConfig } from '#human/llm-kimi/trait';
+export type { KimiThinkingConfig } from '#human/llm-kimi/trait';
 
 export * from '#/app/sessionIndex/sessionIndex';
 export * from '#/app/sessionIndex/sessionIndexService';
@@ -361,8 +360,6 @@ export * from '#/app/flag/flagRegistryService';
 export * from '#/app/flag/flag';
 export * from '#/app/flag/flagService';
 
-export * from '#/agent/activityView/activityView';
-import '#/agent/activityView/activityViewService';
 export * from '#/agent/modeMutex/modeMutex';
 import '#/agent/modeMutex/modeMutexService';
 export * from '#/features/btw/btw';

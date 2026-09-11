@@ -8,12 +8,11 @@
 //   node drop.mjs --agent <you> --where "GYM ex-1" \
 //     --did "..." --expected "..." --happened "..."
 import fs from 'node:fs/promises';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const __dirname = import.meta.dirname;
 const EXT_DIR = path.resolve(__dirname, '..');
 const CONFIG_PATH = path.join(EXT_DIR, 'gym-config.yml');
 const DEFAULTS = { drop_stores: ['local', 'ledger'] };
@@ -80,7 +79,7 @@ function parseArgs(argv) {
 
 async function main() {
   const cfg = loadConfig();
-  const stores = Array.isArray(cfg.drop_stores) && cfg.drop_stores.length ? cfg.drop_stores : ['local', 'ledger'];
+  const stores = Array.isArray(cfg.drop_stores) && cfg.drop_stores.length > 0 ? cfg.drop_stores : ['local', 'ledger'];
   const o = parseArgs(process.argv.slice(2));
   const repoRoot = process.cwd();
   const date = new Date().toISOString().slice(0, 10);
@@ -120,7 +119,7 @@ async function main() {
   console.log('Drop card recorded:');
   written.forEach((p) => console.log('  + ' + p));
   const missing = ['agent', 'where', 'did', 'expected', 'happened'].filter((k) => !o[k]);
-  if (missing.length) console.log(`Note: missing fields flagged: ${missing.join(', ')}`);
+  if (missing.length > 0) console.log(`Note: missing fields flagged: ${missing.join(', ')}`);
 }
 
-main().catch((e) => { console.error(e); process.exit(1); });
+main().catch((error) => { console.error(error); process.exit(1); });

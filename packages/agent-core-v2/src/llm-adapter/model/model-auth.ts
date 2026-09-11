@@ -6,7 +6,6 @@ import {
 } from '#human/llm/requester/bases/anthropic/profile';
 
 import { CONFIG_INVALID_ERROR_CODE } from '../contract/errors';
-import type { InspectionSource, ResolutionTrace } from '../contract/inspection';
 import { ProtocolSchema, type Protocol } from '../protocol/protocol';
 import type { ProviderConfig } from '../provider/provider';
 import { explainProviderEndpoint, getProviderDefinition } from '../provider/provider-definition';
@@ -24,25 +23,20 @@ function getActiveProviderApiKey(provider: ProviderConfig | undefined): string |
   return provider.apiKey;
 }
 
-export function resolveModelAuthMaterial(
-  args: {
-    readonly modelId: string;
-    readonly model: ModelRecord;
-    readonly provider: ProviderConfig | undefined;
-    readonly providerName: string;
-  },
-  trace?: ResolutionTrace,
-): ResolvedModelAuthMaterial {
+export function resolveModelAuthMaterial(args: {
+  readonly modelId: string;
+  readonly model: ModelRecord;
+  readonly provider: ProviderConfig | undefined;
+  readonly providerName: string;
+}): ResolvedModelAuthMaterial {
   const modelApiKey = nonEmpty(args.model.apiKey);
   if (modelApiKey !== undefined && args.model.oauth !== undefined) {
     throw authConflictError('Model', args.modelId);
   }
   if (modelApiKey !== undefined) {
-    trace?.record('resolved.auth', { kind: 'config', detail: 'model.apiKey' });
     return { apiKey: modelApiKey };
   }
   if (args.model.oauth !== undefined) {
-    trace?.record('resolved.auth', { kind: 'config', detail: 'model.oauth' });
     return {
       oauth: args.model.oauth,
       oauthProviderKey: args.model.providerId ?? args.model.provider,
@@ -59,31 +53,14 @@ export function resolveModelAuthMaterial(
     throw authConflictError('Provider', args.providerName);
   }
   if (providerApiKey !== undefined) {
-    trace?.record(
-      'resolved.auth',
-      getActiveProviderApiKey(args.provider) !== undefined
-        ? { kind: 'config', detail: `provider '${args.providerName}' apiKey (active: ${args.provider?.activeApiKeyId ?? 'legacy'})` }
-        : {
-            kind: 'env',
-            detail: `${providerEndpoint.apiKeyEnvName ?? '?'} (provider '${args.providerName}' env bag)`,
-          },
-    );
     return { apiKey: providerApiKey };
   }
   if (args.provider?.oauth !== undefined) {
-    trace?.record('resolved.auth', {
-      kind: 'config',
-      detail: `provider '${args.providerName}' oauth`,
-    });
     return {
       oauth: args.provider.oauth,
       oauthProviderKey: args.model.providerId ?? args.model.provider,
     };
   }
-  trace?.record('resolved.auth', {
-    kind: 'none',
-    detail: 'no credential resolved at any layer (adapter construction may still read process.env)',
-  });
   return {};
 }
 
@@ -110,7 +87,7 @@ export function effectiveModelConfig(
   return withAnthropicProfile(clamped, providerType);
 }
 
-function withAnthropicProfile(model: ModelRecord, providerType?: string): ModelRecord {
+export function withAnthropicProfile(model: ModelRecord, providerType?: string): ModelRecord {
   const wireName = model.name ?? model.model;
   const protocol = model.protocol ?? providerType;
   const profile =
@@ -151,82 +128,43 @@ export function providerNameFromFlatModel(model: ModelRecord): string | undefine
   return baseUrl === undefined ? undefined : deriveProviderId(baseUrl);
 }
 
-export interface ModelProtocolResolution {
-  readonly protocol: Protocol;
-  readonly source: InspectionSource;
-}
-
 export function resolveModelProtocol(
   model: ModelRecord,
   provider: ProviderConfig | undefined,
-): ModelProtocolResolution | undefined {
+): Protocol | undefined {
   if (model.protocol !== undefined) {
-    return { protocol: model.protocol, source: { kind: 'config', detail: 'model.protocol' } };
+    return model.protocol;
   }
   const providerType = provider?.type;
   if (providerType !== undefined) {
     const asProtocol = ProtocolSchema.safeParse(providerType);
     if (asProtocol.success) {
-      return {
-        protocol: asProtocol.data,
-        source: {
-          kind: 'config',
-          detail: `provider type '${providerType}' is itself a wire protocol`,
-        },
-      };
+      return asProtocol.data;
     }
     const definition = getProviderDefinition(providerType);
     if (definition !== undefined) {
-      return {
-        protocol: definition.baseProtocol,
-        source: { kind: 'builtin', detail: `vendor '${providerType}' declared baseProtocol` },
-      };
+      return definition.baseProtocol;
     }
   }
   return undefined;
 }
 
-export interface EndpointBaseUrlResolution {
-  readonly baseUrl: string | undefined;
-  readonly source?: InspectionSource;
-}
-
 export function resolveEndpointBaseUrl(
   model: ModelRecord,
   provider: ProviderConfig,
-  providerId: string,
-): EndpointBaseUrlResolution {
+): string | undefined {
   const fromModel = nonEmpty(model.baseUrl);
   if (fromModel !== undefined) {
-    return { baseUrl: fromModel, source: { kind: 'config', detail: 'model.baseUrl' } };
+    return fromModel;
   }
   const fromProvider = nonEmpty(provider.baseUrl);
   if (fromProvider !== undefined) {
-    return {
-      baseUrl: fromProvider,
-      source: { kind: 'config', detail: `provider '${providerId}' baseUrl` },
-    };
+    return fromProvider;
   }
   const endpointType = provider.type ?? model.protocol;
   const endpoint =
     endpointType === undefined ? {} : explainProviderEndpoint(endpointType, provider.env ?? {});
-  const baseUrl = nonEmpty(endpoint.baseUrl);
-  if (endpoint.baseUrlEnvName !== undefined) {
-    return {
-      baseUrl,
-      source: {
-        kind: 'env',
-        detail: `${endpoint.baseUrlEnvName} (provider '${providerId}' env bag)`,
-      },
-    };
-  }
-  if (endpoint.baseUrlIsDefault === true) {
-    return {
-      baseUrl,
-      source: { kind: 'builtin', detail: `provider definition '${endpointType}' defaultBaseUrl` },
-    };
-  }
-  return { baseUrl };
+  return nonEmpty(endpoint.baseUrl);
 }
 
 export type ModelReadyFailureReason =

@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import type { LlmModel } from '#human/llm/model';
 
-import { openAIFormat } from '#human/llm/requester/bases/openai/format';
-import { openAIResponsesFormat } from '#human/llm/requester/bases/openai-responses/format';
-import { createAnthropicFormat } from '#human/llm/requester/bases/anthropic/format';
+import { planOpenAIRequest } from '#human/llm/requester/bases/openai/requester';
+import { planOpenAIResponsesRequest } from '#human/llm/requester/bases/openai-responses/requester';
+import { planAnthropicRequest } from '#human/llm/requester/bases/anthropic/requester';
 
 function makeModel(provider = 'openai', baseUrl = 'https://api.example.com/v1'): LlmModel {
   return {
@@ -20,12 +20,10 @@ describe('x-opencode-session header', () => {
   describe('openai (chat completions)', () => {
     it('sets x-opencode-session when cacheKey is provided', () => {
       const model = makeModel();
-      const request = openAIFormat.formatRequest({
+      const request = planOpenAIRequest({
         model,
         messages: [],
         tools: [],
-        trait: undefined,
-        ctx: { model },
         cacheKey: 'session-probe',
       });
       expect(request.headers?.['x-opencode-session']).toBe('session-probe');
@@ -33,12 +31,10 @@ describe('x-opencode-session header', () => {
 
     it('does not set x-opencode-session when cacheKey is absent', () => {
       const model = makeModel();
-      const request = openAIFormat.formatRequest({
+      const request = planOpenAIRequest({
         model,
         messages: [],
         tools: [],
-        trait: undefined,
-        ctx: { model },
       });
       expect(request.headers?.['x-opencode-session']).toBeUndefined();
     });
@@ -47,12 +43,10 @@ describe('x-opencode-session header', () => {
   describe('openai-responses', () => {
     it('sets x-opencode-session when cacheKey is provided', () => {
       const model = makeModel();
-      const request = openAIResponsesFormat.formatRequest({
+      const request = planOpenAIResponsesRequest({
         model,
         messages: [],
         tools: [],
-        trait: undefined,
-        ctx: { model },
         cacheKey: 'session-probe',
       });
       expect(request.headers?.['x-opencode-session']).toBe('session-probe');
@@ -60,12 +54,10 @@ describe('x-opencode-session header', () => {
 
     it('does not set x-opencode-session when cacheKey is absent', () => {
       const model = makeModel();
-      const request = openAIResponsesFormat.formatRequest({
+      const request = planOpenAIResponsesRequest({
         model,
         messages: [],
         tools: [],
-        trait: undefined,
-        ctx: { model },
       });
       expect(request.headers?.['x-opencode-session']).toBeUndefined();
     });
@@ -74,13 +66,10 @@ describe('x-opencode-session header', () => {
   describe('anthropic', () => {
     it('sets x-opencode-session when cacheKey is provided', () => {
       const model = makeModel('anthropic');
-      const format = createAnthropicFormat();
-      const request = format.formatRequest({
+      const request = planAnthropicRequest({
         model,
         messages: [],
         tools: [],
-        trait: undefined,
-        ctx: { model },
         cacheKey: 'session-probe',
       });
       expect(request.headers?.['x-opencode-session']).toBe('session-probe');
@@ -88,13 +77,10 @@ describe('x-opencode-session header', () => {
 
     it('does not set x-opencode-session when cacheKey is absent', () => {
       const model = makeModel('anthropic');
-      const format = createAnthropicFormat();
-      const request = format.formatRequest({
+      const request = planAnthropicRequest({
         model,
         messages: [],
         tools: [],
-        trait: undefined,
-        ctx: { model },
       });
       expect(request.headers?.['x-opencode-session']).toBeUndefined();
     });

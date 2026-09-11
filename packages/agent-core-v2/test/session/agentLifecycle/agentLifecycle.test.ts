@@ -14,6 +14,8 @@ import { ProfileBind } from '#/agent/profile/profileOps';
 import { TOWER_WORKER_PROFILE } from '#/features/tower/tower';
 import { IAgentAgentsMdReminderService } from '#/agent/agentsMdReminder/agentsMdReminder';
 import { IAgentMcpService } from '#/agent/mcp/mcp';
+import { ISessionMediaStore } from '#/agent/media/sessionMediaStore';
+import { SessionMediaStoreService } from '#/agent/media/sessionMediaStoreService';
 import { McpConnectionManager } from '#/mcpCore/connection-manager';
 import { IAgentPermissionModeService } from '#/agent/permissionMode/permissionMode';
 import '#/agent/permissionMode/permissionModeService';
@@ -75,7 +77,7 @@ import { ISessionNotify } from '#/features/notify/sessionNotify';
 import { ISessionEventBus } from '#/app/event/eventBus';
 import { EventBusService } from '#/app/event/eventBusService';
 import '#/app/event/eventBusService';
-import { AgentActivityUpdated } from '#/agent/activityView/activityView';
+import { TurnStarted } from '#/agent/loop/turnEvents';
 import { IAgentBlobService } from '#/agent/blob/agentBlobService';
 import { IAgentPluginService } from '#/agent/plugin/agentPlugin';
 import { ILogService } from '#/_base/log/log';
@@ -202,9 +204,11 @@ describe('AgentLifecycleService', () => {
   let atomicDocs: Map<string, unknown>;
   let permissionModeSetMode: ReturnType<typeof vi.fn>;
   let stopAllOnExit: ReturnType<typeof vi.fn>;
+  let suppressAllTerminalNotifications: ReturnType<typeof vi.fn>;
   let loopActiveTurnId: number | undefined;
-  let loopPendingTurnIds: number[];
+  let loopPendingPromptIds: string[];
   let loopCancel: ReturnType<typeof vi.fn<IAgentLoopService['cancel']>>;
+  let loopCancelQueued: ReturnType<typeof vi.fn<IAgentLoopService['cancelQueued']>>;
   let loopSettled: ReturnType<typeof vi.fn<IAgentLoopService['settled']>>;
   let promptDrain: ReturnType<typeof vi.fn<IAgentPromptService['drain']>>;
   let beforeExecuteListeners: number;
@@ -221,6 +225,7 @@ describe('AgentLifecycleService', () => {
     ix.get(IAgentStateService).contributeState(permissionModeConfiguredKey);
     ix.stub(IAppendLogStore, recordingAppendLog().store);
     ix.stub(IFileSystemStorageService, new InMemoryStorageService());
+    ix.set(ISessionMediaStore, new SyncDescriptor(SessionMediaStoreService));
     stubBlobPassThrough(ix);
     registerAgent = vi.fn<ISessionMetadata['registerAgent']>().mockResolvedValue(undefined);
     atomicDocs = new Map();
@@ -330,17 +335,19 @@ describe('AgentLifecycleService', () => {
       },
     } as unknown as IAgentToolExecutorService);
     loopActiveTurnId = undefined;
-    loopPendingTurnIds = [];
+    loopPendingPromptIds = [];
     loopCancel = vi.fn<IAgentLoopService['cancel']>((turnId) => {
       if (turnId === undefined) {
         loopActiveTurnId = undefined;
-      } else {
-        loopPendingTurnIds = loopPendingTurnIds.filter((id) => id !== turnId);
       }
       return true;
     });
+    loopCancelQueued = vi.fn<IAgentLoopService['cancelQueued']>((queueId) => {
+      loopPendingPromptIds = loopPendingPromptIds.filter((id) => id !== queueId);
+      return true;
+    });
     loopSettled = vi.fn<IAgentLoopService['settled']>(async () => {
-      if (loopActiveTurnId !== undefined || loopPendingTurnIds.length > 0) {
+      if (loopActiveTurnId !== undefined || loopPendingPromptIds.length > 0) {
         throw new Error('Agent loop did not settle');
       }
     });
@@ -354,10 +361,11 @@ describe('AgentLifecycleService', () => {
       status: () => ({
         state: loopActiveTurnId === undefined ? 'idle' : 'running',
         activeTurnId: loopActiveTurnId,
-        pendingTurnIds: loopPendingTurnIds,
-        hasPendingRequests: loopActiveTurnId !== undefined || loopPendingTurnIds.length > 0,
+        pendingPromptIds: loopPendingPromptIds,
+        hasPendingRequests: loopActiveTurnId !== undefined || loopPendingPromptIds.length > 0,
       }),
       cancel: loopCancel,
+      cancelQueued: loopCancelQueued,
       settled: loopSettled,
       tryAcquireQuiescence: vi.fn(() => ({ dispose: vi.fn() })),
     } as unknown as IAgentLoopService);
@@ -456,9 +464,11 @@ describe('AgentLifecycleService', () => {
       isBaselineServer: () => true,
     } satisfies ISessionMcpHandle);
     stopAllOnExit = vi.fn(async () => []);
+    suppressAllTerminalNotifications = vi.fn(async () => {});
     ix.stub(IAgentTaskService, {
       _serviceBrand: undefined,
       stopAllOnExit,
+      suppressAllTerminalNotifications,
     } as unknown as IAgentTaskService);
     ix.stub(IAgentFullCompactionService, {
       _serviceBrand: undefined,
@@ -536,7 +546,7 @@ describe('AgentLifecycleService', () => {
     const bus = ix.get(ISessionEventBus);
     const main = await svc.create({ agentId: 'main' });
     const seen: string[] = [];
-    disposables.add(bus.subscribe(AgentActivityUpdated, (event) => seen.push(event.lifecycle)));
+    disposables.add(bus.subscribe(TurnStarted, () => seen.push('delivered')));
     const agentScope = ix.children.find((child) => child.debugLabel === 'main');
     expect(agentScope).toBeDefined();
     let releaseDrain!: () => void;
@@ -558,19 +568,13 @@ describe('AgentLifecycleService', () => {
     try {
       const removal = svc.remove(main);
       await entered;
-      bus.publish(
-        new AgentActivityUpdated({ lifecycle: 'disposed', background: [], agentId: 'main' }),
-        main,
-      );
-      expect(seen).toEqual(['disposed']);
+      bus.publish(new TurnStarted({ agentId: 'main', turnId: 1, origin: { kind: 'user' } }), main);
+      expect(seen).toEqual(['delivered']);
       releaseDrain();
       await removal;
       expect(() =>
-        bus.publish(
-          new AgentActivityUpdated({ lifecycle: 'disposed', background: [], agentId: 'main' }),
-          main,
-        ),
-      ).toThrow("Agent event 'agent.activity.updated' has no active lifecycle context");
+        bus.publish(new TurnStarted({ agentId: 'main', turnId: 2, origin: { kind: 'user' } }), main),
+      ).toThrow("Agent event 'turn.started' has no active lifecycle context");
       expect(unhandled).toEqual([]);
     } finally {
       process.off('unhandledRejection', onUnhandled);
@@ -601,11 +605,7 @@ describe('AgentLifecycleService', () => {
 
   function publishDisposed(eventBus: ISessionEventBus, scope: IAgentScopeContext): void {
     eventBus.publish(
-      new AgentActivityUpdated({
-        lifecycle: 'disposed',
-        background: [],
-        agentId: scope.agentId,
-      }),
+      new TurnStarted({ agentId: scope.agentId, turnId: 1, origin: { kind: 'user' } }),
       scope.agentContext,
     );
   }
@@ -614,7 +614,7 @@ describe('AgentLifecycleService', () => {
     const svc = ix.get(IAgentLifecycleService);
     const bus = ix.get(ISessionEventBus);
     const seen: string[] = [];
-    disposables.add(bus.subscribe(AgentActivityUpdated, (event) => seen.push(event.lifecycle)));
+    disposables.add(bus.subscribe(TurnStarted, () => seen.push('delivered')));
 
     contributeDisposeBeacon(publishDisposed);
 
@@ -626,7 +626,7 @@ describe('AgentLifecycleService', () => {
     try {
       const main = await svc.create({ agentId: 'main' });
       await svc.remove(main);
-      expect(seen).toEqual(['disposed']);
+      expect(seen).toEqual(['delivered']);
       expect(unhandled).toEqual([]);
     } finally {
       process.off('unhandledRejection', onUnhandled);
@@ -638,7 +638,7 @@ describe('AgentLifecycleService', () => {
     const svc = ix.get(IAgentLifecycleService);
     const bus = ix.get(ISessionEventBus);
     const seen: string[] = [];
-    disposables.add(bus.subscribe(AgentActivityUpdated, (event) => seen.push(event.lifecycle)));
+    disposables.add(bus.subscribe(TurnStarted, () => seen.push('delivered')));
 
     class GatedBeacon {
       constructor(
@@ -671,7 +671,7 @@ describe('AgentLifecycleService', () => {
     process.on('unhandledRejection', onUnhandled);
     try {
       await expect(svc.create({ agentId: 'main' })).rejects.toThrow('boom');
-      expect(seen).toEqual(['disposed']);
+      expect(seen).toEqual(['delivered']);
       expect(unhandled).toEqual([]);
     } finally {
       process.off('unhandledRejection', onUnhandled);
@@ -682,7 +682,7 @@ describe('AgentLifecycleService', () => {
     const svc = ix.get(IAgentLifecycleService);
     const bus = ix.get(ISessionEventBus);
     const seen: string[] = [];
-    disposables.add(bus.subscribe(AgentActivityUpdated, (event) => seen.push(event.lifecycle)));
+    disposables.add(bus.subscribe(TurnStarted, () => seen.push('delivered')));
 
     contributeDisposeBeacon(async (eventBus, scope) => {
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -697,7 +697,7 @@ describe('AgentLifecycleService', () => {
     try {
       const main = await svc.create({ agentId: 'main' });
       await svc.remove(main);
-      expect(seen).toEqual(['disposed']);
+      expect(seen).toEqual(['delivered']);
       expect(unhandled).toEqual([]);
     } finally {
       process.off('unhandledRejection', onUnhandled);
@@ -712,6 +712,13 @@ describe('AgentLifecycleService', () => {
 
     expect(stopAllOnExit).toHaveBeenCalledWith('Session closed');
     expect(promptDrain).toHaveBeenCalledOnce();
+    expect(suppressAllTerminalNotifications).toHaveBeenCalledOnce();
+    expect(suppressAllTerminalNotifications.mock.invocationCallOrder[0]).toBeLessThan(
+      promptDrain.mock.invocationCallOrder[0]!,
+    );
+    expect(stopAllOnExit.mock.invocationCallOrder[0]).toBeGreaterThan(
+      promptDrain.mock.invocationCallOrder[0]!,
+    );
   });
 
   it('remove waits for prompt intake to drain before disposing the agent scope', async () => {
@@ -744,13 +751,14 @@ describe('AgentLifecycleService', () => {
 
   it('remove cancels queued turns before waiting for the active turn to settle', async () => {
     loopActiveTurnId = 1;
-    loopPendingTurnIds = [2, 3];
+    loopPendingPromptIds = ['q2', 'q3'];
     const svc = ix.get(IAgentLifecycleService);
     const main = await svc.create({ agentId: 'main' });
 
     await svc.remove(main);
 
-    expect(loopCancel.mock.calls.map(([turnId]) => turnId)).toEqual([2, 3, undefined]);
+    expect(loopCancelQueued.mock.calls.map(([queueId]) => queueId)).toEqual(['q2', 'q3']);
+    expect(loopCancel.mock.calls.map(([turnId]) => turnId)).toEqual([undefined]);
     expect(loopSettled).toHaveBeenCalledOnce();
   });
 
