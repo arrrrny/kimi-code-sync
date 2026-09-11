@@ -71,3 +71,7 @@ packages/agent-core-v2/src/kosong/provider/bases/openai/openai-legacy.ts :: x-op
 packages/agent-core-v2/src/kosong/provider/bases/openai/openai-responses.ts :: x-opencode-session
 packages/agent-core-v2/src/kosong/provider/bases/anthropic/anthropic.ts :: x-opencode-session
 packages/agent-core-v2/test/kosong/provider/composition.test.ts     :: x-opencode-session
+
+# --- fallback cascade terminal-400 extension (bug fallback-model-skipped) ---
+packages/agent-core-v2/src/agent/stepRetry/stepRetryService.ts         :: activateFallback
+packages/agent-core-v2/src/kosong/contract/errors.ts                   :: isTerminalProviderApiError

@@ -794,4 +794,77 @@ describe('fallback model cascade', () => {
     expect(modelsSeen).toEqual(['mock-model', 'mock-model', 'mock-model', 'mock-model', 'mock-model', 'mock-model', 'mock-model', 'mock-model', 'mock-model', 'mock-model']);
     expect(rpcEvents('warning')).toEqual([]);
   });
+
+  it('U4: switches to the fallback model immediately on a terminal 400 provider error', async () => {
+    vi.useFakeTimers();
+    vi.stubEnv(FALLBACK_MODEL_FLAG_ENV, 'true');
+    const modelsSeen: string[] = [];
+    ctx = createTestAgent(
+      llmGenerateServices(async (chat) => {
+        modelsSeen.push(chat.modelName);
+        if (chat.modelName === 'mock-model') {
+          throw new APIStatusError(400, 'endpoint broken');
+        }
+        return okResponse('fallback-response', 'answered by fallback');
+      }),
+      { initialConfig: FALLBACK_CONFIG },
+    );
+
+    const result = await runTurn(1);
+
+    expect(result.type).toBe('completed');
+    expect(modelsSeen).toEqual(['mock-model', 'fallback-model']);
+    expect(rpcEvents('turn.step.retrying')).toEqual([]);
+    expect(rpcEvents('warning')).toEqual([
+      expect.objectContaining({
+        args: expect.objectContaining({
+          code: 'fallback-model',
+          message: expect.stringContaining('terminal provider error'),
+        }),
+      }),
+    ]);
+  });
+
+  it('U5: advances to the secondary fallback on terminal errors and terminates after it also fails', async () => {
+    vi.useFakeTimers();
+    vi.stubEnv(FALLBACK_MODEL_FLAG_ENV, 'true');
+    const modelsSeen: string[] = [];
+    ctx = createTestAgent(
+      llmGenerateServices(async (chat) => {
+        modelsSeen.push(chat.modelName);
+        throw new APIStatusError(400, 'endpoint broken');
+      }),
+      { initialConfig: FALLBACK_CONFIG },
+    );
+
+    const result = await runTurn(1);
+
+    expect(result.type).toBe('failed');
+    expect(modelsSeen).toEqual(['mock-model', 'fallback-model', 'fallback-model-secondary']);
+    const warnings = rpcEvents('warning');
+    expect(warnings).toHaveLength(2);
+    expect(warnings.map((event) => (event.args as { message: string }).message)).toEqual([
+      expect.stringContaining('tier: primary'),
+      expect.stringContaining('tier: secondary'),
+    ]);
+  });
+
+  it('U6: keeps terminal auth errors off the cascade', async () => {
+    vi.useFakeTimers();
+    vi.stubEnv(FALLBACK_MODEL_FLAG_ENV, 'true');
+    const modelsSeen: string[] = [];
+    ctx = createTestAgent(
+      llmGenerateServices(async (chat) => {
+        modelsSeen.push(chat.modelName);
+        throw new APIStatusError(401, 'unauthorized');
+      }),
+      { initialConfig: FALLBACK_CONFIG },
+    );
+
+    const result = await runTurn(1);
+
+    expect(result.type).toBe('failed');
+    expect(modelsSeen).toEqual(['mock-model']);
+    expect(rpcEvents('warning')).toEqual([]);
+  });
 });
