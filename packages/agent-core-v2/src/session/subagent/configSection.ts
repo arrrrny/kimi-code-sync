@@ -184,7 +184,12 @@ export function resolveSubagentBinding(
   config: IConfigService,
   own: { modelAlias: string; thinkingLevel: string },
   requested?: string,
+  overrides?: { secondaryAlias?: string },
 ): { model: string; thinking?: string; modelSource: SubagentModelSource } {
+  const overrideAlias = overrides?.secondaryAlias;
+  if (overrideAlias !== undefined) {
+    return { model: overrideAlias, thinking: own.thinkingLevel, modelSource: 'secondary_pool' };
+  }
   const section = config.get<SecondaryModelConfig | undefined>(SECONDARY_MODEL_SECTION);
   if (section?.force === true) {
     if (section.models !== undefined) {

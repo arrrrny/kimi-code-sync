@@ -429,6 +429,14 @@ export function encodeOpenAIResponsesRequest(
   return { params: params as unknown as OpenAI.Responses.ResponseCreateParamsStreaming };
 }
 
+export function sessionHeadersForRequest(
+  input: FormatRequestInput,
+): Record<string, string> | undefined {
+  const { cacheKey } = input;
+  if (cacheKey === undefined) return undefined;
+  return { 'x-opencode-session': cacheKey };
+}
+
 export function createOpenAIResponsesFormat(): ProtocolFormat {
   return {
     createStreamParser(options?: StreamParserOptions<unknown>) {

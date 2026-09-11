@@ -194,6 +194,7 @@ export class TowerSpawnTool implements ITowerSpawnTool {
                 args.kind === 'reviewer' && !isSubagentModelForced(this.config)
                   ? 'primary'
                   : undefined,
+                { secondaryAlias: this.profile.getSessionModelOverride('secondary') },
               );
         let handle: SubagentHandle;
         try {

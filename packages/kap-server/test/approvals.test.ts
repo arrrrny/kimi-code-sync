@@ -181,7 +181,7 @@ describe('server-v2 /api/v1/sessions/{sid}/approvals', () => {
     expect(first).not.toBe(second);
 
     const { body } = await getJson<ListWire>(`/api/v1/sessions/${sid}/approvals?status=pending`);
-    expect(body.data.items.map((i) => i.approval_id).sort()).toEqual([first, second].sort());
+    expect(body.data.items.map((i) => i.approval_id).toSorted()).toEqual([first, second].toSorted());
     expect(body.data.items.every((i) => i.tool_call_id === 'Bash_0')).toBe(true);
 
     for (const aid of [first, second]) {

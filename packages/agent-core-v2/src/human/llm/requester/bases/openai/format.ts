@@ -199,6 +199,14 @@ export function encodeOpenAIRequest(params: Record<string, unknown>): OpenAIRequ
   return { params: params as unknown as OpenAI.Chat.ChatCompletionCreateParamsStreaming };
 }
 
+export function sessionHeadersForRequest(
+  input: FormatRequestInput,
+): Record<string, string> | undefined {
+  const { cacheKey } = input;
+  if (cacheKey === undefined) return undefined;
+  return { 'x-opencode-session': cacheKey };
+}
+
 export interface OpenAIStreamParserOptions extends StreamParserOptions<OpenAIRawChunk> {
   readonly reasoningKey?: string;
 }
@@ -387,6 +395,22 @@ export function convertOpenAIError(
   }
   if (error instanceof Error) {
     return toLlmTransportErrorMessage(error.message);
+  }
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    typeof (error as { status?: unknown }).status === 'number'
+  ) {
+    const e = error as { status: number; message?: unknown; headers?: unknown };
+    const message = typeof e.message === 'string' ? e.message : '';
+    const retryAfterMs = parseRetryAfterMs(e.headers);
+    const headers = headersToRecord(e.headers);
+    return toLlmStatusErrorMessage({
+      statusCode: e.status,
+      message,
+      retryAfterMs,
+      headers,
+    });
   }
   return { kind: 'unknown', message: String(error) };
 }

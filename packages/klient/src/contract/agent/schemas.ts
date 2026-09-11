@@ -107,6 +107,16 @@ export const setModelResultSchema = z.object({
   providerName: z.string().optional(),
 });
 
+export const sessionModelOverrideKindSchema = z.enum([
+  'visual',
+  'compaction',
+  'compactionSecondary',
+  'fallback',
+  'fallbackSecondary',
+  'substitute',
+  'secondary',
+]);
+
 export const runtimeBindingSchema = z.object({
   workspaceId: z.string(),
   runtimeId: z.string(),

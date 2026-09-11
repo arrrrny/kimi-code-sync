@@ -123,12 +123,14 @@ export class SessionSubagentService extends Service implements ISessionSubagentS
         details: { agentId: input.callerAgentId },
       });
     }
+    const callerProfile = caller.accessor.get(IAgentProfileService);
     const binding = fork
       ? { model: own.modelAlias, thinking: own.thinkingLevel, modelSource: 'inherited' as const }
       : resolveSubagentBinding(
           this.configService,
           { modelAlias: own.modelAlias, thinkingLevel: own.thinkingLevel },
           input.model,
+          { secondaryAlias: callerProfile.getSessionModelOverride('secondary') },
         );
     let model: Model;
     try {

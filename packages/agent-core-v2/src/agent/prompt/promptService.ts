@@ -455,7 +455,7 @@ export class AgentPromptService implements IAgentPromptService {
       this.steering--;
     }
     if (turn === undefined || this.active !== activeAtEntry) {
-      for (const { item, index } of removed.reverse()) this.pending.splice(index, 0, item);
+      for (const { item, index } of removed.toReversed()) this.pending.splice(index, 0, item);
       if (this.active === undefined) void this.startNext();
       throw new Error2(ErrorCodes.PROMPT_NOT_FOUND, 'no active turn to steer into');
     }

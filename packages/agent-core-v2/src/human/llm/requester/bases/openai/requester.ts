@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import { assign, shake } from 'radashi';
+import { ProxyAgent, type Dispatcher } from 'undici';
 
 import { headersToRecord } from '#/llm/errors';
 import { modelKey, type LlmModel } from '#/llm/model';
@@ -40,6 +41,7 @@ import {
   lowerOpenAIRequest,
   parseOpenAIUsage,
   responseFormatToOpenAI,
+  sessionHeadersForRequest,
   type OpenAIRequestParams,
 } from './format';
 import { DEFAULT_REASONING_KEY, ReasoningKeyDialect } from './reasoning-key';
@@ -49,12 +51,19 @@ const OPENAI_CHAT_TOOL_CALL_ID_POLICY: ToolCallIdPolicy = {
   maxLength: 64,
 };
 
+function buildProxyDispatcher(proxyUrl: string | undefined): Dispatcher | undefined {
+  if (proxyUrl === undefined || proxyUrl.length === 0) return undefined;
+  return new ProxyAgent(proxyUrl);
+}
+
 function createClient(model: LlmModel, headers: Record<string, string> | undefined): OpenAI {
+  const dispatcher = buildProxyDispatcher(model.proxyUrl);
   return new OpenAI({
     apiKey: model.apiKey ?? 'unused',
     baseURL: model.baseUrl,
     defaultHeaders: headers,
     maxRetries: 0,
+    ...(dispatcher !== undefined ? { fetchOptions: { dispatcher: dispatcher as never } } : {}),
   });
 }
 
@@ -127,7 +136,11 @@ export function planOpenAIRequest(
   );
   const params = assembleOpenAIRequest(input, { messages: merged, tools, kwargs });
   const finalParams = trait?.buildParams?.(params, ctx) ?? params;
-  return encodeOpenAIRequest(finalParams);
+  const headers = sessionHeadersForRequest(input);
+  return {
+    ...encodeOpenAIRequest(finalParams),
+    ...(headers !== undefined ? { headers } : {}),
+  };
 }
 
 interface OpenAITransport {

@@ -27,7 +27,7 @@
 // references become '(circular)', and class instances collapse to a '(ClassName)'
 // marker — the wire shape of an entry is the JSON projection of the type here.
 //
-// Index (App: 0 keys · Workspace: 6 keys · Session: 9 keys · Agent: 75 keys)
+// Index (App: 0 keys · Workspace: 6 keys · Session: 9 keys · Agent: 76 keys)
 //   App
 //   Workspace
 //     workspaceDirs.ephemeralDirs          src/workspace/workspaceDirs/workspaceDirsService.ts
@@ -96,6 +96,7 @@
 //     runtime.binding                                 src/agent/runtimeBinding/runtimeBindingService.ts
 //     runtimeBinding                                  src/agent/runtimeBinding/runtimeBindingOps.ts
 //     shellCommand.tasks                              src/agent/shellCommand/shellCommandService.ts
+//     squeezeModel                                    src/agent/fullCompaction/squeezeForkOps.ts
 //     swarm                                           src/features/swarm/swarmOps.ts
 //     task                                            src/agent/task/taskOps.ts
 //     task.activeTaskReminderPending                  src/agent/task/taskService.ts
@@ -923,6 +924,12 @@ export interface AgentStateSnapshot {
   'fullCompaction.consecutiveOverflowCompactions': number;
   'fullCompaction.lastCompactedTokenCount': number | null;
   'fullCompaction.observedMaxContextTokensByModel': Map<string, number>;
+  // src/agent/fullCompaction/squeezeForkOps.ts
+  // replayable · durable — folds: SqueezeModelDecided
+  'squeezeModel': /* SqueezeModelState — packages/agent-core-v2/src/agent/fullCompaction/squeezeForkOps.ts */ {
+    readonly model: string;
+    readonly modelDisplay?: string;
+  };
   // src/agent/interruptionReminder/interruptionReminderOps.ts
   // replayable · durable — folds: InterruptionReminderRecorded
   'interruptionReminder': null;
@@ -956,6 +963,7 @@ export interface AgentStateSnapshot {
       readonly thinkingLevel: /* ThinkingEffort — packages/agent-core-v2/src/human/llm/thinking.ts */ 'off' | 'on' | (string & {});
       readonly reservedContextSize: number | undefined;
       readonly compactionTriggerRatio: number | undefined;
+      readonly compactionTokenBudget: number | undefined;
     };
     readonly params: /* ModelRequestParams — packages/agent-core-v2/src/llm-adapter/model/model-requester.ts */ {
       readonly cacheKey?: string;

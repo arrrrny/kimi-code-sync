@@ -13,10 +13,20 @@ import type { LLMRequestTrace } from '#/llm-adapter/contract/request-trace';
 import { retryBackoffDelays, sleepForRetry } from '#/_base/utils/retry';
 import { runWithCredentialRecovery } from '#/llm-adapter/model/credential-recovery';
 import { IAgentLoopService, type LoopErrorContext } from '#/agent/loop/loop';
+import { ILogService } from '#/_base/log/log';
 import { TurnStarted } from '#/agent/loop/turnEvents';
 import { TurnEnded } from '#/agent/loop/turnOps';
 import { isAbortError } from '#/_base/utils/abort';
 import { IAgentProfileService, type ProfileModelContext } from '#/agent/profile/profile';
+import { CompactionConfigChanged, WarningIssued } from '#/agent/profile/profileOps';
+import { IConfigService } from '#/app/config/config';
+import { IFlagService } from '#/app/flag/flag';
+import {
+  compactionDisplayModel,
+  compactionModelBindingFor,
+  resolveCompactionSecondaryModel,
+  wrapCompactionModelError,
+} from '#/session/compaction/configSection';
 import {
   agentContextOfScope,
   IAgentScopeContext,
@@ -66,6 +76,8 @@ import {
   FullCompactionCancel,
   FullCompactionComplete,
 } from './compactionOps';
+import { resolveSqueezeModelAliasWithCascade } from './squeezeCascade';
+import { SqueezeModelDecided, squeezeModelKey } from './squeezeForkOps';
 import {
   type CompactionBeginData,
   type CompactionResult,
@@ -156,6 +168,9 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
     @IAgentLoopService private readonly loopService: IAgentLoopService,
     @IAgentStateService private readonly states: IAgentStateService,
     @IWireService private readonly wire: IWireService,
+    @IConfigService private readonly configService: IConfigService,
+    @IFlagService private readonly flags: IFlagService,
+    @ILogService private readonly log: ILogService,
   ) {
     super();
     this.states.contributeState(fullCompactionKey);
@@ -165,6 +180,7 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
     this.states.contributeState(fullCompactionLastCompactedTokenCountKey);
     this.states.contributeState(fullCompactionConsecutiveOverflowCompactionsKey);
     this.states.contributeState(fullCompactionActiveTurnIdKey);
+    this.states.contributeState(squeezeModelKey);
     this.strategy = new RuntimeCompactionStrategy(
       () => this.resolveModelContextWithEffectiveMax(),
       (message) => this.tokenCounting.estimateMessage(message),
@@ -184,14 +200,19 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
       }),
     );
     this._register(
+      this.eventBus.subscribe(CompactionConfigChanged, () => {
+        this.observedMaxContextTokensByModel.clear();
+      }),
+    );
+    this._register(
       this.loopService.hooks.onWillBeginStep.register('full-compaction', async (ctx, next) => {
         await this.beforeStep(ctx.signal, ctx.turnId);
         await next();
       }),
     );
     this._register(
-      this.loopService.hooks.onDidFinishStep.register('full-compaction', async (_ctx, next) => {
-        await this.afterStep();
+      this.loopService.hooks.onDidFinishStep.register('full-compaction', async (ctx, next) => {
+        await this.afterStep(ctx.signal, ctx.turnId);
         await next();
       }),
     );
@@ -333,6 +354,8 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
   begin(input: FullCompactionInput): boolean {
     if (this._compacting) return false;
     const data: CompactionBeginData = { source: input.source, instruction: input.instruction };
+    const profileData = this.profile.data();
+    const currentModelAlias = profileData.modelAlias;
     if (!this.reserveCompactionSlot(data.source)) return false;
 
     const tokenCount = this.validateCompactionStart(data.source);
@@ -349,6 +372,22 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
       void this.dispatcher.dispatch(
         new FullCompactionBegin({ ...data, agentId: this.agent.agentId }),
       );
+
+      if (currentModelAlias !== undefined) {
+        const squeezeResult = resolveSqueezeModelAliasWithCascade({
+          currentModelAlias,
+          profile: this.profile,
+          configService: this.configService,
+          flags: this.flags,
+        });
+        void this.dispatcher.dispatch(
+          new SqueezeModelDecided({
+            agentId: this.agent.agentId,
+            model: squeezeResult.alias,
+            modelDisplay: compactionDisplayModel(this.configService, squeezeResult.alias),
+          }),
+        );
+      }
 
       const active = this.createActiveCompaction(
         data.source,
@@ -497,15 +536,15 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
   private async beforeStep(signal: AbortSignal, turnId?: number): Promise<void> {
     this.activeTurnId = turnId;
     this.checkAutoCompaction();
-    if (this.strategy.shouldBlock(this.tokenCountWithPending())) {
+    if (this._compacting !== null || this.strategy.shouldBlock(this.tokenCountWithPending())) {
       await this.block(signal, turnId);
     }
   }
 
-  private async afterStep(): Promise<void> {
+  private async afterStep(signal?: AbortSignal, turnId?: number): Promise<void> {
     this.consecutiveOverflowCompactions = 0;
-    if (this.strategy.checkAfterStep) {
-      this.checkAutoCompaction(false);
+    if (this.strategy.checkAfterStep && this.checkAutoCompaction(false)) {
+      await this.block(signal, turnId);
     }
   }
 
@@ -552,6 +591,7 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
   }
 
   private propagateBlockingAbort(active: ActiveCompaction, signal: AbortSignal | undefined): void {
+    if (active.trigger === 'auto') return;
     signal?.addEventListener(
       'abort',
       () => {
@@ -633,11 +673,96 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
       const resolvedModel = this.profile.resolveModelContext();
       thinkingEffort = resolvedModel.thinkingLevel;
       const maxContextTokens = resolvedModel.modelCapabilities.max_context_tokens;
+      const currentModelAlias = resolvedModel.modelAlias;
       const defaultCompactionCap =
         maxContextTokens > 0
           ? Math.min(maxContextTokens, DEFAULT_COMPACTION_MAX_COMPLETION_TOKENS)
           : undefined;
       const compactionMaxOutputSize = resolvedModel.maxOutputSize ?? defaultCompactionCap;
+
+      const binding = compactionModelBindingFor(this.configService, this.flags, {
+        modelAlias: currentModelAlias,
+        thinkingLevel: thinkingEffort,
+      }, { compactionAlias: this.profile.getSessionModelOverride('compaction') });
+      const dedicatedModelAlias = binding.model;
+      let activeSqueezeAlias = dedicatedModelAlias;
+      let hasDedicatedModel = dedicatedModelAlias !== currentModelAlias;
+      let usingFallbackModel = false;
+      let usingSecondaryModel = false;
+      let boundModel = resolvedModel;
+      if (hasDedicatedModel) {
+        try {
+          boundModel = this.profile.resolveModelContextFor(dedicatedModelAlias);
+        } catch (error) {
+          const secondaryAlias = resolveCompactionSecondaryModel(
+            this.configService,
+            this.flags,
+            { compactionSecondaryAlias: this.profile.getSessionModelOverride('compactionSecondary') },
+          );
+          let cascaded = false;
+          if (
+            secondaryAlias !== undefined &&
+            secondaryAlias !== currentModelAlias &&
+            secondaryAlias !== dedicatedModelAlias
+          ) {
+            try {
+              boundModel = this.profile.resolveModelContextFor(secondaryAlias);
+              activeSqueezeAlias = secondaryAlias;
+              usingSecondaryModel = true;
+              cascaded = true;
+              this.log.warn(
+                `compaction model "${dedicatedModelAlias}" is not configured; using secondary compaction model "${secondaryAlias}"`,
+                { cause: wrapCompactionModelError(error, dedicatedModelAlias) },
+              );
+            } catch (secondaryError) {
+              this.log.warn(
+                `compaction model "${dedicatedModelAlias}" and secondary "${secondaryAlias}" are not configured; falling back to current model "${currentModelAlias}"`,
+                { cause: wrapCompactionModelError(secondaryError, secondaryAlias) },
+              );
+            }
+          }
+          if (!cascaded) {
+            if (
+              secondaryAlias === undefined ||
+              secondaryAlias === currentModelAlias ||
+              secondaryAlias === dedicatedModelAlias
+            ) {
+              this.log.warn(
+                `compaction model "${dedicatedModelAlias}" is not configured; falling back to current model "${currentModelAlias}"`,
+                { cause: wrapCompactionModelError(error, dedicatedModelAlias) },
+              );
+            }
+            hasDedicatedModel = false;
+            boundModel = resolvedModel;
+          }
+        }
+      } else {
+        const secondaryAlias = resolveCompactionSecondaryModel(
+          this.configService,
+          this.flags,
+          { compactionSecondaryAlias: this.profile.getSessionModelOverride('compactionSecondary') },
+        );
+        if (secondaryAlias !== undefined && secondaryAlias !== currentModelAlias) {
+          try {
+            boundModel = this.profile.resolveModelContextFor(secondaryAlias);
+            activeSqueezeAlias = secondaryAlias;
+            usingSecondaryModel = true;
+            hasDedicatedModel = true;
+          } catch (secondaryError) {
+            this.log.warn(
+              `secondary compaction model "${secondaryAlias}" is not configured; falling back to current model "${currentModelAlias}"`,
+              { cause: wrapCompactionModelError(secondaryError, secondaryAlias) },
+            );
+          }
+        }
+      }
+      const boundMaxOutputSize = boundModel.maxOutputSize ?? defaultCompactionCap;
+      let compactionRequestModel = hasDedicatedModel ? activeSqueezeAlias : undefined;
+      let effectiveModelAlias = hasDedicatedModel ? activeSqueezeAlias : currentModelAlias;
+      const effectiveMaxOutputSize = Math.min(
+        compactionMaxOutputSize ?? DEFAULT_COMPACTION_MAX_COMPLETION_TOKENS,
+        boundMaxOutputSize ?? DEFAULT_COMPACTION_MAX_COMPLETION_TOKENS,
+      );
 
       const instruction = renderCompactionInstruction({ customInstruction: data.instruction });
 
@@ -657,7 +782,8 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
             const request = this.llmRequester.start(
               {
                 messages,
-                maxOutputSize: compactionMaxOutputSize,
+                maxOutputSize: effectiveMaxOutputSize,
+                model: compactionRequestModel,
                 source: {
                   type: 'operation',
                   turnId: active.originTurnId,
@@ -720,6 +846,58 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
             retryCount = 0;
             continue;
           }
+          if (
+            hasDedicatedModel &&
+            !usingFallbackModel &&
+            (isRetryableGenerateError(unwrappedError) ||
+              !(error instanceof CompactionTruncatedError))
+          ) {
+            const secondaryAlias = resolveCompactionSecondaryModel(
+              this.configService,
+              this.flags,
+              { compactionSecondaryAlias: this.profile.getSessionModelOverride('compactionSecondary') },
+            );
+            if (
+              !usingSecondaryModel &&
+              secondaryAlias !== undefined &&
+              secondaryAlias !== currentModelAlias &&
+              secondaryAlias !== activeSqueezeAlias
+            ) {
+              usingSecondaryModel = true;
+              activeSqueezeAlias = secondaryAlias;
+              effectiveModelAlias = secondaryAlias;
+              compactionRequestModel = secondaryAlias;
+              this.log.warn(
+                `compaction model "${dedicatedModelAlias}" failed; trying secondary compaction model "${secondaryAlias}"`,
+                { cause: wrapCompactionModelError(error, dedicatedModelAlias) },
+              );
+              void this.dispatcher.dispatch(
+                new WarningIssued({
+                  agentId: this.agent.agentId,
+                  code: 'compaction-model-fallback',
+                  message: `Compaction failed with ${compactionDisplayModel(this.configService, dedicatedModelAlias)}, retrying with ${compactionDisplayModel(this.configService, secondaryAlias)}`,
+                }),
+              );
+              retryCount = 0;
+              continue;
+            }
+            usingFallbackModel = true;
+            effectiveModelAlias = currentModelAlias;
+            compactionRequestModel = undefined;
+            this.log.warn(
+              `compaction model "${activeSqueezeAlias}" failed; falling back to current model "${currentModelAlias}"`,
+              { cause: wrapCompactionModelError(error, activeSqueezeAlias) },
+            );
+            void this.dispatcher.dispatch(
+              new WarningIssued({
+                agentId: this.agent.agentId,
+                code: 'compaction-model-fallback',
+                message: `Compaction failed with ${compactionDisplayModel(this.configService, activeSqueezeAlias)}, retrying with the current model ${compactionDisplayModel(this.configService, currentModelAlias)}`,
+              }),
+            );
+            retryCount = 0;
+            continue;
+          }
           if (!isRetryableGenerateError(unwrappedError)) {
             throw error;
           }
@@ -777,6 +955,8 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
         round: 1,
         thinking_effort: thinkingEffort,
         trace_id: attempt.traceId,
+        model: effectiveModelAlias,
+        model_display: compactionDisplayModel(this.configService, effectiveModelAlias),
         ...usageTelemetry(attempt.usage),
       };
       this.telemetry.track2('compaction_finished', properties);
