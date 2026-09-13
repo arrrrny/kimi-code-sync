@@ -324,7 +324,7 @@ describe('refreshProviderCatalog — OpenAI-compatible on-demand', () => {
     expect(alias?.capabilities).toEqual(expect.arrayContaining(['tool_use', 'image_in']));
   });
 
-  it('preserves a user-curated maxContextSize over the catalog context (opencode-style endpoint)', async () => {
+  it('overrides a stale user-curated maxContextSize with the catalog context (opencode-style endpoint)', async () => {
     const config: ManagedKimiConfigShape = {
       providers: {
         opencode: {
@@ -345,8 +345,8 @@ describe('refreshProviderCatalog — OpenAI-compatible on-demand', () => {
     };
     const host = makeRefreshHost(config);
 
-    // Catalog says 1000000, but the user has already curated 500000 — the
-    // user's value must survive.
+    // The catalog reports 1000000 while the user has curated 500000 — the
+    // catalog corrects the stale curated value.
     const catalog = {
       opencode: {
         models: {
@@ -381,9 +381,9 @@ describe('refreshProviderCatalog — OpenAI-compatible on-demand', () => {
     const result = await refreshProviderCatalog(host, {});
     expect(result.failed).toEqual([]);
     const alias = (await host.getConfig()).models?.['opencode/nemotron-3-ultra-free'];
-    // The catalog (1000000) was a stronger hint than the default but must
-    // still lose to the user's curated 500000.
-    expect(alias?.maxContextSize).toBe(500000);
+    // The catalog (1000000) outranks both the stale curated 500000 and the
+    // OPENAI_COMPATIBLE_DEFAULT_CONTEXT fallback.
+    expect(alias?.maxContextSize).toBe(1000000);
   });
 
   it('still uses the catalog context for a deprecated/alpha opencode model', async () => {

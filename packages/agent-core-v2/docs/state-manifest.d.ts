@@ -1281,6 +1281,7 @@ export interface AgentStateSnapshot {
   'fallbackModel.active': /* ActiveFallbackModel — packages/agent-core-v2/src/session/fallback/state.ts */ {
     readonly alias: string;
     readonly tier: 'primary' | 'secondary';
+    readonly forModelAlias: string | undefined;
   } | undefined;
 }
 

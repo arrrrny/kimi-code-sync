@@ -386,7 +386,7 @@ export class AgentProfileService extends Disposable implements IAgentProfileServ
     if (ratio === undefined) {
       this.compactionTriggerRatioOverride = undefined;
       forkTrack2(this.telemetry, 'compaction_threshold_override', { action: 'clear' });
-      void this.dispatcher.dispatch(new CompactionConfigChanged({ agentId: "main" }));
+      void this.dispatcher.dispatch(new CompactionConfigChanged({ agentId: this.scopeContext.agentId }));
       return;
     }
     if (
@@ -401,7 +401,7 @@ export class AgentProfileService extends Disposable implements IAgentProfileServ
     }
     this.compactionTriggerRatioOverride = ratio;
     forkTrack2(this.telemetry, 'compaction_threshold_override', { ratio, action: 'set' });
-    void this.dispatcher.dispatch(new CompactionConfigChanged({ agentId: "main" }));
+    void this.dispatcher.dispatch(new CompactionConfigChanged({ agentId: this.scopeContext.agentId }));
   }
 
   getCompactionTriggerRatioOverride(): number | undefined {
@@ -417,7 +417,7 @@ export class AgentProfileService extends Disposable implements IAgentProfileServ
     if (tokens === undefined) {
       this.compactionTokenBudgetOverride = undefined;
       forkTrack2(this.telemetry, 'compaction_token_budget_override', { action: 'clear' });
-      void this.dispatcher.dispatch(new CompactionConfigChanged({ agentId: "main" }));
+      void this.dispatcher.dispatch(new CompactionConfigChanged({ agentId: this.scopeContext.agentId }));
       return;
     }
     if (!Number.isInteger(tokens) || tokens < 1) {
@@ -431,7 +431,7 @@ export class AgentProfileService extends Disposable implements IAgentProfileServ
       tokens: this.compactionTokenBudgetOverride,
       action: 'set',
     });
-    void this.dispatcher.dispatch(new CompactionConfigChanged({ agentId: "main" }));
+    void this.dispatcher.dispatch(new CompactionConfigChanged({ agentId: this.scopeContext.agentId }));
   }
 
   getCompactionTokenBudgetOverride(): number | undefined {
