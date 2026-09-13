@@ -155,8 +155,12 @@ jobs:
             case "$line" in
               ''|'#'*) continue ;;
             esac
-            path=$(echo "$line" | sed -e 's/[[:space:]]\+::.*$//')
-            marker=$(echo "$line" | sed -e 's/^.*::[[:space:]]*//')
+            path=$(echo "$line" | sed -e 's/[[:space:]]*::.*$//')
+            marker=$(echo "$line" | sed -e 's/^.*::[[:space:]]*//' -e 's/[[:space:]]*$//')
+            if [ -z "$path" ] || [ -z "$marker" ]; then
+              MARKER_MISSING+=("malformed entry: $line")
+              continue
+            fi
             if [ ! -f "$path" ]; then
               MISSING+=("$path")
               continue
@@ -217,7 +221,7 @@ jobs:
         run: git push origin master
 
       - name: Open failure issue (catch-all)
-        if: failure()
+        if: failure() && steps.merge.outputs.merge_state != 'conflicts' && steps.verify.outputs.guard_state != 'fail'
         uses: actions/github-script@v7
         with:
           script: |
