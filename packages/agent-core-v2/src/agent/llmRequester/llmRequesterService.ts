@@ -739,6 +739,10 @@ export class AgentLLMRequesterService implements IAgentLLMRequesterService {
     if (!this.states.has(fallbackModelActiveKey)) return undefined;
     const active = this.states.get(fallbackModelActiveKey);
     if (active === undefined) return undefined;
+    if (active.forModelAlias !== this.profile.data().modelAlias) {
+      this.states.set(fallbackModelActiveKey, undefined);
+      return undefined;
+    }
     try {
       this.profile.resolveModelContextFor(active.alias);
     } catch {
@@ -768,7 +772,11 @@ export class AgentLLMRequesterService implements IAgentLLMRequesterService {
       return false;
     }
     const tier: ActiveFallbackModel['tier'] = currentActive === undefined ? 'primary' : 'secondary';
-    this.states.set(fallbackModelActiveKey, { alias: binding.model, tier });
+    this.states.set(fallbackModelActiveKey, {
+      alias: binding.model,
+      tier,
+      forModelAlias: this.profile.data().modelAlias,
+    });
     const switchReason =
       cause === 'terminal-error'
         ? 'failed with a terminal provider error'
