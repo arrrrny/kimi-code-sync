@@ -80,3 +80,7 @@ packages/agent-core-v2/test/human/llm/requester/bases/x-opencode-session.test.ts
 # --- fallback cascade terminal-400 extension (bug fallback-model-skipped) ---
 packages/agent-core-v2/src/agent/llmRequester/llmRequesterService.ts :: activateFallback
 packages/agent-core-v2/src/llm-adapter/contract/errors.ts           :: isTerminalProviderApiError
+
+# --- /refresh-catalog live models.dev enrichment (OpenAI-compatible providers) ---
+packages/oauth/src/modelsDevCatalog.ts                              :: lookupModelsDevModel
+apps/kimi-code/src/tui/utils/refresh-providers.ts                   :: refreshCatalogProviderModels

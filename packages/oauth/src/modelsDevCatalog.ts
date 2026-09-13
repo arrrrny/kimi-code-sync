@@ -102,17 +102,46 @@ function modelInfoFrom(
 }
 
 /**
- * Look up a model in the models.dev catalog by provider + model id.
+ * Providers consulted after the requested provider's own entry, in order, when
+ * a model is missing there. models.dev keys opencode's free tier
+ * (`glm-5-free`, `kimi-k2.5-free`, `deepseek-v4-flash-free`) only under
+ * `opencode`, so a provider that mirrors the same endpoint — `opencode-go`, or
+ * a user provider — still needs to reach it.
+ */
+const FALLBACK_PROVIDER_IDS: readonly string[] = ['opencode'];
+
+function lookupInEntry(
+  entry: ModelsDevProviderEntry | undefined,
+  modelId: string,
+): ModelsDevModelInfo | undefined {
+  if (entry === undefined) return undefined;
+  return (
+    modelInfoFrom(entry, modelId) ??
+    modelInfoFrom(entry, modelId.replace(/:free$/i, '')) ??
+    modelInfoFrom(entry, modelId.replace(/-free$/i, ''))
+  );
+}
+
+/**
+ * Look up a model in the models.dev catalog, cascading from the narrowest to
+ * the widest match:
+ *  1. `providerId` + `modelId`,
+ *  2. `modelId` under a `FALLBACK_PROVIDER_IDS` provider,
+ *  3. `modelId` under any provider.
  *
- * Free models are matched loosely: many providers append `:free` (OpenRouter,
- * OpenAI-compatible) or `-free` (opencode) to the model id, but models.dev keys
- * the base model without that suffix. So the lookup tries, in order:
- *  1. the exact id (`tencent/hy3:free`),
- *  2. the id with a trailing `:free` stripped (`tencent/hy3`),
- *  3. the id with a trailing `-free` stripped (`tencent/hy3`),
- *  4. the bare id as-is (no catalog match → undefined).
- * A provider-reported display name still takes priority over the catalog name
- * at the call site; this only supplies the fallback name + capabilities.
+ * Model ids are matched loosely at every step: many providers append `:free`
+ * (OpenRouter, OpenAI-compatible) or `-free` (opencode) to the model id, but
+ * models.dev keys the base model without that suffix. Each step therefore
+ * tries, in order, the exact id (`tencent/hy3:free`), the id with a trailing
+ * `:free` stripped, and the id with a trailing `-free` stripped. A step that
+ * finds nothing falls through to the next one; nothing anywhere means
+ * `undefined` and the caller keeps its own value.
+ *
+ * Steps 2 and 3 can return a model whose context window is the one some other
+ * provider serves rather than the requested provider's, so they only run when
+ * the requested provider has no entry of its own for this model. A
+ * provider-reported display name still takes priority over the catalog name at
+ * the call site; this only supplies the fallback name + capabilities.
  */
 export function lookupModelsDevModel(
   providerId: string,
@@ -120,13 +149,19 @@ export function lookupModelsDevModel(
 ): ModelsDevModelInfo | undefined {
   const catalog = builtInCatalog();
   if (catalog === undefined) return undefined;
-  const entry = entryFor(catalog, providerId);
-  if (entry === undefined) return undefined;
-  return (
-    modelInfoFrom(entry, modelId) ??
-    modelInfoFrom(entry, modelId.replace(/:free$/i, '')) ??
-    modelInfoFrom(entry, modelId.replace(/-free$/i, ''))
-  );
+  const own = lookupInEntry(entryFor(catalog, providerId), modelId);
+  if (own !== undefined) return own;
+  for (const fallbackId of FALLBACK_PROVIDER_IDS) {
+    if (fallbackId === providerId) continue;
+    const fallback = lookupInEntry(entryFor(catalog, fallbackId), modelId);
+    if (fallback !== undefined) return fallback;
+  }
+  for (const id of Object.keys(catalog)) {
+    if (id === providerId || FALLBACK_PROVIDER_IDS.includes(id)) continue;
+    const anyProvider = lookupInEntry(entryFor(catalog, id), modelId);
+    if (anyProvider !== undefined) return anyProvider;
+  }
+  return undefined;
 }
 
 /**
