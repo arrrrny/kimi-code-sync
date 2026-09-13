@@ -45,6 +45,7 @@ export interface AgentLLMRequestOverrides {
   source?: AgentLLMRequestSource;
   maxOutputSize?: number;
   model?: string;
+  onAttemptRetry?: () => void;
 }
 
 export interface AgentLLMRequestTask {

@@ -265,7 +265,7 @@ export class AgentLLMRequesterService implements IAgentLLMRequesterService {
     };
     setTrace(undefined);
     try {
-      return await this.runRequest(overrides, onPart, signal, setTrace);
+      return await this.runRequest(overrides, onPart, signal, setTrace, overrides.onAttemptRetry);
     } catch (error) {
       this.logRequestFailure(error, overrides, signal);
       setTrace(this.trackApiError(error, startedAt, signal, overrides.source, trace.traceId));
@@ -337,6 +337,7 @@ export class AgentLLMRequesterService implements IAgentLLMRequesterService {
     onPart: AgentLLMRequestPartHandler,
     signal: AbortSignal | undefined,
     onRequestTrace: (traceId: string | undefined) => void,
+    onAttemptRetry: (() => void) | undefined,
   ): Promise<AgentLLMRequestFinish> {
     let request = this.resolveRequest(overrides);
     this.toolCallIdNormalizer.seedFrom(this.context.get());
@@ -480,6 +481,7 @@ export class AgentLLMRequesterService implements IAgentLLMRequesterService {
           captureMediaStripPolicy,
         );
         if (nextPolicy !== undefined) {
+          onAttemptRetry?.();
           policy = nextPolicy;
           continue;
         }
@@ -491,6 +493,7 @@ export class AgentLLMRequesterService implements IAgentLLMRequesterService {
           this.activateFallback('terminal-error')
         ) {
           request = this.resolveRequest(overrides);
+          onAttemptRetry?.();
           policy = undefined;
           infiniteRetryAttempt = 0;
           continue;
@@ -514,6 +517,7 @@ export class AgentLLMRequesterService implements IAgentLLMRequesterService {
           delayMs,
           ...retryErrorFields(error),
         });
+        onAttemptRetry?.();
         await sleepForRetry(delayMs, signal);
       }
     }
