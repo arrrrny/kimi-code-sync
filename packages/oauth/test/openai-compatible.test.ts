@@ -863,3 +863,110 @@ describe('refreshProviderCatalog — free_models_only filter', () => {
     expect(ids).toEqual(['opencode/anthropic/claude-3.5-sonnet-free']);
   });
 });
+
+describe('lookupModelsDevModel — provider/model cascade', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  async function warmCatalog(catalog: Record<string, unknown>): Promise<void> {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn<FetchMock>(async () =>
+        new Response(JSON.stringify(catalog), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    );
+    const { refreshModelsDevCatalog } = await import('../src/modelsDevCatalog');
+    await refreshModelsDevCatalog();
+  }
+
+  it('prefers the requested provider over every other provider', async () => {
+    await warmCatalog({
+      'opencode-go': { models: { glm: { name: 'Go GLM', limit: { context: 111 } } } },
+      opencode: { models: { glm: { name: 'OpenCode GLM', limit: { context: 222 } } } },
+    });
+    const { lookupModelsDevModel } = await import('../src/modelsDevCatalog');
+    expect(lookupModelsDevModel('opencode-go', 'glm')?.context).toBe(111);
+  });
+
+  it('falls back to opencode when the requested provider does not carry the model', async () => {
+    // models.dev keys opencode's free tier only under `opencode`; a provider
+    // that mirrors the same endpoint (`opencode-go`) must reach it.
+    await warmCatalog({
+      'opencode-go': { models: {} },
+      opencode: { models: { 'glm-5-free': { name: 'GLM-5 Free', limit: { context: 204800 } } } },
+    });
+    const { lookupModelsDevModel } = await import('../src/modelsDevCatalog');
+    const info = lookupModelsDevModel('opencode-go', 'glm-5-free');
+    expect(info?.context).toBe(204800);
+    expect(info?.displayName).toBe('GLM-5 Free');
+  });
+
+  it('falls back to any provider when neither the requested provider nor opencode carries it', async () => {
+    await warmCatalog({
+      'opencode-go': { models: {} },
+      opencode: { models: {} },
+      zhipuai: { models: { 'glm-5': { name: 'GLM-5', limit: { context: 204800 } } } },
+    });
+    const { lookupModelsDevModel } = await import('../src/modelsDevCatalog');
+    expect(lookupModelsDevModel('opencode-go', 'glm-5')?.context).toBe(204800);
+  });
+
+  it('drops a contested context window at the any-provider step but keeps the display name', async () => {
+    await warmCatalog({
+      'opencode-go': { models: {} },
+      opencode: { models: {} },
+      'nano-gpt': {
+        models: {
+          'claude-sonnet-4-20250514': { name: 'Claude 4 Sonnet', limit: { context: 200000 } },
+        },
+      },
+      anthropic: {
+        models: {
+          'claude-sonnet-4-20250514': { name: 'Claude Sonnet 4', limit: { context: 500000 } },
+        },
+      },
+    });
+    const { lookupModelsDevModel } = await import('../src/modelsDevCatalog');
+    const info = lookupModelsDevModel('opencode-go', 'claude-sonnet-4-20250514');
+    expect(['Claude 4 Sonnet', 'Claude Sonnet 4']).toContain(info?.displayName);
+    expect(info?.context).toBeUndefined();
+  });
+
+  it('keeps the context when no other provider carrying the model contradicts it', async () => {
+    await warmCatalog({
+      'opencode-go': { models: {} },
+      opencode: { models: {} },
+      'nano-gpt': { models: { 'claude-sonnet-4-20250514': { name: 'Claude 4 Sonnet' } } },
+      anthropic: {
+        models: {
+          'claude-sonnet-4-20250514': { name: 'Claude Sonnet 4', limit: { context: 200000 } },
+        },
+      },
+    });
+    const { lookupModelsDevModel } = await import('../src/modelsDevCatalog');
+    expect(lookupModelsDevModel('opencode-go', 'claude-sonnet-4-20250514')?.context).toBe(200000);
+  });
+
+  it('strips :free and -free suffixes at the fallback steps too', async () => {
+    await warmCatalog({
+      'opencode-go': { models: {} },
+      opencode: { models: { 'glm-5': { name: 'GLM-5', limit: { context: 204800 } } } },
+    });
+    const { lookupModelsDevModel } = await import('../src/modelsDevCatalog');
+    expect(lookupModelsDevModel('opencode-go', 'glm-5-free')?.context).toBe(204800);
+    expect(lookupModelsDevModel('opencode-go', 'glm-5:free')?.context).toBe(204800);
+  });
+
+  it('returns undefined when no provider carries the model', async () => {
+    await warmCatalog({
+      'opencode-go': { models: {} },
+      opencode: { models: {} },
+    });
+    const { lookupModelsDevModel } = await import('../src/modelsDevCatalog');
+    expect(lookupModelsDevModel('opencode-go', 'does-not-exist')).toBeUndefined();
+  });
+});
