@@ -142,6 +142,14 @@ function lookupInEntry(
  * the requested provider has no entry of its own for this model. A
  * provider-reported display name still takes priority over the catalog name at
  * the call site; this only supplies the fallback name + capabilities.
+ *
+ * Step 3 is advisory on top of that: the same model id is commonly carried by
+ * several unrelated gateway/aggregator entries that disagree on
+ * `limit.context`, and the catalog's object-key order is a listing order, not
+ * a ranking. Its context is therefore returned only when every provider that
+ * reports one reports the same value; otherwise the caller keeps its curated
+ * or default window. Display name and capabilities still surface from the
+ * first candidate.
  */
 export function lookupModelsDevModel(
   providerId: string,
@@ -156,12 +164,24 @@ export function lookupModelsDevModel(
     const fallback = lookupInEntry(entryFor(catalog, fallbackId), modelId);
     if (fallback !== undefined) return fallback;
   }
+  let firstCandidate: ModelsDevModelInfo | undefined;
+  const candidateContexts = new Set<number>();
   for (const id of Object.keys(catalog)) {
     if (id === providerId || FALLBACK_PROVIDER_IDS.includes(id)) continue;
-    const anyProvider = lookupInEntry(entryFor(catalog, id), modelId);
-    if (anyProvider !== undefined) return anyProvider;
+    const candidate = lookupInEntry(entryFor(catalog, id), modelId);
+    if (candidate === undefined) continue;
+    firstCandidate ??= candidate;
+    if (candidate.context !== undefined) candidateContexts.add(candidate.context);
   }
-  return undefined;
+  if (firstCandidate === undefined) return undefined;
+  const context =
+    candidateContexts.size === 1 ? candidateContexts.values().next().value : undefined;
+  const { displayName, capabilities } = firstCandidate;
+  return {
+    ...(displayName !== undefined ? { displayName } : {}),
+    ...(capabilities !== undefined ? { capabilities } : {}),
+    ...(context !== undefined ? { context } : {}),
+  };
 }
 
 /**

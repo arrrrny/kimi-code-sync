@@ -915,6 +915,42 @@ describe('lookupModelsDevModel — provider/model cascade', () => {
     expect(lookupModelsDevModel('opencode-go', 'glm-5')?.context).toBe(204800);
   });
 
+  it('drops a contested context window at the any-provider step but keeps the display name', async () => {
+    await warmCatalog({
+      'opencode-go': { models: {} },
+      opencode: { models: {} },
+      'nano-gpt': {
+        models: {
+          'claude-sonnet-4-20250514': { name: 'Claude 4 Sonnet', limit: { context: 200000 } },
+        },
+      },
+      anthropic: {
+        models: {
+          'claude-sonnet-4-20250514': { name: 'Claude Sonnet 4', limit: { context: 500000 } },
+        },
+      },
+    });
+    const { lookupModelsDevModel } = await import('../src/modelsDevCatalog');
+    const info = lookupModelsDevModel('opencode-go', 'claude-sonnet-4-20250514');
+    expect(['Claude 4 Sonnet', 'Claude Sonnet 4']).toContain(info?.displayName);
+    expect(info?.context).toBeUndefined();
+  });
+
+  it('keeps the context when no other provider carrying the model contradicts it', async () => {
+    await warmCatalog({
+      'opencode-go': { models: {} },
+      opencode: { models: {} },
+      'nano-gpt': { models: { 'claude-sonnet-4-20250514': { name: 'Claude 4 Sonnet' } } },
+      anthropic: {
+        models: {
+          'claude-sonnet-4-20250514': { name: 'Claude Sonnet 4', limit: { context: 200000 } },
+        },
+      },
+    });
+    const { lookupModelsDevModel } = await import('../src/modelsDevCatalog');
+    expect(lookupModelsDevModel('opencode-go', 'claude-sonnet-4-20250514')?.context).toBe(200000);
+  });
+
   it('strips :free and -free suffixes at the fallback steps too', async () => {
     await warmCatalog({
       'opencode-go': { models: {} },

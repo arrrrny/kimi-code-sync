@@ -1404,7 +1404,14 @@ describe('refreshCatalogProviderModels', () => {
     const alias = host.current().models?.['opencode-go/deepseek-v4.1-flash'];
     expect(alias?.maxContextSize).toBe(1000000);
     expect(alias?.displayName).toBe('DeepSeek V4.1 Flash');
-    // The live catalog is what supplied it; the bundled snapshot would not.
-    expect(fetchMock.mock.calls.map(([input]) => fetchInputUrl(input))).toContain(MODELS_DEV_URL);
+    // The live catalog is what supplied it — the bundled snapshot would not —
+    // and the app-level pre-warm must fetch it before the provider endpoint:
+    // drop the pre-warm call and the enrichment silently reads the snapshot.
+    const requestedUrls = fetchMock.mock.calls.map(([input]) => fetchInputUrl(input));
+    const catalogIndex = requestedUrls.indexOf(MODELS_DEV_URL);
+    const providerIndex = requestedUrls.indexOf(`${baseUrl}/models`);
+    expect(catalogIndex).toBeGreaterThanOrEqual(0);
+    expect(providerIndex).toBeGreaterThanOrEqual(0);
+    expect(catalogIndex).toBeLessThan(providerIndex);
   });
 });
