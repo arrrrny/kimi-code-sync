@@ -1,6 +1,8 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 import type { SwarmModeTrigger } from '@moonshot-ai/agent-core-v2/features/swarm/agent/swarm';
+import type { SessionModelOverrideKind } from '@moonshot-ai/klient/core/facade/agent';
+import type { SessionModelOverrides } from '@moonshot-ai/agent-core-v2/agent/profile/profile';
 import type { Kaos } from '@moonshot-ai/kaos';
 
 import type { AgentContextData } from '#/context';
@@ -113,6 +115,16 @@ export interface SetSessionThinkingRpcInput extends SessionIdRpcInput {
   readonly effort: string;
 }
 
+export interface SetSessionCompactionTriggerRatioRpcInput extends SessionIdRpcInput {
+  /** New session-scoped auto-compaction trigger ratio; `undefined` clears the override. */
+  readonly ratio?: number | undefined;
+}
+
+export interface SetSessionCompactionTokenBudgetRpcInput extends SessionIdRpcInput {
+  /** New session-scoped absolute compaction token budget (in thousands of tokens); `undefined` clears the override. */
+  readonly tokens?: number | undefined;
+}
+
 export interface SetSessionPermissionRpcInput extends SessionIdRpcInput {
   readonly mode: PermissionMode;
 }
@@ -152,6 +164,15 @@ export interface RunCommandRpcInput extends SessionIdRpcInput {
 
 export interface SwitchSessionRuntimeRpcInput extends SessionIdRpcInput {
   readonly runtimeId: string;
+}
+
+export interface SetSessionModelOverrideRpcInput extends SessionIdRpcInput {
+  readonly kind: SessionModelOverrideKind;
+  readonly alias: string | null;
+}
+
+export interface GetSessionModelOverrideRpcInput extends SessionIdRpcInput {
+  readonly kind: SessionModelOverrideKind;
 }
 
 export interface ReconnectMcpServerRpcInput extends SessionIdRpcInput {
@@ -350,9 +371,43 @@ export abstract class SDKRpcClientBase {
 
   abstract setModel(input: SetSessionModelRpcInput): Promise<SetSessionModelRpcResult>;
 
-  abstract setThinking(input: SetSessionThinkingRpcInput): Promise<void>;
+abstract setThinking(input: SetSessionThinkingRpcInput): Promise<void>;
 
   abstract setPermission(input: SetSessionPermissionRpcInput): Promise<void>;
+
+  setSessionModelOverride(_input: SetSessionModelOverrideRpcInput): Promise<void> {
+    throw new Error(
+      'This SDK client does not support setting session model overrides.',
+    );
+  }
+
+  getSessionModelOverride(_input: GetSessionModelOverrideRpcInput): Promise<string | undefined> {
+    throw new Error(
+      'This SDK client does not support getting session model overrides.',
+    );
+  }
+
+  getAllSessionModelOverrides(_input: SessionIdRpcInput): Promise<SessionModelOverrides> {
+    throw new Error(
+      'This SDK client does not support getting session model overrides.',
+    );
+  }
+
+  setCompactionTriggerRatio(
+    _input: SetSessionCompactionTriggerRatioRpcInput,
+  ): Promise<void> {
+    throw new Error(
+      'This SDK client does not support setting the compaction trigger ratio.',
+    );
+  }
+
+  setCompactionTokenBudget(
+    _input: SetSessionCompactionTokenBudgetRpcInput,
+  ): Promise<void> {
+    throw new Error(
+      'This SDK client does not support setting the compaction token budget.',
+    );
+  }
 
   abstract updateSessionMetadata(input: UpdateSessionMetadataRpcInput): Promise<void>;
 

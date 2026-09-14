@@ -180,6 +180,7 @@ export class ProtocolAdapterRegistry implements IProtocolAdapterRegistry {
       maxContextSize: model.maxContextSize > 0 ? model.maxContextSize : undefined,
       maxInputSize: model.maxInputSize,
       baseUrl: model.baseUrl,
+      proxyUrl: model.proxyUrl,
       defaultHeaders: Object.keys(model.headers).length > 0 ? { ...model.headers } : undefined,
       supportEfforts: model.supportEfforts,
       defaultEffort: model.defaultEffort,
