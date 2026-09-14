@@ -978,6 +978,17 @@ describe('Agent loop', () => {
     expect(loop.snapshot().state).toBe('idle');
   });
 
+  it('routes the wire compatibility cancelFromUser onto cancel', () => {
+    const cancel = vi.spyOn(loop, 'cancel').mockReturnValue(true);
+
+    loop.cancelFromUser();
+    expect(cancel).toHaveBeenLastCalledWith(undefined);
+    loop.cancelFromUser(1);
+    expect(cancel).toHaveBeenLastCalledWith({ turnId: 1 });
+
+    cancel.mockRestore();
+  });
+
   it('cancels an in-flight turn while its queued turn continues afterwards', async () => {
     let releaseRunning!: () => void;
     const running = new Promise<void>((resolve) => {

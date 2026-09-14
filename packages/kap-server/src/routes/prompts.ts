@@ -25,6 +25,7 @@ import {
   type PromptWithSkillsResult,
   newMessageId,
   ISessionContext,
+  followSessionLifecycles,
   resumeSessionById,
   ITelemetryService,
   applyPromptMetadataUpdate,
@@ -162,6 +163,11 @@ async function applyProfileSelection(
 }
 
 export function registerPromptsRoutes(app: PromptRouteHost, core: Scope): void {
+  followSessionLifecycles(core.accessor, (lifecycles) =>
+    lifecycles.onDidCloseSession(({ sessionId }) => {
+      reservedPromptIds.delete(sessionId);
+    }),
+  );
   const listRoute = defineRoute(
     {
       method: 'GET',
@@ -312,7 +318,10 @@ export function registerPromptsRoutes(app: PromptRouteHost, core: Scope): void {
             throw error;
           }
           enqueued = true;
-          settlement.settle(result.prompt_id, () => preparedMedia?.discard());
+          settlement.settle(result.prompt_id, () => {
+            reservation?.settle();
+            void preparedMedia?.discard();
+          });
           reply.send(
             okEnvelope(
               {
@@ -333,15 +342,23 @@ export function registerPromptsRoutes(app: PromptRouteHost, core: Scope): void {
           sessionId: session_id,
         }, promptMetadataTextFromContentParts(parts));
         const status = resolved.prompt.snapshot();
-        const { id } = resolved.prompt.submit({
-          message: { role: 'user', content: parts },
-          meta: {
-            promptId: reservation.id,
-            origin: { kind: 'user', attachments: promptAttachments } as PromptOrigin,
-            tracked: true,
-          },
-        });
+        const settlement = watchPromptSettlements(resolved.events);
+        let id: string;
+        try {
+          id = resolved.prompt.submit({
+            message: { role: 'user', content: parts },
+            meta: {
+              promptId: reservation.id,
+              origin: { kind: 'user', attachments: promptAttachments } as PromptOrigin,
+              tracked: true,
+            },
+          }).id;
+        } catch (error) {
+          settlement.dispose();
+          throw error;
+        }
         reservation.submit();
+        settlement.settle(id, () => reservation?.settle());
         enqueued = true;
         const handle = resolved.prompt.promptHandle(id)!;
         if (status.state === 'idle' && !status.paused && status.queue.length === 0) {
@@ -511,10 +528,18 @@ export function projectPromptSnapshot(prompt: {
 export interface PromptIdReservation {
   readonly id: string;
   submit(): void;
+  settle(): void;
   dispose(): void;
 }
 
 const reservedPromptIds = new Map<string, Set<string>>();
+
+function releasePromptId(sessionId: string, id: string): void {
+  const reserved = reservedPromptIds.get(sessionId);
+  if (reserved === undefined) return;
+  reserved.delete(id);
+  if (reserved.size === 0) reservedPromptIds.delete(sessionId);
+}
 
 export function reservePromptId(sessionId: string, promptId?: string): PromptIdReservation {
   if (promptId !== undefined && promptId.length === 0) {
@@ -536,8 +561,11 @@ export function reservePromptId(sessionId: string, promptId?: string): PromptIdR
     submit: () => {
       submitted = true;
     },
+    settle: () => {
+      releasePromptId(sessionId, id);
+    },
     dispose: () => {
-      if (!submitted) reserved.delete(id);
+      if (!submitted) releasePromptId(sessionId, id);
     },
   };
 }

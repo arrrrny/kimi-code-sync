@@ -16,8 +16,8 @@
  *
  * Rendering groups the flat timeline by turn (system markers stay
  * standalone) and is typed entirely by the protocol schemas
- * (`@moonshot-ai/kap-server/protocol`). Cancels go through the
- * `agentLoopService` channel over the debug RPC
+ * (`@moonshot-ai/kap-server/protocol`). Cancels and prompts go through the
+ * `agentLoopService` / `agentPromptService` channels over the debug RPC
  * surface (`/api/v1/debug`); interaction answers (approve/reject,
  * answer/dismiss) go through the public REST endpoints
  * (`src/interactions/api.ts`); the running indicator derives from
@@ -25,6 +25,7 @@
  */
 
 import { IAgentLoopService } from '@moonshot-ai/agent-core-v2/agent/loop/loop';
+import { IAgentPromptChannel } from '@moonshot-ai/agent-core-v2/agent/loop/promptChannel';
 import type {
   AssistantMessage,
   ContentPart,
@@ -180,6 +181,8 @@ export function ChatView({
 }) {
   const { klient } = useConnection();
   const [sendError, setSendError] = useState<unknown>(null);
+  const [draft, setDraft] = useState('');
+  const [sending, setSending] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [olderError, setOlderError] = useState<unknown>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -366,6 +369,27 @@ export function ChatView({
     }
   };
 
+  const send = async () => {
+    if (sessionId === null) return;
+    const text = draft.trim();
+    if (text === '') return;
+    setSending(true);
+    setSendError(null);
+    try {
+      await klient
+        .session(sessionId)
+        .agent(agentId)
+        .service(IAgentPromptChannel)
+        .submit({ input: [{ type: 'text', text }] });
+      setDraft('');
+      trail?.recordEvent('prompt', text, state);
+    } catch (error) {
+      setSendError(error);
+    } finally {
+      setSending(false);
+    }
+  };
+
   if (sessionId === null) {
     return (
       <div className="flex flex-1 items-center justify-center text-sm text-neutral-600">
@@ -451,6 +475,24 @@ export function ChatView({
               <ErrorLine error={sendError} />
             </div>
           ) : null}
+          <div className="mb-2 flex items-end gap-2">
+            <textarea
+              className="h-16 min-h-0 flex-1 resize-y rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-[12px] text-neutral-100 outline-none focus:border-sky-600 disabled:opacity-40"
+              placeholder="Send a prompt to this agent… (Enter to send, Shift+Enter for a newline)"
+              value={draft}
+              disabled={sending}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault();
+                  void send();
+                }
+              }}
+            />
+            <ActionButton onClick={() => void send()} disabled={sending || draft.trim() === ''}>
+              Send
+            </ActionButton>
+          </div>
           <div className="flex justify-end">
             <ActionButton onClick={() => void cancel()} danger disabled={!running}>
               Cancel

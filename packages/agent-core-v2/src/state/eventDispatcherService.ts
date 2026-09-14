@@ -190,6 +190,7 @@ export class EventDispatcherService extends Service implements IEventDispatcher 
     readonly resolve: (disposable: IDisposable) => void;
     readonly reject: (error: unknown) => void;
   }> = [];
+  private lateAttachTail: Promise<unknown> = Promise.resolve();
 
   constructor(
     @IWireService private readonly wire: IWireService,
@@ -283,7 +284,16 @@ export class EventDispatcherService extends Service implements IEventDispatcher 
     return this.attachLateNow(participant);
   }
 
-  private async attachLateNow(participant: DurableAgentRuntimeParticipant): Promise<IDisposable> {
+  private attachLateNow(participant: DurableAgentRuntimeParticipant): Promise<IDisposable> {
+    const run = this.lateAttachTail.then(() => this.runLateAttach(participant));
+    this.lateAttachTail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  private async runLateAttach(participant: DurableAgentRuntimeParticipant): Promise<IDisposable> {
     if (this.disposed) {
       throw new Error(`Agent runtime participant '${participant.id}' late-attached to a disposed event dispatcher`);
     }

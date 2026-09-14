@@ -729,6 +729,10 @@ export class AgentLoopService extends Disposable implements IAgentLoopService {
     return this.cancelActiveTurn(target?.turnId, cancellation);
   }
 
+  cancelFromUser(turnId?: number): void {
+    this.cancel(turnId === undefined ? undefined : { turnId });
+  }
+
   private cancelWaiter(waiter: PromptWaiter, cancellation: unknown): boolean {
     const active = this.active;
     if (active !== undefined && active.prompt.id === waiter.id) {

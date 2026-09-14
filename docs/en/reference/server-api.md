@@ -198,7 +198,7 @@ These endpoints drive the managed Kimi OAuth login lifecycle and expose account-
 
 #### `GET /api/v1/auth`
 
-Auth snapshot: whether the default model resolves to a usable provider configuration, plus the managed provider's login state. `models_ready` is `true` when the global `default_model` alias exists in the model table and resolves to a configured provider — including providerless flat models carrying their own `base_url` and models injected through `KIMI_MODEL_*` environment variables. It does not verify credentials, so a prompt can still fail afterwards with `40111` / `40112`.
+Auth snapshot: whether the default model resolves to a usable provider configuration, plus the managed provider's login state. `models_ready` is `true` when the global `default_model` alias exists in the model table and resolves to a configured provider — including providerless flat models carrying their own `base_url` and models injected through `KIMI_MODEL_*` environment variables. It does not verify credentials, so an accepted prompt can still fail afterwards, asynchronously on the turn it starts (see `POST /api/v1/sessions/{session_id}/prompts`).
 
 On success, `data` carries `models_ready` (boolean), `providers_count` (number of configured providers), and `managed_provider` (`null`, or `{ name, status }` with `status` one of `authenticated` / `expired` / `revoked` / `unauthenticated`). The global default model alias itself is read from `GET /api/v1/config` (`default_model`), not from this endpoint.
 
@@ -1029,7 +1029,7 @@ Submits a user prompt to the session. Media references are validated first, then
 | `session_id` | path | string | **Required.** Session id |
 | `content` | body | array | **Required.** Non-empty array of content parts; variants below |
 | `agent_id` | body | string | Target agent. Default the main agent |
-| `prompt_id` | body | string | Client-chosen prompt id for idempotent submission; an id already reserved by an in-flight prompt fails `40927`, one that has already completed fails `40903`. Cannot be combined with `skills` |
+| `prompt_id` | body | string | Client-chosen prompt id. It is reserved for as long as its prompt is in flight: a second submit with that id before the first settles fails `40927`, and the id becomes available again once the prompt settles. Cannot be combined with `skills` |
 | `skills` | body | array | Bundled skill activations, at least 1 entry of `{ name, args? }`; every skill must exist and be user-activatable |
 | `profile` | body | string | Agent profile to bind before submitting |
 | `model` | body | string | Model alias to switch the agent to |
@@ -1049,15 +1049,12 @@ The schema also accepts the `tool_use`, `tool_result`, and `thinking` parts of t
 
 On success, `data` is the accepted prompt `{ prompt_id, user_message_id, status, content, created_at }`.
 
+This route does not pre-flight auth or model readiness, so an unusable model configuration is accepted here rather than rejected: it never answers `40110`–`40113`, and the failure arrives asynchronously on the turn instead. Watch the WebSocket [events](#events) — the turn ends with `turn.ended` (`reason: "failed"`, with the cause in `error.code`: `model.not_configured` when no model resolves, or the matching `auth.*` / `provider.*` code when a credential is missing or rejected) and the session's `last_turn_reason` becomes `failed`. Clients that decide to prompt for login should react to those events, not to an HTTP status from this call.
+
 - `40001`: validation failure — for example `prompt_id` combined with `skills`, or an unknown `profile`
-- `40110`: no provider configured yet — finish login first
-- `40111`: the resolved provider has no credential (`details.provider_id`)
-- `40112`: the provider's credential was rejected (`details.provider_id`)
-- `40113`: the model could not be resolved (`details.model_id` / `details.provider_id` when known)
 - `40401`: session not found
 - `40407`: a referenced `file_id` does not exist (or does not match the part's media kind)
 - `40415`: a `skills` entry names an unknown skill
-- `40903`: `prompt_id` belongs to an already-completed prompt; `data` carries `{ aborted: false }`
 - `40912`: the skill exists but cannot be activated by the user
 - `40927`: `prompt_id` is already reserved by an in-flight prompt
 

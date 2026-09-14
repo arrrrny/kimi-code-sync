@@ -153,6 +153,7 @@ export interface AgentMachineContext {
   drainedId?: string;
   drainedEntry?: UserEntry;
   paused: boolean;
+  drainedWhilePaused: boolean;
 }
 
 function completionNotification(toolCall: ToolCall, output: ToolOutput): UserEntry {
@@ -436,6 +437,7 @@ export function createAgentMachine({
       turnId: 0,
       branchId: 'main',
       paused: false,
+      drainedWhilePaused: false,
     }),
     invoke: {
       src: 'controllerGuard',
@@ -495,7 +497,10 @@ export function createAgentMachine({
             queue: context.queue.filter((item) => !steered.includes(item)),
             notifications: [
               ...context.notifications,
-              createUserEntry({ role: 'user', content: merged.content }, { source: 'input' }),
+              createUserEntry(
+                { role: 'user', content: merged.content },
+                { source: 'input', origin: merged.origin },
+              ),
             ],
           });
           enqueue.emit({
@@ -519,7 +524,7 @@ export function createAgentMachine({
         actions: assign({ paused: true }),
       },
       'input.continue': {
-        actions: assign({ paused: false }),
+        actions: assign({ paused: false, drainedWhilePaused: false }),
       },
       'store.error': {
         actions: 'forwardToParent',
@@ -606,9 +611,13 @@ export function createAgentMachine({
         on: {
           'input.continue': {
             guard: ({ context }) =>
-              !hasPendingWork(context) && historyEndsMidToolChain(context.messages),
+              !hasPendingWork(context) &&
+              (context.drainedWhilePaused || historyEndsMidToolChain(context.messages)),
             target: 'running',
-            actions: [assign({ paused: false }), 'commitPendingToHistory'],
+            actions: [
+              assign({ paused: false, drainedWhilePaused: false }),
+              'commitPendingToHistory',
+            ],
           },
         },
         states: {
@@ -806,7 +815,11 @@ export function createAgentMachine({
               const messages = [...context.notifications, ...context.reminders];
               enqueue.sendTo('turn', { type: 'turn.notify' as const, messages });
               if (messages.length === 0) return;
-              enqueue.assign({ notifications: [], reminders: [] });
+              enqueue.assign({
+                notifications: [],
+                reminders: [],
+                drainedWhilePaused: context.paused,
+              });
             }),
           },
           'tool.detached': {
