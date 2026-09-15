@@ -233,6 +233,7 @@ function createService(
       reservedContextSize: undefined,
       compactionTriggerRatio: undefined,
       compactionTokenBudget: undefined,
+      compactionMaxAttempts: undefined,
     }),
     resolveModelContextFor: (modelAlias) => ({
       modelAlias,
@@ -243,6 +244,7 @@ function createService(
       reservedContextSize: undefined,
       compactionTriggerRatio: undefined,
       compactionTokenBudget: undefined,
+      compactionMaxAttempts: undefined,
     }),
     getEffectiveThinkingLevel: () => thinkingLevel,
     getSessionModelOverride: (kind) =>

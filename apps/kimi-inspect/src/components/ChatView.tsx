@@ -16,16 +16,17 @@
  *
  * Rendering groups the flat timeline by turn (system markers stay
  * standalone) and is typed entirely by the protocol schemas
- * (`@moonshot-ai/kap-server/protocol`). Prompts/cancels go through the
- * `IAgentPromptService` / `IAgentLoopService` channels over the debug RPC
+ * (`@moonshot-ai/kap-server/protocol`). Cancels and prompts go through the
+ * `agentLoopService` / `agentPromptService` channels over the debug RPC
  * surface (`/api/v1/debug`); interaction answers (approve/reject,
  * answer/dismiss) go through the public REST endpoints
  * (`src/interactions/api.ts`); the running indicator derives from
  * `session.state`.
  */
 
+import { createDecorator } from '@moonshot-ai/agent-core-v2/_base/di/instantiation';
 import { IAgentLoopService } from '@moonshot-ai/agent-core-v2/agent/loop/loop';
-import { IAgentPromptService } from '@moonshot-ai/agent-core-v2/agent/prompt/prompt';
+import type { IAgentPromptChannel as PromptChannelContract } from '@moonshot-ai/agent-core-v2/agent/loop/promptChannel';
 import type {
   AssistantMessage,
   ContentPart,
@@ -73,6 +74,17 @@ import { ActionButton, Badge, ErrorLine, JsonView, relTime } from '../ui';
 import { ChatSearchBar } from './ChatSearchBar';
 
 const noopSubscribe = () => () => {};
+
+/**
+ * The engine's `agentPromptService` token lives in `agent/loop/promptChannel`,
+ * a module that also holds the channel implementation. Its runtime imports
+ * (agent lifecycle, session context, the media layer's `node:path`) are
+ * server-only, so importing the token from there drags them into this browser
+ * bundle and breaks the build. Declare the token here instead: `createDecorator`
+ * is idempotent by name and `String(id)` — the wire channel name the debug RPC
+ * routes on — stays `agentPromptService`.
+ */
+const IAgentPromptChannel = createDecorator<PromptChannelContract>('agentPromptService');
 
 /** Active session id for deeply nested interaction views (approve/answer buttons). */
 const SessionContext = createContext<string>('');
@@ -180,8 +192,9 @@ export function ChatView({
   onOpenSearchHit?: ((hit: SearchHit) => void) | undefined;
 }) {
   const { klient } = useConnection();
-  const [input, setInput] = useState('');
   const [sendError, setSendError] = useState<unknown>(null);
+  const [draft, setDraft] = useState('');
+  const [sending, setSending] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [olderError, setOlderError] = useState<unknown>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -358,30 +371,34 @@ export function ChatView({
   );
   const latestTodo = latestTodoOf(state.todos);
 
-  const send = async () => {
-    if (sessionId === null || input.trim() === '' || running) return;
-    const text = input.trim();
-    setInput('');
-    setSendError(null);
+  const cancel = async () => {
+    if (sessionId === null) return;
     try {
-      await klient
-        .session(sessionId)
-        .agent(agentId)
-        .service(IAgentPromptService)
-        .submit({ input: [{ type: 'text', text }] });
-      trail?.recordEvent('prompt', text, state);
+      await klient.session(sessionId).agent(agentId).service(IAgentLoopService).cancel(undefined);
+      trail?.recordEvent('cancel', undefined, state);
     } catch (error) {
       setSendError(error);
     }
   };
 
-  const cancel = async () => {
+  const send = async () => {
     if (sessionId === null) return;
+    const text = draft.trim();
+    if (text === '') return;
+    setSending(true);
+    setSendError(null);
     try {
-      await klient.session(sessionId).agent(agentId).service(IAgentLoopService).cancelFromUser();
-      trail?.recordEvent('cancel', undefined, state);
+      await klient
+        .session(sessionId)
+        .agent(agentId)
+        .service(IAgentPromptChannel)
+        .submit({ input: [{ type: 'text', text }] });
+      setDraft('');
+      trail?.recordEvent('prompt', text, state);
     } catch (error) {
       setSendError(error);
+    } finally {
+      setSending(false);
     }
   };
 
@@ -449,7 +466,7 @@ export function ChatView({
           ) : null}
           {entries.length === 0 && loadError === null ? (
             <div className="text-[12px] text-neutral-600 italic">
-              {loaded ? 'Empty transcript — send a prompt below.' : 'Loading transcript…'}
+              {loaded ? 'Empty transcript.' : 'Loading transcript…'}
             </div>
           ) : null}
           {latestTodo !== undefined && latestTodo.items.length > 0 ? (
@@ -470,27 +487,28 @@ export function ChatView({
               <ErrorLine error={sendError} />
             </div>
           ) : null}
-          <div className="flex gap-2">
+          <div className="mb-2 flex items-end gap-2">
             <textarea
-              className="min-h-[40px] flex-1 resize-y rounded border border-neutral-700 bg-neutral-950 px-3 py-2 text-[13px] text-neutral-100 outline-none focus:border-sky-600"
-              placeholder="Send a prompt to the active agent… (Enter to send, Shift+Enter for newline)"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
+              className="h-16 min-h-0 flex-1 resize-y rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-[12px] text-neutral-100 outline-none focus:border-sky-600 disabled:opacity-40"
+              placeholder="Send a prompt to this agent… (Enter to send, Shift+Enter for a newline)"
+              value={draft}
+              disabled={sending}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault();
                   void send();
                 }
               }}
             />
-            <div className="flex flex-col gap-2">
-              <ActionButton onClick={() => void send()} disabled={running || input.trim() === ''}>
-                Send
-              </ActionButton>
-              <ActionButton onClick={() => void cancel()} danger disabled={!running}>
-                Cancel
-              </ActionButton>
-            </div>
+            <ActionButton onClick={() => void send()} disabled={sending || draft.trim() === ''}>
+              Send
+            </ActionButton>
+          </div>
+          <div className="flex justify-end">
+            <ActionButton onClick={() => void cancel()} danger disabled={!running}>
+              Cancel
+            </ActionButton>
           </div>
         </div>
       </div>

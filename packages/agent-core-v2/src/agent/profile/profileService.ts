@@ -547,6 +547,7 @@ export class AgentProfileService extends Disposable implements IAgentProfileServ
       reservedContextSize: loopControl?.reservedContextSize,
       compactionTriggerRatio: this.getEffectiveCompactionTriggerRatio(),
       compactionTokenBudget: this.getEffectiveCompactionTokenBudget(),
+      compactionMaxAttempts: loopControl?.compactionMaxAttempts,
     };
   }
 
@@ -562,6 +563,7 @@ export class AgentProfileService extends Disposable implements IAgentProfileServ
       reservedContextSize: loopControl?.reservedContextSize,
       compactionTriggerRatio: loopControl?.compactionTriggerRatio,
       compactionTokenBudget: this.getEffectiveCompactionTokenBudget(),
+      compactionMaxAttempts: loopControl?.compactionMaxAttempts,
     };
   }
 

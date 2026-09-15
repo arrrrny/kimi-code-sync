@@ -6,8 +6,7 @@ import {
   inputSteered,
   inputSubmitted,
 } from '#/agent/events';
-import type { QueuedPrompt } from '#/agent/slices';
-import type { HistoryMessage, UserEntry } from '#/agent/turn';
+import { createUserEntry, type HistoryMessage, type SystemEntry, type UserEntry } from '#/agent/turn';
 import type { ExternalEvent } from '#/eventStore/events';
 import type { UserMessage } from '#/llm/message';
 import type { AgentActorRef } from '#/session/machine';
@@ -88,12 +87,12 @@ export type CompactionMachineOutput =
 type CompactionMachineEvent = { type: 'cancel'; cause: 'cancelled' | 'user-abort' };
 
 interface PendingSnapshot {
-  queue: QueuedPrompt[];
   notifications: UserEntry[];
   reminders: HistoryMessage[];
 }
 
 interface QuiesceSnapshot extends PendingSnapshot {
+  queue: UserEntry[];
   history: HistoryMessage[];
   nextTurnId: number;
   branch: string;
@@ -177,28 +176,18 @@ function replayPendingDelta(
   snap: PendingSnapshot,
   pending: PendingSnapshot,
 ): void {
-  const snapQueue = new Set(snap.queue);
-  for (const item of pending.queue) {
-    if (!snapQueue.has(item)) {
-      deps.actor.send({ type: 'input.submit', id: item.id, message: item.message });
-    }
+  const replayedNotifications = new Set<UserEntry>();
+  for (const entry of [...snap.notifications, ...pending.notifications]) {
+    if (replayedNotifications.has(entry)) continue;
+    replayedNotifications.add(entry);
+    deps.actor.send({ type: 'input.notify', entry });
   }
-  const snapNotifications = new Set(snap.notifications);
-  for (const entry of pending.notifications) {
-    if (!snapNotifications.has(entry)) {
-      deps.actor.send({ type: 'input.notify', message: entry.message });
-    }
-  }
-  const snapReminders = new Set(snap.reminders);
-  for (const entry of pending.reminders) {
-    if (snapReminders.has(entry) || entry.meta.key === undefined) continue;
+  const replayedReminders = new Set<HistoryMessage>();
+  for (const entry of [...snap.reminders, ...pending.reminders]) {
+    if (entry.meta?.key === undefined || replayedReminders.has(entry)) continue;
     if (entry.message.role !== 'system' && entry.message.role !== 'user') continue;
-    deps.actor.send({ type: 'input.remind', key: entry.meta.key, message: entry.message });
-  }
-  for (const item of snap.queue) {
-    if (!pending.queue.includes(item) && item.id !== undefined) {
-      deps.actor.send({ type: 'input.cancel', id: item.id });
-    }
+    replayedReminders.add(entry);
+    deps.actor.send({ type: 'input.remind', key: entry.meta.key, entry: entry as SystemEntry | UserEntry });
   }
 }
 
@@ -309,7 +298,6 @@ export function createCompactionMachine(deps: CompactionMachineDeps) {
       >(async ({ input }) => {
         const machineContext = deps.actor.getSnapshot().context;
         const pending: PendingSnapshot = {
-          queue: [...machineContext.queue],
           notifications: [...machineContext.notifications],
           reminders: [...machineContext.reminders],
         };
@@ -330,7 +318,7 @@ export function createCompactionMachine(deps: CompactionMachineDeps) {
           replayPendingDelta(deps, input.snap, input.pending);
           const continuation = (deps.continuation ?? defaultContinuation)(input.reason);
           if (continuation !== undefined) {
-            deps.actor.send({ type: 'input.submit', message: continuation });
+            deps.actor.send({ type: 'input.submit', entry: createUserEntry(continuation) });
           }
           deps.actor.send({ type: 'input.continue' });
         },

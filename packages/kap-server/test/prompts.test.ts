@@ -15,6 +15,7 @@ import {
   IAgentToolPolicyService,
   IBootstrapService,
   IConfigService,
+  IEventBus,
   IFileService,
   ISessionContext,
   ISessionMetadata,
@@ -25,7 +26,7 @@ import {
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { type RunningServer, startServer } from '../src/start';
-import { projectPromptSnapshot, watchPromptSettlements } from '../src/routes/prompts';
+import { projectPromptSnapshot, reservePromptId, watchPromptSettlements } from '../src/routes/prompts';
 import { TEST_HOST_IDENTITY } from './helpers/hostIdentity';
 import { authHeaders } from './helpers/auth';
 
@@ -341,15 +342,33 @@ describe('server-v2 /api/v1 prompts', () => {
     expect(submitted.body.code).toBe(0);
   });
 
-  it('rejects when neither prompt, session, nor default_model resolves a model', async () => {
+  it('accepts the prompt and fails the turn at runtime when no model resolves', async () => {
     await writeConfigToml(home as string, PROMPT_TOML_NO_DEFAULT);
     const id = await createSession(home as string);
     await createMainAgent(id);
 
-    const submitted = await call('POST', `/api/v1/sessions/${id}/prompts`, {
+    const session = getLiveSessionById(server!.core.accessor, id);
+    const main = session!.accessor.get(IAgentLifecycleService).handleOf('main')!;
+    const ended: { reason?: string; error?: { code?: string; message?: string } }[] = [];
+    const completed: { reason?: string }[] = [];
+    const subscription = main.accessor.get(IEventBus).subscribe((event) => {
+      if (event.type === 'turn.ended') ended.push(event as (typeof ended)[number]);
+      if (event.type === 'prompt.completed') completed.push(event as (typeof completed)[number]);
+    });
+    const submitted = await call<PromptItemWire>('POST', `/api/v1/sessions/${id}/prompts`, {
       content: [{ type: 'text', text: 'hello' }],
     });
-    expect(submitted.body.code).toBe(40113);
+    expect(submitted.body.code).toBe(0);
+
+    await vi.waitFor(() => {
+      expect(ended).toHaveLength(1);
+    });
+    subscription.dispose();
+    expect(ended[0]).toMatchObject({
+      reason: 'failed',
+      error: { code: 'model.not_configured', message: 'Model not set' },
+    });
+    expect(completed).toContainEqual(expect.objectContaining({ reason: 'failed' }));
   });
 
   it('rejects a bound profile switch with 40001 even when the session model is stale', async () => {
@@ -380,16 +399,36 @@ describe('server-v2 /api/v1 prompts', () => {
     expect(submitted.body.msg).toContain('already bound');
   });
 
-  it('rejects a stale session model when no profile switch is requested', async () => {
+  it('accepts the prompt and fails the turn at runtime when the session model is stale', async () => {
     const id = await createSession(home as string);
     await createMainAgent(id);
     await setSessionModel(id, 'stub');
-    await writeConfigToml(home as string, PROMPT_TOML_OTHER_DEFAULT);
+    await writeConfigToml(home as string, PROMPT_TOML_OTHER_DEFAULT.replace('default_model = "other"\n\n', ''));
+    await server!.core.accessor.get(IConfigService).reload();
 
-    const submitted = await call('POST', `/api/v1/sessions/${id}/prompts`, {
+    const session = getLiveSessionById(server!.core.accessor, id);
+    const main = session!.accessor.get(IAgentLifecycleService).handleOf('main')!;
+    const ended: { reason?: string; error?: { code?: string; message?: string } }[] = [];
+    const completed: { reason?: string }[] = [];
+    const subscription = main.accessor.get(IEventBus).subscribe((event) => {
+      if (event.type === 'turn.ended') ended.push(event as (typeof ended)[number]);
+      if (event.type === 'prompt.completed') completed.push(event as (typeof completed)[number]);
+    });
+    const submitted = await call<PromptItemWire>('POST', `/api/v1/sessions/${id}/prompts`, {
       content: [{ type: 'text', text: 'hello' }],
     });
-    expect(submitted.body.code).toBe(40113);
+    expect(submitted.body.code).toBe(0);
+
+    await vi.waitFor(
+      () => {
+        expect(ended).toHaveLength(1);
+      },
+      { timeout: 15000 },
+    );
+    subscription.dispose();
+    expect(ended[0]?.reason).toBe('failed');
+    expect(ended[0]?.error?.message).toContain('stub');
+    expect(completed).toContainEqual(expect.objectContaining({ reason: 'failed' }));
   });
 
   it('submits a bundled skill prompt through the skills field', async () => {
@@ -488,7 +527,7 @@ describe('server-v2 /api/v1 prompts', () => {
     );
   });
 
-  it('rejects a reused prompt_id live and after cold resume without changing metadata', async () => {
+  it('frees a reused prompt_id once its prompt settles, live and after cold resume', async () => {
     const id = await createSession(home as string);
     await createMainAgent(id);
 
@@ -498,25 +537,54 @@ describe('server-v2 /api/v1 prompts', () => {
     });
     expect(first.body.code).toBe(0);
 
-    const duplicate = await call<null>('POST', `/api/v1/sessions/${id}/prompts`, {
-      content: [{ type: 'text', text: 'must not become metadata' }],
-      prompt_id: 'submission-1',
-    });
-    expect(duplicate.body.code).toBe(40927);
-
-    const session = getLiveSessionById(server!.core.accessor, id);
-    expect((await session!.accessor.get(ISessionMetadata).read()).lastPrompt).toBe('first prompt');
+    await vi.waitFor(
+      async () => {
+        const reused = await call<PromptItemWire>('POST', `/api/v1/sessions/${id}/prompts`, {
+          content: [{ type: 'text', text: 'reused after settling' }],
+          prompt_id: 'submission-1',
+        });
+        expect(reused.body.code).toBe(0);
+      },
+      { timeout: 15000 },
+    );
 
     await closeSessionById(server!.core.accessor, id);
     expect(getLiveSessionById(server!.core.accessor, id)).toBeUndefined();
 
-    const afterResume = await call<null>('POST', `/api/v1/sessions/${id}/prompts`, {
-      content: [{ type: 'text', text: 'must not survive a cold resume' }],
+    const afterResume = await call<PromptItemWire>('POST', `/api/v1/sessions/${id}/prompts`, {
+      content: [{ type: 'text', text: 'reused after a cold resume' }],
       prompt_id: 'submission-1',
     });
-    expect(afterResume.body.code).toBe(40927);
+    expect(afterResume.body.code).toBe(0);
     const resumed = getLiveSessionById(server!.core.accessor, id);
-    expect((await resumed!.accessor.get(ISessionMetadata).read()).lastPrompt).toBe('first prompt');
+    expect((await resumed!.accessor.get(ISessionMetadata).read()).lastPrompt).toBe(
+      'reused after a cold resume',
+    );
+  });
+
+  it('keeps a prompt_id reserved while its prompt is in flight and releases it on settle', () => {
+    const reservation = reservePromptId('reservation-session', 'submission-1');
+    expect(reservation.id).toBe('submission-1');
+    expect(() => reservePromptId('reservation-session', 'submission-1')).toThrowError(
+      /already in use/,
+    );
+
+    reservation.submit();
+    reservation.dispose();
+    expect(() => reservePromptId('reservation-session', 'submission-1')).toThrowError(
+      /already in use/,
+    );
+
+    reservation.settle();
+    const reused = reservePromptId('reservation-session', 'submission-1');
+    expect(reused.id).toBe('submission-1');
+    reused.dispose();
+    reused.settle();
+    expect(reservePromptId('reservation-session', 'submission-1').id).toBe('submission-1');
+
+    const neverSubmitted = reservePromptId('reservation-session', 'submission-2');
+    neverSubmitted.dispose();
+    expect(reservePromptId('reservation-session', 'submission-2').id).toBe('submission-2');
   });
 
   it('rejects a bundled submission with an unknown skill and records nothing', async () => {
@@ -772,11 +840,10 @@ describe('server-v2 /api/v1 prompts', () => {
     const session = getLiveSessionById(server!.core.accessor, id);
     const main = session!.accessor.get(IAgentLifecycleService).handleOf('main')!;
     const memory = main.accessor.get(IAgentContextMemoryService).get();
-    const reminder = memory.find((m) => m.origin?.kind === 'injection');
-    const reminderText = reminder?.content[0];
-    expect(reminderText?.type).toBe('text');
-    expect((reminderText as { type: 'text'; text: string }).text).toContain('<system-reminder>');
-    expect((reminderText as { type: 'text'; text: string }).text).toContain('Image compressed');
+    const promptMessage = memory.find((m) => m.origin?.kind === 'user');
+    const captionPart = promptMessage?.content[0];
+    expect(captionPart?.type).toBe('text');
+    expect((captionPart as { type: 'text'; text: string }).text).toContain('Image compressed');
   });
 
   it('rolls back a compressed upload when a later prompt part fails to resolve', async () => {

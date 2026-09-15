@@ -8,7 +8,6 @@ import { LifecycleScope } from '#/app/scopes';
 import { createServices, type TestInstantiationService } from '#/_base/di/test';
 import { Emitter } from '#/_base/event';
 import { IOAuthService } from '#/app/auth/auth';
-import { IFlagService } from '#/app/flag/flag';
 import { IConfigService } from '#/app/config/config';
 import { SUBSCRIPTION_SECTION } from '#/app/subscription/configSection';
 import { IEventService } from '#/app/event/event';
@@ -147,7 +146,6 @@ describe('SessionTitleService', () => {
   let turnExcerpt: TitleTurnExcerpt;
   let digestExcerpt: TitleDigestExcerpt;
   let tokenCalls: boolean[];
-  let flagEnabled: boolean;
   let subscriptionConfig: Record<string, boolean> | undefined;
 
   beforeEach(() => {
@@ -159,8 +157,7 @@ describe('SessionTitleService', () => {
     turnExcerpt = {};
     digestExcerpt = { turns: [] };
     tokenCalls = [];
-    flagEnabled = true;
-    subscriptionConfig = undefined;
+    subscriptionConfig = { auto_session_title: true };
     providers = { 'managed:kimi-code': MANAGED_PROVIDER };
     metadata = new FakeSessionMetadata();
     events = new FakeEventService();
@@ -224,7 +221,6 @@ describe('SessionTitleService', () => {
           headers: { 'User-Agent': 'test' },
           thirdPartyHeaders: {},
         });
-        reg.definePartialInstance(IFlagService, { enabled: () => flagEnabled });
         reg.definePartialInstance(IConfigService, {
           get: ((domain: string) =>
             domain === SUBSCRIPTION_SECTION
@@ -241,17 +237,6 @@ describe('SessionTitleService', () => {
     disposables.dispose();
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
-  });
-
-  it('is unavailable while the experimental auto_session_title flag is off', async () => {
-    flagEnabled = false;
-    titlePrompts = ['hello'];
-
-    await expect(ix.get(ISessionTitleService).generateTitle()).resolves.toBeUndefined();
-    await expect(
-      ix.get(ISessionTitleService).generateTitle({ force: true, source: 'digest' }),
-    ).resolves.toBeUndefined();
-    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('replaces the easy title with the generated one', async () => {

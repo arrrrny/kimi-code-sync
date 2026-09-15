@@ -453,9 +453,6 @@ describe('SDKRpcClientV2 (agent-core-v2 wiring)', () => {
       `
 default_model = "stub"
 
-[experimental]
-auto_session_title = true
-
 [providers.stub]
 type = "openai"
 base_url = "https://model.example.test/v1"
@@ -473,6 +470,9 @@ base_url = "${titleBaseUrl}"
 [providers."managed:kimi-code".oauth]
 storage = "file"
 key = "${titleOAuthRef.key}"
+
+[subscription]
+auto_session_title = true
 `,
       'utf-8',
     );
@@ -558,9 +558,6 @@ key = "${titleOAuthRef.key}"
       `
 default_model = "stub"
 
-[experimental]
-auto_session_title = true
-
 [providers.stub]
 type = "openai"
 base_url = "https://model.example.test/v1"
@@ -578,6 +575,9 @@ base_url = "${titleBaseUrl}"
 [providers."managed:kimi-code".oauth]
 storage = "file"
 key = "${titleOAuthRef.key}"
+
+[subscription]
+auto_session_title = true
 `,
       'utf-8',
     );

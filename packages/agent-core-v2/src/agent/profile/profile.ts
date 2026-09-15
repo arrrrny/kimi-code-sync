@@ -109,6 +109,7 @@ export interface ProfileModelContext {
   readonly reservedContextSize: number | undefined;
   readonly compactionTriggerRatio: number | undefined;
   readonly compactionTokenBudget: number | undefined;
+  readonly compactionMaxAttempts: number | undefined;
 }
 
 export interface ProfileSetModelResult {
