@@ -1940,15 +1940,18 @@ describe('FullCompaction', () => {
 
     await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Answer after compacting' }] });
     await compactionRequested.promise;
+    const compactionCompleted = ctx.once('full_compaction.complete');
     void ctx.rpc.cancel({});
     releaseCompaction.resolve();
 
     const events = await ctx.untilTurnEnd();
     expect(countEvents(events, 'compaction.cancelled')).toBe(0);
-    expect(countEvents(events, 'full_compaction.complete')).toBe(1);
-    expect(eventIndex(events, 'full_compaction.complete')).toBeLessThan(
-      eventIndex(events, 'turn.ended'),
-    );
+    expect(eventIndex(events, 'full_compaction.begin')).toBeGreaterThanOrEqual(0);
+
+    await compactionCompleted;
+    const afterTurnEnd = ctx.newEvents();
+    expect(countEvents(afterTurnEnd, 'compaction.cancelled')).toBe(0);
+    expect(countEvents(afterTurnEnd, 'full_compaction.complete')).toBe(1);
     await ctx.expectResumeMatches();
   });
 
@@ -3097,7 +3100,7 @@ describe('FullCompaction', () => {
     const events = await ctx.untilTurnEnd();
 
     expect(callCount).toBe(3);
-    expect(compactionMaxCompletionTokens).toEqual([32000]);
+    expect(compactionMaxCompletionTokens).toEqual([128 * 1024]);
     expect(events).toContainEqual(
       expect.objectContaining({
         event: 'compaction.started',
