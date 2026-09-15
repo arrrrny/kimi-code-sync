@@ -24,8 +24,9 @@
  * `session.state`.
  */
 
+import { createDecorator } from '@moonshot-ai/agent-core-v2/_base/di/instantiation';
 import { IAgentLoopService } from '@moonshot-ai/agent-core-v2/agent/loop/loop';
-import { IAgentPromptChannel } from '@moonshot-ai/agent-core-v2/agent/loop/promptChannel';
+import type { IAgentPromptChannel as PromptChannelContract } from '@moonshot-ai/agent-core-v2/agent/loop/promptChannel';
 import type {
   AssistantMessage,
   ContentPart,
@@ -73,6 +74,17 @@ import { ActionButton, Badge, ErrorLine, JsonView, relTime } from '../ui';
 import { ChatSearchBar } from './ChatSearchBar';
 
 const noopSubscribe = () => () => {};
+
+/**
+ * The engine's `agentPromptService` token lives in `agent/loop/promptChannel`,
+ * a module that also holds the channel implementation. Its runtime imports
+ * (agent lifecycle, session context, the media layer's `node:path`) are
+ * server-only, so importing the token from there drags them into this browser
+ * bundle and breaks the build. Declare the token here instead: `createDecorator`
+ * is idempotent by name and `String(id)` — the wire channel name the debug RPC
+ * routes on — stays `agentPromptService`.
+ */
+const IAgentPromptChannel = createDecorator<PromptChannelContract>('agentPromptService');
 
 /** Active session id for deeply nested interaction views (approve/answer buttons). */
 const SessionContext = createContext<string>('');
