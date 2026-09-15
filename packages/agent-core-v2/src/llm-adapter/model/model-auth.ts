@@ -14,6 +14,15 @@ import type { ModelRecord } from './model';
 import type { ResolvedModelAuthMaterial } from './model.types';
 import { drivesThinkingThroughTraits } from './thinking';
 
+function getActiveProviderApiKey(provider: ProviderConfig | undefined): string | undefined {
+  if (!provider) return undefined;
+  if (provider.apiKeys && provider.activeApiKeyId) {
+    const active = provider.apiKeys[provider.activeApiKeyId];
+    if (active) return active.key;
+  }
+  return provider.apiKey;
+}
+
 export function resolveModelAuthMaterial(args: {
   readonly modelId: string;
   readonly model: ModelRecord;
@@ -39,7 +48,7 @@ export function resolveModelAuthMaterial(args: {
     providerAuthType === undefined
       ? {}
       : explainProviderEndpoint(providerAuthType, args.provider?.env ?? {});
-  const providerApiKey = nonEmpty(args.provider?.apiKey) ?? nonEmpty(providerEndpoint.apiKey);
+  const providerApiKey = getActiveProviderApiKey(args.provider) ?? nonEmpty(providerEndpoint.apiKey);
   if (providerApiKey !== undefined && args.provider?.oauth !== undefined) {
     throw authConflictError('Provider', args.providerName);
   }

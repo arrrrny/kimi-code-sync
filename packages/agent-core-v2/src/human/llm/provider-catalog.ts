@@ -47,6 +47,7 @@ export interface CatalogProviderInfo {
   readonly type?: string;
   readonly apiKey?: string;
   readonly baseUrl?: string;
+  readonly proxyUrl?: string;
   readonly customHeaders?: Readonly<Record<string, string>>;
   readonly defaultModel?: string;
   readonly oauth?: CatalogOAuthRef;

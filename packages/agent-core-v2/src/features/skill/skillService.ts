@@ -165,7 +165,6 @@ export class AgentSkillService implements IAgentSkillService {
     if (status.state === 'running' || status.paused || status.queue.length > 0) {
       return { prompt_id: id, created_at: handle.createdAt, state: 'queued' };
     }
-    await Promise.race([handle.launched, handle.completion]);
     const turn = await handle.launched;
     if (turn === undefined && handle.state !== 'blocked') {
       throw new Error2(ErrorCodes.INTERNAL, 'promptWithSkills failed to launch a turn');

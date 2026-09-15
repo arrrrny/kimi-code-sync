@@ -203,6 +203,7 @@ export interface AnthropicRequestParams {
   readonly params: Anthropic.MessageCreateParamsStreaming;
   readonly betas: readonly string[];
   readonly useBetaApi: boolean;
+  readonly headers?: Record<string, string>;
 }
 
 export interface AnthropicFormatOptions {
@@ -261,6 +262,14 @@ export function encodeAnthropicRequest(
     betas: assembly.betas,
     useBetaApi: assembly.useBetaApi,
   };
+}
+
+export function sessionHeadersForRequest(
+  input: FormatRequestInput,
+): Record<string, string> | undefined {
+  const { cacheKey } = input;
+  if (cacheKey === undefined) return undefined;
+  return { 'x-opencode-session': cacheKey };
 }
 
 export function createAnthropicFormat(): ProtocolFormat<AnthropicRawStreamEvent> {

@@ -237,6 +237,28 @@ export function isRetryableGenerateError(error: unknown): boolean {
   return error instanceof ChatProviderError && !isImageFormatError(error);
 }
 
+export function isTerminalProviderApiError(error: unknown): boolean {
+  if (!(error instanceof APIStatusError)) return false;
+  if (
+    error instanceof APIContextOverflowError ||
+    error instanceof APIRequestTooLargeError ||
+    error instanceof APIProviderQuotaExhaustedError ||
+    error instanceof APIProviderOverloadedError
+  ) {
+    return false;
+  }
+  if (isContextOverflowStatusError(error.statusCode, error.message)) return false;
+  if (isRequestTooLargeStatusError(error.statusCode, error.message)) return false;
+  if (isImageFormatError(error)) return false;
+  if (isToolExchangeAdjacencyError(error)) return false;
+  if (isRecoverableRequestStructureError(error)) return false;
+  return (
+    error.statusCode >= 400 &&
+    error.statusCode < 500 &&
+    ![401, 403, 408, 409, 429].includes(error.statusCode)
+  );
+}
+
 const NETWORK_RE = /network|connection|connect|disconnect|terminated/i;
 const TIMEOUT_RE = /timed?\s*out|timeout|deadline/i;
 

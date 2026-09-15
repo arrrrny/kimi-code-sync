@@ -174,9 +174,9 @@ export function createCompactionController(deps: CompactionControllerDeps): Comp
     const current = { actor, reason, startedAt: Date.now() };
     active = current;
     const subscriptions = pipeEvents(actor);
-    await deps.stores.session();
-    actor.start();
     try {
+      await deps.stores.session();
+      actor.start();
       const snapshot = await waitFor(actor, (s) => s.status !== 'active');
       const output = snapshot.output as CompactionMachineOutput;
       if (output.status === 'completed') {

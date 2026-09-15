@@ -134,6 +134,7 @@ describe('AgentConversationUndoService', () => {
       code: ErrorCodes.SESSION_BUSY,
       details: { reason: 'loop' },
     });
+    expect(turn.state).toBe('running');
     expect(turn.signal.aborted).toBe(false);
     expect(loop.snapshot().state).toBe('running');
     expect(ctx.context.get()).toBe(history);
@@ -686,8 +687,8 @@ describe('AgentConversationUndoService', () => {
     await undo.undo(1);
 
     const redelivered = ctx.context.get().filter((message) => message.origin?.kind === 'task');
-    expect(redelivered.map((message) => (message.origin as TaskOrigin).taskId).sort()).toEqual(
-      [taskA, taskB].sort(),
+    expect(redelivered.map((message) => (message.origin as TaskOrigin).taskId).toSorted()).toEqual(
+      [taskA, taskB].toSorted(),
     );
   });
 
