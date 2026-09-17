@@ -264,14 +264,6 @@ export function encodeAnthropicRequest(
   };
 }
 
-export function sessionHeadersForRequest(
-  input: FormatRequestInput,
-): Record<string, string> | undefined {
-  const { cacheKey } = input;
-  if (cacheKey === undefined) return undefined;
-  return { 'x-opencode-session': cacheKey };
-}
-
 export function createAnthropicFormat(): ProtocolFormat<AnthropicRawStreamEvent> {
   return {
     createStreamParser() {

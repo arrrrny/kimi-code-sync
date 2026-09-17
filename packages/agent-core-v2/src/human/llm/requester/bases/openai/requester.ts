@@ -9,6 +9,7 @@ import type { ProtocolBase, ProtocolRequesterOptions, TraitContext } from '#/llm
 import { resolveModelConnection } from '#/llm/protocol/connection';
 import { applyThinking } from '#/llm/protocol/thinking';
 import { resolveMaxCompletionCap, type FormatRequestInput } from '#/llm/protocol/format';
+import { opencodeSessionHeaders } from '#/llm/protocol/session-headers';
 import { encodeReasoningEffortFallback } from '#/llm/thinking';
 import {
   mergeRequestHeaders,
@@ -41,7 +42,6 @@ import {
   lowerOpenAIRequest,
   parseOpenAIUsage,
   responseFormatToOpenAI,
-  sessionHeadersForRequest,
   type OpenAIRequestParams,
 } from './format';
 import { DEFAULT_REASONING_KEY, ReasoningKeyDialect } from './reasoning-key';
@@ -136,7 +136,7 @@ export function planOpenAIRequest(
   );
   const params = assembleOpenAIRequest(input, { messages: merged, tools, kwargs });
   const finalParams = trait?.buildParams?.(params, ctx) ?? params;
-  const headers = sessionHeadersForRequest(input);
+  const headers = opencodeSessionHeaders(input);
   return {
     ...encodeOpenAIRequest(finalParams),
     ...(headers !== undefined ? { headers } : {}),
