@@ -198,7 +198,7 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 
 #### `GET /api/v1/auth`
 
-鉴权状态快照：默认模型能否解析到可用的供应商配置，以及托管供应商的登录状态。当全局 `default_model` 别名存在于模型表中且能解析到已配置的供应商时，`models_ready` 为 `true`——包括自带 `base_url` 的平铺（providerless）模型，以及通过 `KIMI_MODEL_*` 环境变量注入的模型。它不做凭据校验，因此此后的对话请求仍可能以 `40111` / `40112` 失败。
+鉴权状态快照：默认模型能否解析到可用的供应商配置，以及托管供应商的登录状态。当全局 `default_model` 别名存在于模型表中且能解析到已配置的供应商时，`models_ready` 为 `true`——包括自带 `base_url` 的平铺（providerless）模型，以及通过 `KIMI_MODEL_*` 环境变量注入的模型。它不做凭据校验，因此被接受的提示词仍可能在其轮次上异步失败（见 `POST /api/v1/sessions/{session_id}/prompts`）。
 
 成功时 `data` 携带 `models_ready`（布尔值）、`providers_count`（已配置供应商数量）与 `managed_provider`（`null`，或 `{ name, status }`，其中 `status` 为 `authenticated` / `expired` / `revoked` / `unauthenticated` 之一）。全局默认模型别名本身改从 `GET /api/v1/config` 的 `default_model` 读取，本端点不再携带。
 
@@ -1029,7 +1029,7 @@ main agent 的实时状态汇总；读取它会在会话为冷态时将其恢复
 | `session_id` | path | string | **必填。** 会话 id |
 | `content` | body | array | **必填。** 非空的内容块数组；变体见下 |
 | `agent_id` | body | string | 目标 Agent。默认为 main agent |
-| `prompt_id` | body | string | 客户端选定的提示词 id，用于幂等提交；已被进行中提示词占用的 id 返回 `40927`，已完成的返回 `40903`。不能与 `skills` 同用 |
+| `prompt_id` | body | string | 客户端选定的提示词 id。它只在对应提示词处于进行中期间被占用：在第一条提示词落定之前用同一 id 再次提交会返回 `40927`，提示词落定后该 id 即可再次使用。不能与 `skills` 同用 |
 | `skills` | body | array | 打包的 Skill 激活，至少 1 个 `{ name, args? }` 条目；每个 Skill 必须存在且可由用户激活 |
 | `profile` | body | string | 提交前要绑定的 Agent 档案 |
 | `model` | body | string | 要切换到的模型别名 |
@@ -1049,15 +1049,12 @@ schema 还接受共享消息格式中的 `tool_use`、`tool_result` 和 `thinkin
 
 成功时，`data` 为被接受的提示词 `{ prompt_id, user_message_id, status, content, created_at }`。
 
+此路由不做鉴权与模型就绪度的预检，因此不可用的模型配置会在这里被接受，而不是被拒绝：它不会再返回 `40110`–`40113`，失败改为异步出现在轮次上。请监听 WebSocket [事件](#事件)——轮次以 `turn.ended` 结束（`reason: "failed"`，原因在 `error.code` 中：没有可解析的模型时为 `model.not_configured`，凭据缺失或被拒绝时为相应的 `auth.*` / `provider.*` 码），且会话的 `last_turn_reason` 变为 `failed`。需要据此提示登录的客户端应监听这些事件，而不是依赖本次调用返回的 HTTP 状态码。
+
 - `40001`：校验失败——例如 `prompt_id` 与 `skills` 同用，或未知的 `profile`
-- `40110`：尚未配置供应商——请先完成登录
-- `40111`：解析出的供应商没有凭据（`details.provider_id`）
-- `40112`：供应商的凭据被拒绝（`details.provider_id`）
-- `40113`：模型无法解析（已知时带 `details.model_id` / `details.provider_id`）
 - `40401`：会话不存在
 - `40407`：引用的 `file_id` 不存在（或与内容块的媒体 kind 不匹配）
 - `40415`：某个 `skills` 条目指向未知的 Skill
-- `40903`：`prompt_id` 属于已完成的提示词；`data` 携带 `{ aborted: false }`
 - `40912`：Skill 存在但无法由用户激活
 - `40927`：`prompt_id` 已被进行中的提示词占用
 

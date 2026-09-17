@@ -470,6 +470,9 @@ base_url = "${titleBaseUrl}"
 [providers."managed:kimi-code".oauth]
 storage = "file"
 key = "${titleOAuthRef.key}"
+
+[subscription]
+auto_session_title = true
 `,
       'utf-8',
     );
@@ -572,6 +575,9 @@ base_url = "${titleBaseUrl}"
 [providers."managed:kimi-code".oauth]
 storage = "file"
 key = "${titleOAuthRef.key}"
+
+[subscription]
+auto_session_title = true
 `,
       'utf-8',
     );

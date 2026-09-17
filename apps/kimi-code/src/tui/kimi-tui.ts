@@ -59,6 +59,7 @@ import {
   type KimiSlashCommand,
   type SkillListSession,
 } from './commands';
+import { rotateToNextFavoriteModel } from './commands/config';
 import * as slashCommands from './commands/dispatch';
 import { CacheHintController } from './controllers/cache-hint-controller';
 import { BannerComponent } from './components/chrome/banner';
@@ -291,6 +292,7 @@ function createInitialAppState(input: KimiTUIStartupInput): AppState {
     upgrade: input.tuiConfig.upgrade,
     statusLine: input.tuiConfig.statusLine,
     markdown: input.tuiConfig.markdown,
+    favoriteModels: input.tuiConfig.favoriteModels ?? [],
     availableModels: {},
     availableProviders: {},
     sessionTitle: null,
@@ -1189,6 +1191,12 @@ export class KimiTUI {
 
   handlePlanToggle(next: boolean): void {
     void slashCommands.handlePlanCommand(this, next ? 'on' : 'off');
+  }
+
+  /** Alt+M: rotate the session model through the favorite models (see
+   * commands/config.ts `rotateToNextFavoriteModel`). */
+  rotateFavoriteModels(): void {
+    void rotateToNextFavoriteModel(this);
   }
 
   handleInputModeChange(mode: 'prompt' | 'bash'): void {
@@ -2780,7 +2788,7 @@ export class KimiTUI {
   private createTranscriptComponent(entry: TranscriptEntry): Component | null {
     if (entry.compactionData !== undefined) {
       const data = entry.compactionData;
-      const block = new CompactionComponent(this.state.ui, data.instruction);
+      const block = new CompactionComponent(this.state.ui, data.instruction, undefined, data.model);
       if (data.result === 'cancelled') {
         block.markCanceled();
       } else {
