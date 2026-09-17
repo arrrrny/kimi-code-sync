@@ -90,3 +90,32 @@ apps/kimi-code/src/tui/utils/refresh-providers.ts                   :: refreshCa
 # keeps web_search/fetch_url enabled-by-default but leaves auto_session_title
 # off unless `[subscription] auto_session_title = true` is set explicitly.
 packages/agent-core-v2/src/app/subscription/subscription.ts          :: SUBSCRIPTION_METHOD_DEFAULTS
+
+# --- API key rotation + per-key proxy (feature 831) ---
+# Two new fork modules plus every shared file that carries the rotation
+# control path: the credential/rotation contract, the config schema and its
+# TOML serializer (`rotate_keys` and the per-key `proxy_url`), the recovery
+# hook that advances to the next key, the keyed credential provider wiring,
+# and the `/provider` TUI entry points.
+packages/agent-core-v2/src/llm-adapter/provider/apiKeyRotation.ts      :: createKeyedCredentialProvider
+packages/agent-core-v2/src/human/credentials/keyRotationRecovery.ts    :: API_KEY_ROTATION_STRATEGY
+packages/agent-core-v2/src/human/llm/requester/requester.ts            :: LlmKeyRotationController
+packages/agent-core-v2/src/human/llm/requester/recovery.ts             :: readonly detail?: string
+packages/agent-core-v2/src/human/llm/requester/actor.ts                :: detail?: string
+packages/agent-core-v2/src/human/agent/turn.ts                         :: applyRecoveryActor
+packages/agent-core-v2/src/agent/loop/machine/engine.ts                :: keyRotationRecovery
+packages/agent-core-v2/src/agent/loop/loopService.ts                   :: api-key-rotation
+packages/agent-core-v2/src/human/credentials/credentials.ts            :: credential.proxyUrl
+packages/agent-core-v2/src/app/kosongConfig/configSection.ts           :: apiKeyEntryFromToml
+packages/agent-core-v2/src/llm-adapter/provider/provider.ts            :: rotateKeys
+packages/agent-core-v2/src/llm-adapter/provider/provider-service.ts    :: setActiveApiKey
+packages/agent-core-v2/src/llm-adapter/model/catalog-service.ts        :: createKeyedCredentialProvider
+packages/node-sdk/src/config/schema.ts                                 :: rotateKeys
+packages/node-sdk/src/config/toml.ts                                   :: transformApiKeys
+packages/klient/src/contract/global/providers.ts                       :: rotateKeys
+apps/kimi-code/src/tui/commands/provider.ts                            :: handleProviderKeyRotationToggle
+apps/kimi-code/src/tui/commands/prompts.ts                             :: promptKeyProxyUrl
+apps/kimi-code/src/tui/components/dialogs/provider-manager.ts          :: onToggleRotation
+apps/kimi-code/src/tui/components/dialogs/api-key-input-dialog.ts      :: allowEmpty
+packages/agent-core-v2/test/llm-adapter/provider/apiKeyRotation.test.ts       :: createKeyedCredentialProvider
+packages/agent-core-v2/src/human/test/credentials/keyRotationRecovery.test.ts :: keyRotationRecovery

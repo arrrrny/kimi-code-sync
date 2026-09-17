@@ -37,9 +37,10 @@ Kimi Code CLI 有三个地方可以影响运行参数：配置文件、命令行
 
 对单个供应商，凭证按以下顺序解析：
 
-1. `[providers.<name>].api_key`：配置文件里直接写的密钥，优先级最高
-2. `[providers.<name>.env]` 子表里的对应键（`KIMI_API_KEY`、`ANTHROPIC_API_KEY` 等）：`api_key` 为空时才读这里
-3. 两者都缺 → 启动报错，提示该供应商缺少凭证
+1. `[providers.<name>.api_keys]` 中由 `active_api_key_id` 选中的具名密钥：优先级最高，也是轮换切换的目标，见[多个 API 密钥与自动轮换](./providers.md#多个-api-密钥与自动轮换)
+2. `[providers.<name>].api_key`：配置文件里直接写的密钥
+3. `[providers.<name>.env]` 子表里的对应键（`KIMI_API_KEY`、`ANTHROPIC_API_KEY` 等）：以上两者为空时才读这里
+4. 都缺 → 启动报错，提示该供应商缺少凭证
 
 `base_url` 的解析方式相同：先读 `[providers.<name>].base_url`，再读 `[providers.<name>.env]` 里的 `*_BASE_URL` 键。
 

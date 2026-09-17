@@ -127,6 +127,10 @@ Each entry in the `providers` table defines an API provider, keyed by a unique n
 | `oauth` | `table` | No | OAuth credential reference (`storage` and `key` fields); injected automatically by the login flow, so you normally never write this by hand |
 | `env` | `table<string, string>` | No | Fallback source for provider credentials; see the `env` sub-table |
 | `custom_headers` | `table<string, string>` | No | Custom HTTP headers attached to each request |
+| `proxy_url` | `string` | No | Proxy for this provider's requests; a key's own `proxy_url` takes precedence over it |
+| `api_keys` | `table<string, table>` | No | Named API keys; each entry has `key`, `name`, and an optional `proxy_url` |
+| `active_api_key_id` | `string` | No | ID of the active key in `api_keys` |
+| `rotate_keys` | `boolean` | No | Advance to the next key when the active one is rejected; see [Multiple API keys and automatic rotation](./providers.md#multiple-api-keys-and-automatic-rotation) |
 
 **`env` sub-table**: You can write provider-conventional key names (such as `KIMI_API_KEY`) inside `[providers.<name>.env]` as a fallback source for `api_key` / `base_url`. This sub-table is **read only from the config file** and does not modify the shell environment:
 
