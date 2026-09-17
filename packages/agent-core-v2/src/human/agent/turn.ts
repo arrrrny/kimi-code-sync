@@ -345,6 +345,24 @@ function llmRecoveringEvent(
   };
 }
 
+function recoveryFailureOf(failure: unknown): Error {
+  if (failure instanceof Error) return failure;
+  return new Error(typeof failure === 'string' ? failure : 'recovery could not be applied');
+}
+
+function llmRecoveryRecord(pending: PendingRecovery, failure: Error | undefined): LlmRecoveryRecord {
+  const { proposal } = pending;
+  if (failure === undefined) {
+    return { strategy: proposal.strategy, action: proposal.action, detail: proposal.detail };
+  }
+  return {
+    strategy: proposal.strategy,
+    action: proposal.action,
+    detail: `${proposal.detail ?? proposal.action} could not be applied: ${failure.message}`,
+    failed: true,
+  };
+}
+
 function emptyErrorOf(context: TurnMachineContext): LlmErrorMessage<'empty_response'> | null {
   const entry = context.accumulator.finish();
   return emptyResponseError(
@@ -388,12 +406,13 @@ export function createTurnMachine(
       onBeforeStepActor: fromPromise<void, TurnBeforeStepContext>(async ({ input }) => {
         await options?.onBeforeStep?.(input);
       }),
-      applyRecoveryActor: fromPromise<void, PendingRecovery['proposal'] | undefined>(
+      applyRecoveryActor: fromPromise<Error | undefined, PendingRecovery['proposal'] | undefined>(
         async ({ input }) => {
           try {
             await input?.beforeNextAttempt?.();
-          } catch {
-            return;
+            return undefined;
+          } catch (error) {
+            return recoveryFailureOf(error);
           }
         },
       ),
@@ -725,16 +744,12 @@ export function createTurnMachine(
           onDone: {
             target: 'thinking',
             actions: [
-              assign(({ context }) => {
+              assign(({ context, event }) => {
                 const pending = context.pendingRecovery as PendingRecovery;
                 return {
                   appliedRecoveries: [
                     ...context.appliedRecoveries,
-                    {
-                      strategy: pending.proposal.strategy,
-                      action: pending.proposal.action,
-                      detail: pending.proposal.detail,
-                    },
+                    llmRecoveryRecord(pending, event.output),
                   ],
                   attemptMessageOverride:
                     pending.proposal.attemptMessageOverride ?? context.attemptMessageOverride,

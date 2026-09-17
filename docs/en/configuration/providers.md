@@ -30,7 +30,7 @@ The manager displays providers as a list of entries grouped by source. Navigatio
 - ↑/↓ to move the cursor, ←/→ to page
 - `a` to add a key to the selected provider — the add flow also asks for the key's optional proxy — and `s` to make the selected key the active one
 - `d` to delete the selected provider or key (with `[y/N]` confirmation)
-- `p` to set the provider's proxy, `r` to turn [automatic key rotation](#multiple-api-keys-and-automatic-rotation) on or off (needs at least two keys)
+- `p` to set the provider's proxy, `r` to turn [automatic key rotation](#multiple-api-keys-and-automatic-rotation) on or off (turning it on needs at least two keys)
 - Press Enter on the `[ Add New Platform ]` row to add a new provider
 
 Two paths when adding:

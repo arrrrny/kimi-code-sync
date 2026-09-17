@@ -54,6 +54,19 @@ describe('keyed credential provider resolution', () => {
     const providers = service({ kilo: { type: 'openai', apiKey: 'sk-legacy' } });
     expect(await keyed(providers).resolve()).toEqual({ apiKey: 'sk-legacy' });
   });
+
+  it('falls back to the resolved api key when no entry of the key set resolves', async () => {
+    const providers = service({
+      kilo: { type: 'openai', apiKeys: { key1: { key: 'sk-alpha', name: 'work' } } },
+    });
+    const provider = createKeyedCredentialProvider({
+      providers,
+      providerName: 'kilo',
+      fallbackApiKey: 'sk-from-env',
+    });
+
+    expect(await provider.resolve()).toEqual({ apiKey: 'sk-from-env' });
+  });
 });
 
 describe('keyed credential provider rotation surface', () => {

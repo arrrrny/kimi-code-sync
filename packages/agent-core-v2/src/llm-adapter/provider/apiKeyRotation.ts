@@ -40,13 +40,16 @@ function planNext(config: ProviderConfig | undefined): ResolvedKey | undefined {
   return next === undefined ? undefined : { keyId: next[0], entry: next[1] };
 }
 
-function credentialOf(config: ProviderConfig | undefined): LlmCredential | undefined {
+function credentialOf(
+  config: ProviderConfig | undefined,
+  fallbackApiKey: string | undefined,
+): LlmCredential | undefined {
   const active = resolveActiveKey(config);
   if (active !== undefined) {
     const proxyUrl = nonEmpty(active.entry.proxyUrl);
     return { apiKey: active.entry.key, proxyUrl };
   }
-  const legacy = nonEmpty(config?.apiKey);
+  const legacy = nonEmpty(config?.apiKey) ?? nonEmpty(fallbackApiKey);
   return legacy === undefined ? undefined : { apiKey: legacy };
 }
 
@@ -112,9 +115,10 @@ function rotationFor(
 export function createKeyedCredentialProvider(args: {
   readonly providers: IProviderService;
   readonly providerName: string;
+  readonly fallbackApiKey?: string;
 }): LlmCredentialProvider {
   return {
-    resolve: () => credentialOf(args.providers.get(args.providerName)),
+    resolve: () => credentialOf(args.providers.get(args.providerName), args.fallbackApiKey),
     rotation: () => rotationFor(args.providers, args.providerName),
   };
 }

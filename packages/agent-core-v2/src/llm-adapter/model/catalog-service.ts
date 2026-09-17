@@ -460,7 +460,11 @@ export class ModelCatalog extends Disposable implements IModelCatalog {
     if (auth.apiKey !== undefined) {
       const configured = this.providers.get(providerName);
       if (configured !== undefined && Object.keys(configured.apiKeys ?? {}).length > 0) {
-        return createKeyedCredentialProvider({ providers: this.providers, providerName });
+        return createKeyedCredentialProvider({
+          providers: this.providers,
+          providerName,
+          fallbackApiKey: auth.apiKey,
+        });
       }
       return createStaticCredentialProvider(auth.apiKey);
     }

@@ -546,6 +546,26 @@ describe('Model assembly (pure data)', () => {
     }
   });
 
+  it('resolves the provider env key for a model whose provider also declares apiKeys', async () => {
+    const { host, catalog } = createHost({
+      providers: {
+        kilo: {
+          type: 'openai',
+          baseUrl: 'https://api.example.test/v1',
+          apiKeys: { key1: { key: 'sk-alpha', name: 'work' } },
+          env: { OPENAI_API_KEY: 'sk-from-env' },
+        },
+      },
+      models: { m1: { provider: 'kilo', model: 'gpt-5', maxContextSize: 128000 } },
+    });
+    try {
+      const model = catalog.get('m1');
+      expect(await model.credentialProvider?.resolve()).toEqual({ apiKey: 'sk-from-env' });
+    } finally {
+      host.dispose();
+    }
+  });
+
   it('exposes no rotation controller for an oauth-backed model', () => {
     const tokenProvider = stubTokenProvider(['tok-1']);
     const { host, catalog } = createHost(

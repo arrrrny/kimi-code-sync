@@ -60,6 +60,7 @@ function createToolExecutor(): IAgentToolExecutorService {
 function keyedProvider(args: {
   readonly keyCount: number;
   readonly onRotate: (keyId: string | undefined) => void;
+  readonly failRotate?: boolean;
 }): LlmCredentialProvider {
   const controller: LlmKeyRotationController = {
     providerName: 'kilo',
@@ -67,6 +68,9 @@ function keyedProvider(args: {
     plan: () => ({ keyId: 'key2', name: 'personal' }),
     rotate: (keyId) => {
       args.onRotate(keyId);
+      if (args.failRotate === true) {
+        return Promise.reject(new Error('config.toml is read-only'));
+      }
       return Promise.resolve({ outcome: 'rotated', keyId: 'key2', name: 'personal' });
     },
   };
@@ -216,5 +220,47 @@ describe('machine engine api key rotation precedence', () => {
       'api_key_rotation',
       'substitute_model',
     ]);
+  });
+
+  it('announces a rotation that failed to persist and never proposes it again for the step', async () => {
+    const applied: string[] = [];
+    const { actor, recovering } = startEngineTurnActor(
+      {
+        model,
+        llmRequester: createRequesterService([
+          'rate_limit',
+          'rate_limit',
+          'rate_limit',
+          'rate_limit',
+          'rate_limit',
+          'rate_limit',
+          'ok',
+        ]),
+        toolExecutor: createToolExecutor(),
+        toolInfos: () => [],
+        maxAttemptsPerStep: 3,
+        recovery: fallbackChain(applied),
+        journal: memoryJournal(),
+      },
+      {
+        request: {
+          model,
+          credentialProvider: keyedProvider({
+            keyCount: 2,
+            failRotate: true,
+            onRotate: (keyId) => applied.push(`rotate:${keyId}`),
+          }),
+        },
+      },
+    );
+
+    await advanceTurn(actor);
+
+    expect(applied).toEqual(['rotate:key2', 'fallback']);
+    expect(recovering.map((event) => event.strategy)).toEqual([
+      'api_key_rotation',
+      'substitute_model',
+    ]);
+    expect(recovering[0]?.detail).toContain('could not be applied: config.toml is read-only');
   });
 });

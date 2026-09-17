@@ -6,6 +6,7 @@ export interface LlmRecoveryRecord {
   readonly strategy: string;
   readonly action: string;
   readonly detail?: string;
+  readonly failed?: boolean;
 }
 
 export interface LlmRecoveryContext {

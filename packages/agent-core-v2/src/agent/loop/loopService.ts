@@ -23,6 +23,7 @@ import { IAgentToolRegistryService } from '#/agent/toolRegistry/toolRegistry';
 import { IConfigService } from '#/app/config/config';
 import { AgentErrorEvent } from '#/agent/mcp/mcpEvents';
 import { type FinishReason } from '#human/llm/finish-reason';
+import { API_KEY_ROTATION_STRATEGY } from '#human/credentials/keyRotationRecovery';
 import { mergeInPlace } from '#/llm-adapter/contract/message';
 import type { ContentPart, UserMessage } from '#human/llm/message';
 import { emptyUsage, type TokenUsage } from '#human/llm/usage';
@@ -126,6 +127,10 @@ export const loopLastRequestTraceIdKey = defineState<string | undefined>(
 export const loopDisposingKey = defineState<boolean>('loop.disposing', () => false);
 
 const MAX_STEP_SIGNAL_LISTENERS = 64;
+
+const RECOVERY_WARNING_CODES: Partial<Record<string, string>> = {
+  [API_KEY_ROTATION_STRATEGY]: 'api-key-rotation',
+};
 
 export class AgentLoopService extends Disposable implements IAgentLoopService {
   declare readonly _serviceBrand: undefined;
@@ -1559,7 +1564,7 @@ export class AgentLoopService extends Disposable implements IAgentLoopService {
           void this.dispatcher.dispatch(
             new WarningIssued({
               agentId: this.scopeContext.agentId,
-              code: 'api-key-rotation',
+              code: RECOVERY_WARNING_CODES[event.strategy],
               message: event.detail,
             }),
           );

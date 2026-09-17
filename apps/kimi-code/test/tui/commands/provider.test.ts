@@ -357,6 +357,32 @@ describe('handleProviderCommand key flows', () => {
     expect(setConfig).not.toHaveBeenCalled();
     expect(host.showStatus).not.toHaveBeenCalled();
   });
+
+  it('turns rotation back off for a provider that dropped below two keys', async () => {
+    const providers: Record<string, ProviderConfig> = {
+      acme: {
+        type: 'openai',
+        baseUrl: 'https://acme.test',
+        apiKeys: { key1: { key: 'sk-alpha-secret-value', name: 'work' } },
+        activeApiKeyId: 'key1',
+        rotateKeys: true,
+      },
+    };
+    const { host, mounts, replaceConfigSections } = makeFlowHost(providers);
+
+    void handleProviderCommand(host);
+    mounts[0]!.handleInput('R');
+    await vi.waitFor(() => {
+      expect(replaceConfigSections).toHaveBeenCalledTimes(1);
+    });
+
+    const written = replaceConfigSections.mock.calls[0]![0] as {
+      providers: Record<string, ProviderConfig>;
+    };
+    expect(written.providers['acme']!.rotateKeys).toBe(false);
+    expect(host.showError).not.toHaveBeenCalled();
+    expect(host.showStatus).toHaveBeenCalledWith('Key rotation disabled for acme');
+  });
 });
 
 describe('promptKeyProxyUrl', () => {

@@ -285,7 +285,7 @@ async function handleProviderKeyRotationToggle(
 
   const rotateKeys = provider.rotateKeys !== true;
   const keyCount = Object.keys(provider.apiKeys ?? {}).length;
-  if (keyCount < 2) {
+  if (rotateKeys && keyCount < 2) {
     host.showError(
       `Key rotation needs at least two API keys for ${providerId}; only ${String(keyCount)} configured.`,
     );

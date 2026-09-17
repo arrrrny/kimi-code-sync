@@ -5,7 +5,15 @@ import type { LlmKeyRotationController } from '#/llm/requester/requester';
 export const API_KEY_ROTATION_STRATEGY = 'api_key_rotation';
 
 function rotationCount(appliedRecoveries: readonly LlmRecoveryRecord[]): number {
-  return appliedRecoveries.filter((record) => record.strategy === API_KEY_ROTATION_STRATEGY).length;
+  return appliedRecoveries.filter(
+    (record) => record.strategy === API_KEY_ROTATION_STRATEGY && record.failed !== true,
+  ).length;
+}
+
+function rotationFailed(appliedRecoveries: readonly LlmRecoveryRecord[]): boolean {
+  return appliedRecoveries.some(
+    (record) => record.strategy === API_KEY_ROTATION_STRATEGY && record.failed === true,
+  );
 }
 
 function qualifies(error: LlmRemoteErrorMessage, attempt: number, maxAttempts: number): boolean {
@@ -37,6 +45,7 @@ export const keyRotationRecovery: LlmRecovery = {
   propose: (ctx) => {
     const controller = eligible(ctx);
     if (controller === undefined) return undefined;
+    if (rotationFailed(ctx.appliedRecoveries)) return undefined;
     if (spent(ctx, controller)) return undefined;
     const target = controller.plan();
     if (target === undefined) return undefined;
@@ -45,7 +54,10 @@ export const keyRotationRecovery: LlmRecovery = {
       action: target.keyId,
       detail: detailOf(controller, target.keyId, target.name),
       beforeNextAttempt: async () => {
-        await controller.rotate(target.keyId);
+        const outcome = await controller.rotate(target.keyId);
+        if (outcome.outcome === 'unavailable') {
+          throw new Error(`key rotation for ${controller.providerName} is no longer available`);
+        }
       },
     };
   },

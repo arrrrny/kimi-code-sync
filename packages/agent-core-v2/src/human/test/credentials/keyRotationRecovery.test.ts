@@ -142,6 +142,19 @@ describe('keyRotationRecovery cycle bound', () => {
       ),
     ).toMatchObject({ strategy: 'api_key_rotation' });
   });
+
+  it('declines once a rotation of this step failed to apply', () => {
+    expect(
+      keyRotationRecovery.propose(
+        context({
+          error: refused,
+          appliedRecoveries: [
+            { strategy: 'api_key_rotation', action: 'key2', detail: 'failed', failed: true },
+          ],
+        }),
+      ),
+    ).toBeUndefined();
+  });
 });
 
 describe('keyRotationRecovery exhaustion', () => {
@@ -173,6 +186,18 @@ describe('keyRotationRecovery exhaustion', () => {
     expect(
       keyRotationRecovery.exhausted?.(
         context({ error: statusError(401), appliedRecoveries: rotationRecords(2) }),
+      ),
+    ).toBeUndefined();
+  });
+
+  it('stays silent when the step only holds a rotation that failed to apply', () => {
+    expect(
+      keyRotationRecovery.exhausted?.(
+        context({
+          error: refused,
+          rotation: controller({ keyCount: 2 }),
+          appliedRecoveries: [{ strategy: 'api_key_rotation', action: 'key2', failed: true }],
+        }),
       ),
     ).toBeUndefined();
   });
@@ -215,5 +240,18 @@ describe('keyRotationRecovery proposal', () => {
     const proposal = keyRotationRecovery.propose(context({ error: refused }));
     expect(proposal?.detail).toBe('kilo → personal (key2)');
     expect(proposal?.detail).not.toContain('sk-');
+  });
+
+  it('rejects when the controller reports the planned key is no longer available', async () => {
+    const proposal = keyRotationRecovery.propose(
+      context({
+        error: refused,
+        rotation: controller({ rotate: () => Promise.resolve({ outcome: 'unavailable' }) }),
+      }),
+    );
+
+    await expect(proposal?.beforeNextAttempt?.()).rejects.toThrow(
+      'key rotation for kilo is no longer available',
+    );
   });
 });
