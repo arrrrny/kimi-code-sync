@@ -10,8 +10,8 @@ const OPENCODE_BASE_URL = 'https://opencode.ai/zen/v1';
 const OPENCODE_GO_BASE_URL = 'https://opencode.ai/zen/go/v1';
 const OPENCODE_USER_AGENT = 'opencode/1.17.0';
 const KIMI_SESSION_ID = 'session_0923e81c-92bb-4bf0-80d8-4d0dbfdbd067';
-const OPENCODE_SESSION_ID = 'ses_0923e81c92bb4bf080d88b6a72';
-const OPENCODE_SESSION_ID_WITHOUT_KEY = 'ses_0923e81c92bb4bf080d84d0dbf';
+const OPENCODE_SESSION_ID = 'ses_15e24457e565a45ada428b6a72';
+const OPENCODE_SESSION_ID_WITHOUT_KEY = 'ses_15e24457e565a45ada426cb6e5';
 
 function makeModel(provider = 'openai', baseUrl = 'https://api.example.com/v1'): LlmModel {
   return {
@@ -171,23 +171,34 @@ describe('x-opencode-session header', () => {
 });
 
 describe('opencode session id derivation', () => {
-  it('strips the session prefix and dashes and truncates the session part', () => {
+  function sessionHeaderWithoutKey(cacheKey: string): string | undefined {
+    const model: LlmModel = { ...makeModel(), apiKey: undefined };
+    return planOpenAIRequest({
+      model,
+      messages: [],
+      tools: [],
+      cacheKey,
+    }).headers?.['x-opencode-session'];
+  }
+
+  it('derives a 26 character hex id behind the ses prefix', () => {
     expect(sessionHeaderFor(KIMI_SESSION_ID)).toBe(OPENCODE_SESSION_ID);
-    expect(sessionHeaderFor(KIMI_SESSION_ID)?.replace('ses_', '')).toHaveLength(26);
+    expect(sessionHeaderFor(KIMI_SESSION_ID)?.replace('ses_', '')).toMatch(/^[0-9a-f]{26}$/);
   });
 
-  it('lowercases and drops characters outside the hex alphabet', () => {
-    expect(sessionHeaderFor('session_AB12CD34-ef56-4789-9012-3456789ABCDE')).toBe(
-      'ses_ab12cd34ef56478990128b6a72',
-    );
-  });
-
-  it('pads short cache keys', () => {
-    expect(sessionHeaderFor('probe')).toBe('ses_be0000000000000000008b6a72');
-  });
-
-  it('accepts keys already carrying the ses prefix', () => {
-    expect(sessionHeaderFor('ses_abc')).toBe('ses_abc000000000000000008b6a72');
+  it('never derives the all-zero session id the gateway rejects', () => {
+    const rejected = 'ses_000000000000000000000000';
+    for (const cacheKey of [
+      '',
+      'zzz',
+      'session_xyz',
+      'ses_',
+      '00000000-0000-0000-0000-000000000000',
+    ]) {
+      expect(sessionHeaderFor(cacheKey)).not.toBe(rejected);
+      expect(sessionHeaderWithoutKey(cacheKey)).not.toBe(rejected);
+    }
+    expect(sessionHeaderWithoutKey('ses_')).toBe('ses_3730f19d70e463f876eb1e78c7');
   });
 
   it('keeps the same session id across calls for one cache key', () => {
@@ -195,19 +206,12 @@ describe('opencode session id derivation', () => {
   });
 
   it('changes the session id when the api key changes', () => {
-    expect(sessionHeaderFor(KIMI_SESSION_ID, 'sk-other')).toBe('ses_0923e81c92bb4bf080d83dcad3');
+    expect(sessionHeaderFor(KIMI_SESSION_ID, 'sk-other')).toBe('ses_15e24457e565a45ada423dcad3');
     expect(sessionHeaderFor(KIMI_SESSION_ID, 'sk-other')).not.toBe(OPENCODE_SESSION_ID);
   });
 
   it('omits the key fingerprint when the model carries no api key', () => {
-    const model: LlmModel = { ...makeModel(), apiKey: undefined };
-    const request = planOpenAIRequest({
-      model,
-      messages: [],
-      tools: [],
-      cacheKey: KIMI_SESSION_ID,
-    });
-    expect(request.headers?.['x-opencode-session']).toBe(OPENCODE_SESSION_ID_WITHOUT_KEY);
+    expect(sessionHeaderWithoutKey(KIMI_SESSION_ID)).toBe(OPENCODE_SESSION_ID_WITHOUT_KEY);
   });
 
   it('ignores an unparseable base url', () => {
@@ -219,6 +223,33 @@ describe('opencode session id derivation', () => {
     });
     expect(request.headers?.['x-opencode-session']).toBe(OPENCODE_SESSION_ID);
     expect(request.headers?.['User-Agent']).toBeUndefined();
+  });
+});
+
+describe('opencode user agent host matching', () => {
+  function userAgentFor(baseUrl: string): string | undefined {
+    return planOpenAIRequest({
+      model: makeModel('opencode', baseUrl),
+      messages: [],
+      tools: [],
+      cacheKey: KIMI_SESSION_ID,
+    }).headers?.['User-Agent'];
+  }
+
+  it.each(['https://api.opencode.ai/v1', 'https://opencode.ai:8443/v1', 'https://OPENCODE.AI/v1'])(
+    'sends the opencode user agent to %s',
+    (baseUrl) => {
+      expect(userAgentFor(baseUrl)).toBe(OPENCODE_USER_AGENT);
+    },
+  );
+
+  it.each([
+    'https://evil-opencode.ai/v1',
+    'https://opencode.ai.evil.com/v1',
+    'https://notopencode.ai/v1',
+    'https://proxy.example.com/opencode.ai/v1',
+  ])('withholds the opencode user agent from %s', (baseUrl) => {
+    expect(userAgentFor(baseUrl)).toBeUndefined();
   });
 });
 
