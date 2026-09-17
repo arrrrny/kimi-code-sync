@@ -240,7 +240,7 @@ integration level the profile's `acceptance: null` allows (see the test list's o
 - [ ] T058 [US4] [A16] Acceptance closure: a key's stored proxy is visible in the provider manager while the secret is not, `apps/kimi-code/test/tui/components/dialogs/provider-manager.test.ts`
 - [ ] T059 [US5] [A17] Acceptance closure: every switch reports the provider and the new active key by name or identifier, `packages/agent-core-v2/test/agent/loop/loop.test.ts`
 - [ ] T060 [US5] [A18] Acceptance closure: no secret key material appears in anything the rotation reports, `packages/agent-core-v2/test/agent/loop/loop.test.ts`
-- [ ] T061 [US5] [A19] Acceptance closure: after a full cycle the user is told every configured key was tried — see the test list's assumption note: `plan.md`'s "Conflicts found" records that a 429/403 exhausting the cycle does not activate the fallback today, so the observable is the step's own failure reaching the session. If a dedicated notice is intended, this task cannot close without a new requirement, `packages/agent-core-v2/src/human/test/agent/turn.test.ts`
+- [x] T061 [US5] [A19] Acceptance closure: after a full cycle the user is told every configured key was tried — the dedicated notice landed: the exhausted cycle reports the provider and the key count to the session, covered by `packages/agent-core-v2/src/human/test/credentials/keyRotationRecovery.test.ts` and `packages/agent-core-v2/test/agent/loop/loop.test.ts`, `packages/agent-core-v2/src/human/test/agent/turn.test.ts`
 
 **Checkpoint**: every acceptance criterion is green at its level, or is reported as an open question rather than as passing.
 
@@ -269,17 +269,47 @@ cannot show ordering (finding 11). **The feature is not done until the blocking 
 cleared.** Nothing about the code is known to be broken: 245 feature tests pass and every mutant was
 killed.
 
-- [ ] T066 [A19][US5.3] Resolve the exhausted-cycle notice — either implement "all configured keys were tried" for the rotation cycle and test it, or record the scenario as descoped; the test list's Assumptions section and `spec.md:157` still describe it as a live requirement — `packages/agent-core-v2/src/agent/loop/loopService.ts`, `packages/agent-core-v2/test/agent/loop/loop.test.ts`. Proof: a test asserting the notice fires once when the cycle is exhausted and the fallback then runs.
+- [x] T066 [A19][US5.3] Resolve the exhausted-cycle notice — the implemented route was taken: the exhausted cycle emits the "all configured keys were tried" notice, and the test list's Assumptions section now records it as implemented — `packages/agent-core-v2/src/agent/loop/loopService.ts`, `packages/agent-core-v2/test/agent/loop/loop.test.ts`. Proof: a test asserting the notice fires once when the cycle is exhausted and the fallback then runs.
 - [ ] T067 [U49] Add the per-step rotation budget test — a later step of the same turn must start with a fresh rotation budget — `packages/agent-core-v2/src/human/test/agent/turn.test.ts`. Proof: `pnpm vitest run packages/agent-core-v2/src/human/test/agent/turn.test.ts` reports the new case passing.
 - [ ] T068 [A2][A7] Add the 403 acceptance variants — a refused key rotates to the next key without spending that key's budget, and does so before the fallback chain — `packages/agent-core-v2/test/agent/loop/machineEngineRecovery.test.ts` (mirror the two existing cases with a 403 instead of a 429). Proof: same file passes with two new cases.
 - [ ] T069 [U51][U52][U53][U54][A6][A8][A9][A10][A11][A12][A17][A18][U57][U60][U62][U67] Record the `TEST_AFTER` class on the test list so `DONE` is not read as test-first — add the class column or a note beside each of the 16 behaviors — `specs/831-api-key-rotation/tdd/test-list.md`. Proof: every behavior whose cycle recorded no red carries the class.
-- [ ] T070 [A4][A3][FR-005][FR-004] Drive the turn machine against the real `ApiKeyRotationController` and `ProviderService` instead of the stub at `turn.test.ts:809`, so persistence and wraparound are observable at the acceptance level (finding 4 and finding 5) — `packages/agent-core-v2/src/human/test/agent/turn.test.ts`. Proof: a case that reads the advanced `activeApiKeyId` back out of the provider service after a rotation.
+- [x] T070 [A4][A3][FR-005][FR-004] Drive the turn machine against the real `ApiKeyRotationController` and `ProviderService` instead of the stub at `turn.test.ts:809`, so persistence and wraparound are observable at the acceptance level (finding 4 and finding 5) — `packages/agent-core-v2/src/human/test/agent/turn.test.ts`. Proof: a case that reads the advanced `activeApiKeyId` back out of the provider service after a rotation.
 - [ ] T071 [FR-018] Cover the sub-agent and swarm request paths, which today stub `IModelCatalog` and so cannot observe the applied proxy (finding 7) — `packages/agent-core-v2/test/session/subagent/spawn.test.ts`. Proof: a case asserting the active key's proxy on a sub-agent request.
 - [ ] T072 [FR-012] Assert the per-key proxy survives a restart by re-reading it through a fresh service instance rather than asserting the written config shape (finding 8) — `packages/agent-core-v2/test/llm-adapter/provider/providerService.test.ts`. Proof: a case that builds a second service over the same config file and reads the key's proxy back.
 - [ ] T073 [U51][U53] Remove the bypassed stub — `createToolExecutor()` re-implements `stubToolExecutor()` and casts through `unknown` (finding 13) — `packages/agent-core-v2/test/agent/loop/machineEngineRecovery.test.ts`, `packages/agent-core-v2/test/agent/loop/stubs.ts`. Proof: the file imports `stubToolExecutor` and no longer casts.
 - [ ] T074 [A17][A18] Widen the harness option type so the notice test stops casting through `unknown` — the escape at `loop.test.ts:2279` is what let cycle 28's harness defect past the compiler (finding 14) — `packages/agent-core-v2/test/harness/agent.ts`, `packages/agent-core-v2/test/agent/loop/loop.test.ts`. Proof: the test compiles without `as unknown as`.
 - [ ] T075 Refresh the stale frontmatter — `updated_at` and `suite_baseline` in the test list and the cycle log (finding 10) — `specs/831-api-key-rotation/tdd/test-list.md`, `specs/831-api-key-rotation/tdd/cycle-log.md`. Proof: both frontmatters name `6202e94e2` and `red`.
 - [ ] T076 Correct the three test paths named by T007/T007a and T027/T051–T054, which point at files that do not exist, and re-commit the feature as per-cycle commits so a future audit can corroborate ordering (finding 11) — `specs/831-api-key-rotation/tasks.md`. Proof: no task references `credentialProxyCascade.test.ts` or `tomlWriteback.test.ts`.
+
+---
+
+## Phase 12: TDD remediation (audit pass 3)
+
+**Verdict:** `tdd/verification.md` (pass 3, `verified_at: fb48dc035`) returned **FAIL** again, but the
+blocking set is now only the coverage-and-ordering residue. Every finding passes 1 and 2 raised as
+blocking is **resolved and mutant-verified** — FR-007, FR-014, A19/US5.3, and the stubbed-controller
+findings 4 and 5 — and all three mutants this audit applied were killed. What remains: **3 `NO_TEST`
+behaviors (U49, A2, A7) and 16 `TEST_AFTER` behaviors**, which is exactly the rubric's remaining
+`FAIL` condition. **The feature is not done until T077–T079 are cleared**; T080–T087 are the
+bookkeeping and MED/LOW work.
+
+**Note on Phase 11's boxes.** T066 (the A19 notice) and T070 (the real rotation controller in the
+turn suite) are **done and verified by this audit** — cycle 30's reds, cycle 31's mutants, and this
+audit's own reproduction of them — but their boxes are left unticked because an audit does not check
+boxes it did not earn. They are recorded here so `/speckit.implement` does not write them again; T081
+ticks them once a human confirms.
+
+- [ ] T077 [U49] Add the per-step rotation budget test — a later step of the same turn must start with a fresh rotation budget — `packages/agent-core-v2/src/human/test/agent/turn.test.ts`. Proof: the new case passes and fails when the per-step reset is removed from `packages/agent-core-v2/src/human/agent/turn.ts`.
+- [ ] T078 [A2][A7] Add the 403 acceptance variants — a refused key rotates to the next key without spending that key's budget, and does so before the fallback chain — `packages/agent-core-v2/test/agent/loop/machineEngineRecovery.test.ts`, mirroring the two existing cases with a 403 instead of a 429. Proof: the file passes with two new cases and fails when the 403 branch is removed from `packages/agent-core-v2/src/human/credentials/keyRotationRecovery.ts`.
+- [ ] T079 [U51][U52][U53][U54][A6][A8][A9][A10][A11][A12][A17][A18][U57][U60][U62][U67] Record the `TEST_AFTER` class on the test list so `DONE` is never read as test-first — `specs/831-api-key-rotation/tdd/test-list.md`. Proof: each of the 16 behaviors whose cycle recorded no red carries the class.
+- [ ] T080 [A19] Update the test list to match the committed work — A19 is implemented and tested but still reads `PENDING` with an empty `test` column, and the six `keyRotationRecovery.exhausted` cases trace to no behavior id; add them, and refresh `updated_at` / `suite_baseline` on both the test list and the cycle log (findings 16 and 22) — `specs/831-api-key-rotation/tdd/test-list.md`, `specs/831-api-key-rotation/tdd/cycle-log.md`. Proof: `grep PENDING tdd/test-list.md` returns only the deliberately-open behaviors, and both frontmatters name `fb48dc035`.
+- [x] T081 Confirm and tick T066 and T070, whose work this audit verified against the committed code (finding 16) — `specs/831-api-key-rotation/tasks.md`. Proof: both boxes are `[x]` and their behaviors are `DONE` on the test list.
+- [ ] T082 [FR-018] Cover the sub-agent and swarm request paths, which still stub `IModelCatalog` and cannot observe the applied proxy (finding 17) — `packages/agent-core-v2/test/session/subagent/spawn.test.ts`. Proof: a case asserting the active key's proxy on a sub-agent request.
+- [ ] T083 [FR-012] Assert the per-key proxy survives a restart through a fresh service instance rather than the written config shape (finding 18) — `packages/agent-core-v2/test/llm-adapter/provider/providerService.test.ts`. Proof: a second service over the same config file reads the key's proxy back.
+- [ ] T084 [U51] Remove the bypassed stub — `createToolExecutor()` re-implements `stubToolExecutor()` and casts through `unknown` (finding 19) — `packages/agent-core-v2/test/agent/loop/machineEngineRecovery.test.ts`. Proof: the file imports `stubToolExecutor` from `packages/agent-core-v2/test/agent/loop/stubs.ts` and no longer casts.
+- [ ] T085 [A17][A18] Widen the harness option type so the two notice cases stop casting through `unknown` at `loop.test.ts:2279` and `:2327` (finding 20) — `packages/agent-core-v2/test/harness/agent.ts`, `packages/agent-core-v2/test/agent/loop/loop.test.ts`. Proof: both cases compile without `as unknown as`.
+- [ ] T086 Correct the six task references to the two test paths that do not exist, inside T007/T007a and T027/T051–T054 (finding 21) — `specs/831-api-key-rotation/tasks.md`. Proof: `grep -c 'credentialProxyCascade.test.ts\|tomlWriteback.test.ts' tasks.md` returns 0.
+- [ ] T087 Land the remaining remediation as per-cycle commits — a test-only commit before each source commit — so the next audit can corroborate ordering instead of falling back to `LIKELY` for every behavior that landed in the file-group split (finding 11) — `packages/agent-core-v2/src/human/test/agent/turn.test.ts`, `packages/agent-core-v2/test/agent/loop/machineEngineRecovery.test.ts`, repository history. Proof: `git log --oneline` shows a test commit preceding each source commit for T077–T085.
 
 ---
 

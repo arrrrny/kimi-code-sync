@@ -4,8 +4,8 @@ loop: outside-in
 profile: .specify/memory/tdd-profile.md
 spec_criteria: 19
 planned_at: 3f2a19d8f
-updated_at: 3f2a19d8f
-suite_baseline: unknown
+updated_at: fb48dc035
+suite_baseline: red
 ---
 
 # Test List: Provider API Key Rotation with Per-Key Proxy
@@ -49,7 +49,7 @@ the real CLI.
 | A16 | A key that has its own proxy shows that proxy in the provider manager while the secret stays hidden                      | US4.4, FR-015 | example | DONE | `apps/kimi-code/test/tui/components/dialogs/provider-manager.test.ts::shows a key's own proxy host on its row`; `apps/kimi-code/test/tui/components/dialogs/provider-manager.test.ts::never renders a key's proxy userinfo or the key secret` |
 | A17 | A rotation reports the provider and the newly active key by name or identifier                                           | US5.1, FR-014 | example | DONE | `packages/agent-core-v2/test/agent/loop/loop.test.ts::reports the provider and the new key without leaking the key value`; `packages/agent-core-v2/src/human/test/credentials/keyRotationRecovery.test.ts::names the provider and the target key without the key value` |
 | A18 | Nothing the rotation reports contains secret key material                                                                | US5.2, FR-015, SC-007 | example | DONE | `packages/agent-core-v2/test/agent/loop/loop.test.ts::reports the provider and the new key without leaking the key value`; `apps/kimi-code/test/tui/components/dialogs/provider-manager.test.ts::never renders a key's proxy userinfo or the key secret` |
-| A19 | A rotation that cycled through every key without success tells the user that all configured keys were tried             | US5.3, FR-008, FR-014 | example | PENDING |      |
+| A19 | A rotation that cycled through every key without success tells the user that all configured keys were tried             | US5.3, FR-008, FR-014 | example | DONE | `packages/agent-core-v2/src/human/test/credentials/keyRotationRecovery.test.ts::reports the provider and the key count once every key was tried`; `packages/agent-core-v2/test/agent/loop/loop.test.ts::reports that every configured key was tried once the cycle is exhausted` |
 
 ## Inner loop: unit behaviors
 
@@ -212,11 +212,12 @@ None. The invariants this list relies on are recorded below with their rationale
 
 ## Assumptions recorded while deriving this list
 
-- **A19 is the one criterion `plan.md` says is only half-wired.** research.md's "Conflicts found" records
-  that a 429/403 exhausting the cycle does not activate the fallback model today, so "the user is told that
-  all configured keys were tried" is read literally as: the step fails and that failure reaches the session.
-  If the intended reading is a dedicated "all keys tried" notice, that is a new requirement the plan does
-  not implement, and the behavior will stay red until it does.
+- **A19's "all keys tried" notice is implemented, so the criterion is no longer half-wired.** research.md's
+  "Conflicts found" records that a 429/403 exhausting the cycle does not activate the fallback model, so this
+  note originally read "the user is told that all configured keys were tried" as the step's own failure
+  reaching the session. The dedicated notice landed instead: `exhausted()` in `keyRotationRecovery.ts` returns
+  a detail naming the provider and the configured key count, and the machine publishes it in `turn.failed`
+  when no strategy proposed; the A19 row above is `DONE` and names its two covering tests.
 - **The cycle bound is per step, not per turn.** research.md (b) records the decision to count
   `appliedRecoveries`, which the machine resets when a step completes. U49 pins the per-step reading
   (a later step may rotate again); FR-008's own wording says "per turn".
