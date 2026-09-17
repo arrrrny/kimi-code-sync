@@ -67,11 +67,10 @@ packages/agent-core-v2/src/agent/fullCompaction/squeezeForkOps.ts       :: Squee
 packages/agent-core-v2/src/agent/fullCompaction/squeezeCascade.ts       :: resolveSqueezeModelAliasWithCascade
 packages/agent-core-v2/src/app/telemetry/forkEvents.ts                  :: forkTelemetryEventDefinitions
 # --- x-opencode-session header in agent-core-v2 (OpenCode Go session affinity) ---
-# Ported from packages/agent-core-v2/src/kosong/* to packages/agent-core-v2/src/human/llm/requester/bases/* in sync 2026-09-07.
+# Ported from packages/agent-core-v2/src/kosong/* to packages/agent-core-v2/src/human/llm/requester/bases/* in sync 2026-09-07,
+# then consolidated into the shared protocol/session-headers.ts helper.
 packages/agent-core-v2/src/human/llm/model.ts                          :: proxyUrl
-packages/agent-core-v2/src/human/llm/requester/bases/openai/format.ts   :: x-opencode-session
-packages/agent-core-v2/src/human/llm/requester/bases/openai-responses/format.ts :: x-opencode-session
-packages/agent-core-v2/src/human/llm/requester/bases/anthropic/format.ts :: x-opencode-session
+packages/agent-core-v2/src/human/llm/protocol/session-headers.ts        :: x-opencode-session
 packages/agent-core-v2/src/human/llm/requester/bases/openai/requester.ts :: buildProxyDispatcher
 packages/agent-core-v2/src/human/llm/requester/bases/openai-responses/requester.ts :: buildProxyDispatcher
 packages/agent-core-v2/src/human/llm/requester/bases/anthropic/requester.ts :: buildProxyDispatcher

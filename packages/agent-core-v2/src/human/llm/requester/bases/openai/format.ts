@@ -199,14 +199,6 @@ export function encodeOpenAIRequest(params: Record<string, unknown>): OpenAIRequ
   return { params: params as unknown as OpenAI.Chat.ChatCompletionCreateParamsStreaming };
 }
 
-export function sessionHeadersForRequest(
-  input: FormatRequestInput,
-): Record<string, string> | undefined {
-  const { cacheKey } = input;
-  if (cacheKey === undefined) return undefined;
-  return { 'x-opencode-session': cacheKey };
-}
-
 export interface OpenAIStreamParserOptions extends StreamParserOptions<OpenAIRawChunk> {
   readonly reasoningKey?: string;
 }
