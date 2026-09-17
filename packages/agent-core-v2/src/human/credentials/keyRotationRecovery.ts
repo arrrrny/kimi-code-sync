@@ -1,5 +1,5 @@
 import type { LlmRemoteErrorMessage } from '#/llm/errors';
-import type { LlmRecovery, LlmRecoveryRecord } from '#/llm/requester/recovery';
+import type { LlmRecovery, LlmRecoveryContext, LlmRecoveryRecord } from '#/llm/requester/recovery';
 import type { LlmKeyRotationController } from '#/llm/requester/requester';
 
 export const API_KEY_ROTATION_STRATEGY = 'api_key_rotation';
@@ -15,16 +15,29 @@ function qualifies(error: LlmRemoteErrorMessage, attempt: number, maxAttempts: n
   return error.kind === 'status' && error.statusCode === 403;
 }
 
+function eligible(ctx: LlmRecoveryContext): LlmKeyRotationController | undefined {
+  const controller = ctx.credentialProvider?.rotation?.();
+  if (controller === undefined) return undefined;
+  return qualifies(ctx.error, ctx.attempt, ctx.maxAttempts) ? controller : undefined;
+}
+
+function spent(ctx: LlmRecoveryContext, controller: LlmKeyRotationController): boolean {
+  return rotationCount(ctx.appliedRecoveries) >= controller.keyCount - 1;
+}
+
 function detailOf(controller: LlmKeyRotationController, keyId: string, name: string): string {
   return `${controller.providerName} → ${name} (${keyId})`;
 }
 
+function exhaustedDetailOf(controller: LlmKeyRotationController): string {
+  return `${controller.providerName}: all ${controller.keyCount} configured keys were tried`;
+}
+
 export const keyRotationRecovery: LlmRecovery = {
-  propose: ({ error, appliedRecoveries, attempt, maxAttempts, credentialProvider }) => {
-    const controller = credentialProvider?.rotation?.();
+  propose: (ctx) => {
+    const controller = eligible(ctx);
     if (controller === undefined) return undefined;
-    if (!qualifies(error, attempt, maxAttempts)) return undefined;
-    if (rotationCount(appliedRecoveries) >= controller.keyCount - 1) return undefined;
+    if (spent(ctx, controller)) return undefined;
     const target = controller.plan();
     if (target === undefined) return undefined;
     return {
@@ -34,6 +47,16 @@ export const keyRotationRecovery: LlmRecovery = {
       beforeNextAttempt: async () => {
         await controller.rotate(target.keyId);
       },
+    };
+  },
+  exhausted: (ctx) => {
+    const controller = eligible(ctx);
+    if (controller === undefined) return undefined;
+    if (!spent(ctx, controller)) return undefined;
+    return {
+      strategy: API_KEY_ROTATION_STRATEGY,
+      action: 'exhausted',
+      detail: exhaustedDetailOf(controller),
     };
   },
 };

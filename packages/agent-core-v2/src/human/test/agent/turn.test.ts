@@ -26,6 +26,10 @@ import {
   type TurnOutput,
 } from '#/agent/turn';
 
+import { createKeyedCredentialProvider } from '../../../llm-adapter/provider/apiKeyRotation';
+import type { ProviderConfig } from '../../../llm-adapter/provider/provider';
+import { ProviderService } from '../../../llm-adapter/provider/provider-service';
+
 const model: LlmModel = { provider: 'test', model: 'test-model', capability: UNKNOWN_CAPABILITY };
 
 type RetryingEvent = Extract<LlmEvent, { type: 'llm.retrying' }>;
@@ -928,6 +932,80 @@ describe('turn machine api key rotation', () => {
 
     expect(rotate).not.toHaveBeenCalled();
     expect(recovering).toHaveLength(0);
+  });
+});
+
+describe('turn machine api key rotation against the real rotation controller', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const THREE_KEYS: ProviderConfig = {
+    type: 'openai',
+    apiKeys: {
+      k1: { key: 'sk-alpha', name: 'work' },
+      k2: { key: 'sk-beta', name: 'personal' },
+      k3: { key: 'sk-gamma', name: 'backup' },
+    },
+    activeApiKeyId: 'k1',
+    rotateKeys: true,
+  };
+
+  function providersWith(config: ProviderConfig): ProviderService {
+    const providers = new ProviderService();
+    providers.loadAll({ kilo: config }, undefined);
+    return providers;
+  }
+
+  function keyedProvider(
+    providers: ProviderService,
+    resolved: (string | undefined)[],
+  ): LlmCredentialProvider {
+    const keyed = createKeyedCredentialProvider({ providers, providerName: 'kilo' });
+    return {
+      resolve: () => {
+        const credential = keyed.resolve();
+        resolved.push(credential?.apiKey);
+        return credential;
+      },
+      rotation: () => keyed.rotation?.(),
+    };
+  }
+
+  it('persists the rotated key on the provider config and resolves it for the next attempt', async () => {
+    const providers = providersWith(THREE_KEYS);
+    const resolved: (string | undefined)[] = [];
+    const { requester } = createStubRequester([rateLimited(), rateLimited(), rateLimited(), 'ok']);
+    startTurnActor(
+      requester,
+      { retry: { maxAttemptsPerStep: 3 }, recovery: ROTATION_RECOVERY },
+      turnInputWithRequest(keyedProvider(providers, resolved)),
+    );
+
+    await advanceTurn();
+
+    expect(providers.get('kilo')?.activeApiKeyId).toBe('k2');
+    expect(resolved.at(-1)).toBe('sk-beta');
+  });
+
+  it('wraps around to the first key once the last key is the active one', async () => {
+    const providers = providersWith({ ...THREE_KEYS, activeApiKeyId: 'k3' });
+    const resolved: (string | undefined)[] = [];
+    const { requester } = createStubRequester([rateLimited(), rateLimited(), rateLimited(), 'ok']);
+    startTurnActor(
+      requester,
+      { retry: { maxAttemptsPerStep: 3 }, recovery: ROTATION_RECOVERY },
+      turnInputWithRequest(keyedProvider(providers, resolved)),
+    );
+
+    await advanceTurn();
+
+    expect(providers.get('kilo')?.activeApiKeyId).toBe('k1');
+    expect(resolved.at(-1)).toBe('sk-alpha');
   });
 });
 

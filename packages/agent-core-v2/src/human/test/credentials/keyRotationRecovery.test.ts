@@ -144,6 +144,54 @@ describe('keyRotationRecovery cycle bound', () => {
   });
 });
 
+describe('keyRotationRecovery exhaustion', () => {
+  it('reports the provider and the key count once every key was tried', () => {
+    expect(
+      keyRotationRecovery.exhausted?.(context({ error: refused, appliedRecoveries: rotationRecords(2) })),
+    ).toEqual({
+      strategy: 'api_key_rotation',
+      action: 'exhausted',
+      detail: 'kilo: all 3 configured keys were tried',
+    });
+  });
+
+  it('stays silent while a key is still untried in this step', () => {
+    expect(
+      keyRotationRecovery.exhausted?.(
+        context({ error: refused, appliedRecoveries: rotationRecords(1) }),
+      ),
+    ).toBeUndefined();
+  });
+
+  it('stays silent when no rotation was applied to this step', () => {
+    expect(
+      keyRotationRecovery.exhausted?.(context({ error: refused })),
+    ).toBeUndefined();
+  });
+
+  it('stays silent for a failure that never qualified for rotation', () => {
+    expect(
+      keyRotationRecovery.exhausted?.(
+        context({ error: statusError(401), appliedRecoveries: rotationRecords(2) }),
+      ),
+    ).toBeUndefined();
+  });
+
+  it('stays silent when the credential provider exposes no rotation controller', () => {
+    const ctx = context({ error: refused, appliedRecoveries: rotationRecords(2) });
+    expect(
+      keyRotationRecovery.exhausted?.({ ...ctx, credentialProvider: { resolve: () => undefined } }),
+    ).toBeUndefined();
+  });
+
+  it('reports no key value', () => {
+    const record = keyRotationRecovery.exhausted?.(
+      context({ error: refused, appliedRecoveries: rotationRecords(2) }),
+    );
+    expect(record?.detail).not.toContain('sk-');
+  });
+});
+
 function rotationRecords(count: number): LlmRecoveryRecord[] {
   return Array.from({ length: count }, () => ({
     strategy: 'api_key_rotation',

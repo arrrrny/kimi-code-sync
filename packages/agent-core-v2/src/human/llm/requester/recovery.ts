@@ -26,4 +26,5 @@ export interface LlmRecoveryProposal {
 
 export interface LlmRecovery {
   propose(ctx: LlmRecoveryContext): (LlmRecoveryProposal & LlmRecoveryRecord) | undefined;
+  exhausted?(ctx: LlmRecoveryContext): LlmRecoveryRecord | undefined;
 }

@@ -435,3 +435,55 @@ and failed before the implementation. `/speckit.tdd.run` appends the cycle entri
 - observed after the fix: the notice case **`Tests 1 passed | 58 skipped (59)`**; scoped re-runs
   `test/agent/loop` → **`Tests 75 passed (75)`** and `src/human/test/agent` → **`Tests 60 passed (60)`**,
   so the merge repaired the harness without moving the turn-machine suite.
+
+## Cycle 30 — A19 the exhausted-cycle notice (US5.3, T066)
+
+- test 1 (unit): `packages/agent-core-v2/src/human/test/credentials/keyRotationRecovery.test.ts >
+  keyRotationRecovery exhaustion` — six cases for a new `LlmRecovery.exhausted(ctx)` hook: it reports
+  the provider and the configured key count once `keyCount - 1` rotations were applied to the step; it
+  stays silent while a key is untried, silent with zero rotations, silent for a failure that never
+  qualified for rotation (401), silent without a controller, and carries no `sk-` material.
+- test 2 (acceptance): `packages/agent-core-v2/test/agent/loop/loop.test.ts > Agent loop api key
+  rotation notice > reports that every configured key was tried once the cycle is exhausted` — the same
+  real-loop harness as cycle 28, with two keys and `rotateKeys: true`, exhausts both keys' attempt
+  budgets on 429s (six mocks) and asserts exactly one `api-key-rotation` `WarningIssued` whose message
+  names `test-provider` and says `all 2 configured keys were tried`, with none of the three configured
+  key values.
+- red: unit — **`Tests 2 failed | 17 passed (19)`**:
+  `AssertionError: expected undefined to deeply equal { … "detail": "kilo: all 3 configured keys were
+  tried" … }` and `the given combination of arguments (undefined and string) is invalid for this
+  assertion` on the key-material case; the hook did not exist. Acceptance — **`Tests 1 failed | 59
+  skipped (60)`**: `AssertionError: expected [] to have a length of 1 but got +0` — the loop emitted no
+  warning of any kind once the cycle was exhausted, which is exactly finding 12 (the behavior, not just
+  the test, was missing).
+- implementation: `keyRotationRecovery` gained `exhausted(ctx)` sharing the strategy's existing
+  eligibility guards (`rate_limit` at the attempt budget, or a 403) and its cycle bound, returning
+  `{ strategy: 'api_key_rotation', action: 'exhausted', detail: '<provider>: all <n> configured keys
+  were tried' }`. The engine's composite recovery records that record whenever no strategy proposed
+  (`machineEngineAttachBundle`), clears it on `turn.started` / `llm.sent` / after use, and publishes it
+  in `turn.failed` **after** `stepFailed` and before `turnSettled` as the existing `recovering` event —
+  so `loopService`'s current `recovering` case issues the `api-key-rotation` warning with no change
+  there, the failed-step marker survives (the substitute/fallback handoff of T062 still runs), and the
+  notice cannot fire when zero rotations were applied.
+- green: unit **`Tests 19 passed (19)`**; acceptance **`Tests 1 passed | 59 skipped (60)`**.
+- scoped suites after the change: `src/human/test/agent` → **`Tests 62 passed (62)`**,
+  `test/agent/loop` → **`Tests 76 passed (76)`**, `tsc --noEmit` → exit 0,
+  `node scripts/check-no-comments.mjs` → OK (1833 files).
+
+## Cycle 31 — the turn suite now drives the real rotation controller (T070, findings 4/5)
+
+- test: `packages/agent-core-v2/src/human/test/agent/turn.test.ts > turn machine api key rotation
+  against the real rotation controller` — two cases that replace the hand-rolled `rotation()` stub with
+  `createKeyedCredentialProvider` over a real `ProviderService` (`loadAll` with three keys and
+  `rotateKeys: true`): one asserts the rotated `activeApiKeyId` is persisted on the provider config and
+  the next attempt resolves the new key value (`sk-alpha` → `sk-beta`); the other starts on the last key
+  and asserts the cycle wraps to the first (`k3` → `k1`, `sk-gamma` → `sk-alpha`).
+- red: none — the production behavior shipped in cycle 11, so these are strengthening tests and the
+  proof is mutant-based, as for cycles 26/27 and T070.
+- mutant A — `await this.providers.setActiveApiKey(...)` deleted from `ApiKeyRotationController.apply`:
+  **`Tests 2 failed | 26 passed (28)`** (both new cases fail on `activeApiKeyId` / resolved key value).
+- mutant B — the circular wraparound removed (`entries[(index + 1) % entries.length]` →
+  `entries[index + 1]`): **`Tests 1 failed | 27 passed (28)`** (the wraparound case fails; no rotation
+  is planned from the last key).
+- Both mutants were reverted, and the file verifies byte-identical to its pre-mutation backup
+  (`git diff -- packages/agent-core-v2/src/llm-adapter/provider/apiKeyRotation.ts` is empty).

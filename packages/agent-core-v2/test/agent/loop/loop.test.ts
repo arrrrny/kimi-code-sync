@@ -2304,4 +2304,53 @@ describe('Agent loop api key rotation notice', () => {
       await ctx.dispose();
     }
   });
+
+  it('reports that every configured key was tried once the cycle is exhausted', async () => {
+    const maxAttemptsPerStep = 3;
+    const ctx = createTestAgent({
+      initialConfig: {
+        loopControl: { maxAttemptsPerStep },
+        providers: {
+          'test-provider': {
+            type: 'kimi',
+            apiKey: 'sk-legacy-key',
+            baseUrl: 'https://api.example.test/v1',
+            rotateKeys: true,
+            activeApiKeyId: 'k1',
+            apiKeys: {
+              k1: { key: 'sk-live-SECRET-ONE', name: 'primary' },
+              k2: { key: 'sk-live-SECRET-TWO', name: 'personal' },
+            },
+          },
+        },
+      },
+    } as unknown as TestAgentOptions);
+    try {
+      await ctx.restorePersisted();
+      const warnings: WarningIssued[] = [];
+      const subscription = ctx.get(IEventBus).subscribe((event) => {
+        if (event instanceof WarningIssued) warnings.push(event);
+      });
+      for (let i = 0; i < maxAttemptsPerStep * 2; i += 1) {
+        ctx.mockNextProviderResponse({ error: new APIProviderRateLimitError('slow down', null, 1) });
+      }
+
+      await ctx.rpc.prompt({ input: [{ type: 'text', text: 'hello' }] });
+      await ctx.untilTurnEnd();
+      subscription.dispose();
+
+      const exhausted = warnings.filter(
+        (warning) =>
+          warning.code === 'api-key-rotation' &&
+          warning.message.includes('all 2 configured keys were tried'),
+      );
+      expect(exhausted).toHaveLength(1);
+      expect(exhausted[0]?.message).toContain('test-provider');
+      expect(exhausted[0]?.message).not.toContain('sk-live-SECRET-ONE');
+      expect(exhausted[0]?.message).not.toContain('sk-live-SECRET-TWO');
+      expect(exhausted[0]?.message).not.toContain('sk-legacy-key');
+    } finally {
+      await ctx.dispose();
+    }
+  });
 });
