@@ -212,6 +212,7 @@ export class AgentMcpService extends Service implements IAgentMcpService {
       resolved.client,
       resolved.tools,
       resolved.enabledNames,
+      resolved.deferred,
     );
     this.emitMcpToolCollisions(entry.name, result.collisions);
     this.recordDiscovery(entry.name, resolved.rawTools, resolved.enabledNames, result.collisions);
@@ -235,7 +236,13 @@ export class AgentMcpService extends Service implements IAgentMcpService {
       oauthService,
       reconnect: (signal) => this.reconnect(entry.name, signal),
     });
-    const disposable = this._register(this.registry.register(tool, { source: 'mcp' }));
+    const deferred = this.mcpHandle.connectionManager.configOf(entry.name)?.deferred === true;
+    const disposable = this._register(
+      this.registry.register(tool, {
+        source: 'mcp',
+        disclosure: deferred ? 'deferred' : 'inline',
+      }),
+    );
     this.mcpTools.set(tool.name, { disposable, serverName: entry.name });
     this.mcpToolsByServer.set(entry.name, [tool.name]);
     void this.dispatcher.dispatch(
@@ -252,6 +259,7 @@ export class AgentMcpService extends Service implements IAgentMcpService {
     client: MCPClient,
     tools: readonly KosongTool[],
     enabledTools: ReadonlySet<string>,
+    deferred: boolean,
   ): {
     readonly registered: readonly string[];
     readonly collisions: readonly McpToolCollision[];
@@ -285,14 +293,17 @@ export class AgentMcpService extends Service implements IAgentMcpService {
       const disposable = this._register(
         this.registry.register(
           createMcpTool(qualified, tool, client, {
+            serverName,
             attachmentStore: this.attachmentStore,
             telemetry: this.telemetry,
             providerType: () => this.profile.getModelProviderType(),
             reconnect: (signal) => this.reconnectForToolCall(serverName, client, signal),
             isRemoved: () =>
               this.mcpHandle.connectionManager.get(serverName)?.status === 'removed',
+            onUnauthorized: (error, failedClient) =>
+              this.mcpHandle.connectionManager.markNeedsAuth(serverName, error, failedClient),
           }),
-          { source: 'mcp' },
+          { source: 'mcp', disclosure: deferred ? 'deferred' : 'inline' },
         ),
       );
       this.mcpTools.set(qualified, { disposable, serverName });

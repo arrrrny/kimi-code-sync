@@ -364,7 +364,7 @@ describe('refreshAllProviderModels', () => {
         'a/m1': {
           provider: 'a',
           model: 'm1',
-          maxContextSize: 131072,
+          maxContextSize: 262144,
           capabilities: ['tool_use'],
           displayName: 'm1',
         },
@@ -427,7 +427,7 @@ describe('refreshAllProviderModels', () => {
     expect(host.current().models?.['b/m1']).toEqual({
       provider: 'b',
       model: 'm1',
-      maxContextSize: 131072,
+      maxContextSize: 262144,
       capabilities: ['tool_use'],
       displayName: 'm1',
     });
@@ -456,21 +456,21 @@ describe('refreshAllProviderModels', () => {
         'a/m1': {
           provider: 'a',
           model: 'm1',
-          maxContextSize: 131072,
+          maxContextSize: 262144,
           capabilities: ['tool_use'],
           displayName: 'm1',
         },
         'b/m1': {
           provider: 'b',
           model: 'm1',
-          maxContextSize: 131072,
+          maxContextSize: 262144,
           capabilities: ['tool_use'],
           displayName: 'm1',
         },
         'my-b': {
           provider: 'b',
           model: 'm1',
-          maxContextSize: 131072,
+          maxContextSize: 262144,
           capabilities: ['tool_use'],
           displayName: 'My B',
         },
@@ -549,14 +549,14 @@ describe('refreshAllProviderModels', () => {
         'a/m1': {
           provider: 'a',
           model: 'm1',
-          maxContextSize: 131072,
+          maxContextSize: 262144,
           capabilities: ['tool_use'],
           displayName: 'm1',
         },
         'b/m1': {
           provider: 'b',
           model: 'm1',
-          maxContextSize: 131072,
+          maxContextSize: 262144,
           capabilities: ['tool_use'],
           displayName: 'm1',
         },
@@ -624,7 +624,7 @@ describe('refreshAllProviderModels', () => {
     expect(host.current().models?.['b/m2']).toEqual({
       provider: 'b',
       model: 'm2',
-      maxContextSize: 131072,
+      maxContextSize: 262144,
       capabilities: ['tool_use'],
       displayName: 'm2',
     });
@@ -1213,7 +1213,7 @@ describe('refreshAllProviderModels', () => {
         'custom/m1': {
           provider: 'custom',
           model: 'm1',
-          maxContextSize: 131072,
+          maxContextSize: 262144,
           capabilities: ['tool_use'],
           displayName: 'm1',
         },
@@ -1253,6 +1253,8 @@ describe('refreshAllProviderModels', () => {
 });
 
 describe('refreshCatalogProviderModels', () => {
+  const MODELS_DEV_URL = 'https://models.dev/api.json';
+
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
@@ -1280,6 +1282,12 @@ describe('refreshCatalogProviderModels', () => {
     } as unknown as KimiConfig);
 
     const fetchMock = vi.fn<FetchMock>(async (input, init) => {
+      // `/refresh-catalog` pulls the live models.dev catalog before the
+      // provider endpoints. Nothing here matches, so the curated window must
+      // survive the refresh.
+      if (fetchInputUrl(input) === MODELS_DEV_URL) {
+        return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
       expect(fetchInputUrl(input)).toBe(`${baseUrl}/models`);
       expect(new Headers(init?.headers).get('authorization')).toBe('Bearer sk-zai');
       return new Response(
@@ -1316,9 +1324,12 @@ describe('refreshCatalogProviderModels', () => {
       telemetry: true,
     } as unknown as KimiConfig);
 
-    let calls = 0;
+    let providerCalls = 0;
     const fetchMock = vi.fn<FetchMock>(async (input) => {
-      calls += 1;
+      if (fetchInputUrl(input) === MODELS_DEV_URL) {
+        return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      providerCalls += 1;
       expect(fetchInputUrl(input)).toContain('opencode.ai');
       return new Response(
         JSON.stringify({ data: [{ id: 'm' }] }),
@@ -1337,7 +1348,70 @@ describe('refreshCatalogProviderModels', () => {
       { providerId: 'opencode' },
     );
 
-    expect(calls).toBe(1);
+    expect(providerCalls).toBe(1);
     expect(result.changed.map((c) => c.providerId)).toEqual(['opencode']);
+  });
+
+  it('enriches from the live models.dev catalog instead of the 256K default', async () => {
+    // Regression: the catalog memo is seeded from the snapshot bundled at build
+    // time, so a provider/model added to models.dev after the installed release
+    // used to collapse to OPENAI_COMPATIBLE_DEFAULT_CONTEXT and lose its
+    // display name until a newer release shipped a fresh snapshot.
+    const baseUrl = 'https://opencode.ai/zen/v1';
+    const host = makeRefreshHost({
+      providers: {
+        'opencode-go': { type: 'openai', baseUrl, apiKey: 'sk-oc' },
+      },
+      models: {},
+      telemetry: true,
+    } as unknown as KimiConfig);
+
+    const fetchMock = vi.fn<FetchMock>(async (input) => {
+      if (fetchInputUrl(input) === MODELS_DEV_URL) {
+        return new Response(
+          JSON.stringify({
+            'opencode-go': {
+              models: {
+                'deepseek-v4.1-flash': {
+                  id: 'deepseek-v4.1-flash',
+                  name: 'DeepSeek V4.1 Flash',
+                  limit: { context: 1000000 },
+                  tool_call: true,
+                  modalities: { input: ['text'], output: ['text'] },
+                },
+              },
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      // opencode-go's real `/models` returns no context length.
+      return new Response(
+        JSON.stringify({ data: [{ id: 'deepseek-v4.1-flash' }] }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await refreshCatalogProviderModels({
+      getConfig: async () => host.current(),
+      removeProvider: host.removeProvider,
+      setConfig: host.setConfig,
+      resolveOAuthToken: vi.fn(),
+    });
+
+    expect(result.failed).toEqual([]);
+    const alias = host.current().models?.['opencode-go/deepseek-v4.1-flash'];
+    expect(alias?.maxContextSize).toBe(1000000);
+    expect(alias?.displayName).toBe('DeepSeek V4.1 Flash');
+    // The live catalog is what supplied it — the bundled snapshot would not —
+    // and the app-level pre-warm must fetch it before the provider endpoint:
+    // drop the pre-warm call and the enrichment silently reads the snapshot.
+    const requestedUrls = fetchMock.mock.calls.map(([input]) => fetchInputUrl(input));
+    const catalogIndex = requestedUrls.indexOf(MODELS_DEV_URL);
+    const providerIndex = requestedUrls.indexOf(`${baseUrl}/models`);
+    expect(catalogIndex).toBeGreaterThanOrEqual(0);
+    expect(providerIndex).toBeGreaterThanOrEqual(0);
+    expect(catalogIndex).toBeLessThan(providerIndex);
   });
 });

@@ -177,7 +177,7 @@ describe('fetchCustomRegistry', () => {
     const error = await fetchCustomRegistry(
       KOKUB_SOURCE,
       { fetchImpl: fetchMock as unknown as typeof fetch },
-    ).catch((caught: unknown) => caught);
+    ).catch((error: unknown) => error);
 
     expect(error).toBeInstanceOf(CustomRegistryApiError);
     expect((error as CustomRegistryApiError).status).toBe(401);
@@ -265,7 +265,7 @@ describe('applyCustomRegistryProvider', () => {
       maxContextSize: CUSTOM_REGISTRY_DEFAULT_MAX_CONTEXT,
       displayName: 'GPT 5.5',
     });
-    expect(gpt).toMatchObject({ maxContextSize: 131072 });
+    expect(gpt).toMatchObject({ maxContextSize: CUSTOM_REGISTRY_DEFAULT_MAX_CONTEXT });
     expect((gpt as { capabilities: string[] }).capabilities).toEqual([
       ...CUSTOM_REGISTRY_DEFAULT_CAPABILITIES,
     ]);
@@ -580,7 +580,7 @@ describe('applyCustomRegistryEntries', () => {
     applyCustomRegistryEntries(config, entries, source);
     applyCustomRegistryEntries(config, entries, source);
 
-    expect(Object.keys(config.providers).sort()).toEqual(['a', 'b', 'c']);
+    expect(Object.keys(config.providers).toSorted()).toEqual(['a', 'b', 'c']);
     expect(config.models?.['a/m1']).toBeDefined();
     expect(config.models?.['b/m1']).toBeDefined();
     expect(config.models?.['c/m1']).toBeDefined();

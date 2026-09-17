@@ -131,7 +131,7 @@ async function waitForSubmit(sandbox, timeoutSec) {
       } catch {
         if (Date.now() >= deadline) return resolve(false);
         process.stdout.write('.');
-        setTimeout(tick, 2000);
+        setTimeout(() => void tick(), 2000);
       }
     };
     void tick();

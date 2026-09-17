@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import type { LlmModel } from '#human/llm/model';
 
-import { planOpenAIRequest } from '#human/llm/requester/bases/openai/requester';
-import { planOpenAIResponsesRequest } from '#human/llm/requester/bases/openai-responses/requester';
-import { planAnthropicRequest } from '#human/llm/requester/bases/anthropic/requester';
+import { prepareOpenAIRequest } from '#human/llm/requester/bases/openai/requester';
+import { prepareOpenAIResponsesRequest } from '#human/llm/requester/bases/openai-responses/requester';
+import { prepareAnthropicRequest } from '#human/llm/requester/bases/anthropic/requester';
 
 const OPENCODE_BASE_URL = 'https://opencode.ai/zen/v1';
 const OPENCODE_GO_BASE_URL = 'https://opencode.ai/zen/go/v1';
@@ -25,7 +25,7 @@ function makeModel(provider = 'openai', baseUrl = 'https://api.example.com/v1'):
 
 function sessionHeaderFor(cacheKey: string, apiKey?: string): string | undefined {
   const model: LlmModel = apiKey === undefined ? makeModel() : { ...makeModel(), apiKey };
-  return planOpenAIRequest({
+  return prepareOpenAIRequest({
     model,
     messages: [],
     tools: [],
@@ -37,7 +37,7 @@ describe('x-opencode-session header', () => {
   describe('openai (chat completions)', () => {
     it('sets x-opencode-session derived from the cache key', () => {
       const model = makeModel();
-      const request = planOpenAIRequest({
+      const request = prepareOpenAIRequest({
         model,
         messages: [],
         tools: [],
@@ -48,7 +48,7 @@ describe('x-opencode-session header', () => {
 
     it('does not set x-opencode-session when cacheKey is absent', () => {
       const model = makeModel();
-      const request = planOpenAIRequest({
+      const request = prepareOpenAIRequest({
         model,
         messages: [],
         tools: [],
@@ -58,7 +58,7 @@ describe('x-opencode-session header', () => {
 
     it('identifies as the opencode client on opencode endpoints', () => {
       const model = makeModel('opencode', OPENCODE_BASE_URL);
-      const request = planOpenAIRequest({
+      const request = prepareOpenAIRequest({
         model,
         messages: [],
         tools: [],
@@ -69,7 +69,7 @@ describe('x-opencode-session header', () => {
 
     it('does not identify as the opencode client on other endpoints', () => {
       const model = makeModel();
-      const request = planOpenAIRequest({
+      const request = prepareOpenAIRequest({
         model,
         messages: [],
         tools: [],
@@ -82,7 +82,7 @@ describe('x-opencode-session header', () => {
   describe('openai-responses', () => {
     it('sets x-opencode-session derived from the cache key', () => {
       const model = makeModel();
-      const request = planOpenAIResponsesRequest({
+      const request = prepareOpenAIResponsesRequest({
         model,
         messages: [],
         tools: [],
@@ -93,7 +93,7 @@ describe('x-opencode-session header', () => {
 
     it('does not set x-opencode-session when cacheKey is absent', () => {
       const model = makeModel();
-      const request = planOpenAIResponsesRequest({
+      const request = prepareOpenAIResponsesRequest({
         model,
         messages: [],
         tools: [],
@@ -103,7 +103,7 @@ describe('x-opencode-session header', () => {
 
     it('identifies as the opencode client on opencode endpoints', () => {
       const model = makeModel('opencode', OPENCODE_GO_BASE_URL);
-      const request = planOpenAIResponsesRequest({
+      const request = prepareOpenAIResponsesRequest({
         model,
         messages: [],
         tools: [],
@@ -114,7 +114,7 @@ describe('x-opencode-session header', () => {
 
     it('does not identify as the opencode client on other endpoints', () => {
       const model = makeModel();
-      const request = planOpenAIResponsesRequest({
+      const request = prepareOpenAIResponsesRequest({
         model,
         messages: [],
         tools: [],
@@ -127,7 +127,7 @@ describe('x-opencode-session header', () => {
   describe('anthropic', () => {
     it('sets x-opencode-session derived from the cache key', () => {
       const model = makeModel('anthropic');
-      const request = planAnthropicRequest({
+      const request = prepareAnthropicRequest({
         model,
         messages: [],
         tools: [],
@@ -138,7 +138,7 @@ describe('x-opencode-session header', () => {
 
     it('does not set x-opencode-session when cacheKey is absent', () => {
       const model = makeModel('anthropic');
-      const request = planAnthropicRequest({
+      const request = prepareAnthropicRequest({
         model,
         messages: [],
         tools: [],
@@ -148,7 +148,7 @@ describe('x-opencode-session header', () => {
 
     it('identifies as the opencode client on opencode endpoints', () => {
       const model = makeModel('opencode', OPENCODE_BASE_URL);
-      const request = planAnthropicRequest({
+      const request = prepareAnthropicRequest({
         model,
         messages: [],
         tools: [],
@@ -159,7 +159,7 @@ describe('x-opencode-session header', () => {
 
     it('does not identify as the opencode client on other endpoints', () => {
       const model = makeModel('anthropic');
-      const request = planAnthropicRequest({
+      const request = prepareAnthropicRequest({
         model,
         messages: [],
         tools: [],
@@ -173,7 +173,7 @@ describe('x-opencode-session header', () => {
 describe('opencode session id derivation', () => {
   function sessionHeaderWithoutKey(cacheKey: string): string | undefined {
     const model: LlmModel = { ...makeModel(), apiKey: undefined };
-    return planOpenAIRequest({
+    return prepareOpenAIRequest({
       model,
       messages: [],
       tools: [],
@@ -215,7 +215,7 @@ describe('opencode session id derivation', () => {
   });
 
   it('ignores an unparseable base url', () => {
-    const request = planOpenAIRequest({
+    const request = prepareOpenAIRequest({
       model: makeModel('opencode', 'not a url'),
       messages: [],
       tools: [],
@@ -228,7 +228,7 @@ describe('opencode session id derivation', () => {
 
 describe('opencode user agent host matching', () => {
   function userAgentFor(baseUrl: string): string | undefined {
-    return planOpenAIRequest({
+    return prepareOpenAIRequest({
       model: makeModel('opencode', baseUrl),
       messages: [],
       tools: [],

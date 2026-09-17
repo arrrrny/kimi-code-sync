@@ -1,4 +1,5 @@
 import {
+  refreshModelsDevCatalog,
   refreshProviderCatalog,
   refreshProviderModels,
   type ProviderChange,
@@ -49,14 +50,22 @@ export async function refreshAllProviderModels(
 
 /**
  * On-demand catalog refresh for OpenAI-compatible providers (the `/refresh-catalog`
- * command). Fetches each provider's `/models` endpoint, preserves curated
- * `maxContextSize` values, and enriches names/capabilities from models.dev.
- * Never refreshes during the automatic startup refresh.
+ * command). Refreshes the live models.dev catalog, then fetches each provider's
+ * `/models` endpoint, preserves curated `maxContextSize` values, and enriches
+ * names/capabilities from models.dev. Never refreshes during the automatic
+ * startup refresh.
  */
 export async function refreshCatalogProviderModels(
   host: RefreshProviderHost,
   options: { providerId?: string } = {},
 ): Promise<RefreshCatalogResult> {
+  // Enrichment reads a memo of the models.dev catalog, and that memo is seeded
+  // from the snapshot bundled at build time. Refreshing it from the live
+  // endpoint first is what lets a provider/model pair newer than the installed
+  // release pick up its real context window and display name instead of falling
+  // through to `OPENAI_COMPATIBLE_DEFAULT_CONTEXT`. Best-effort: a failed fetch
+  // leaves the bundled snapshot in place.
+  await refreshModelsDevCatalog(undefined, host.userAgent);
   return refreshProviderCatalog(
     {
       getConfig: () => host.getConfig(),

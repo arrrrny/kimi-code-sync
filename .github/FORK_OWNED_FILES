@@ -79,3 +79,14 @@ packages/agent-core-v2/test/human/llm/requester/bases/x-opencode-session.test.ts
 # --- fallback cascade terminal-400 extension (bug fallback-model-skipped) ---
 packages/agent-core-v2/src/agent/llmRequester/llmRequesterService.ts :: activateFallback
 packages/agent-core-v2/src/llm-adapter/contract/errors.ts           :: isTerminalProviderApiError
+
+# --- /refresh-catalog live models.dev enrichment (OpenAI-compatible providers) ---
+packages/oauth/src/modelsDevCatalog.ts                              :: lookupModelsDevModel
+apps/kimi-code/src/tui/utils/refresh-providers.ts                   :: refreshCatalogProviderModels
+
+# --- auto session titles stay opt-in (privacy default, sync 2026-09-14) ---
+# Upstream graduated AI titles out of the experimental flag and gates only on
+# the subscription section, which defaults every method to enabled. The fork
+# keeps web_search/fetch_url enabled-by-default but leaves auto_session_title
+# off unless `[subscription] auto_session_title = true` is set explicitly.
+packages/agent-core-v2/src/app/subscription/subscription.ts          :: SUBSCRIPTION_METHOD_DEFAULTS

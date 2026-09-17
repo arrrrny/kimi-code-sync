@@ -72,4 +72,15 @@ describe('isSubscriptionMethodEnabled', () => {
   it('tolerates unknown method ids as enabled', () => {
     expect(isSubscriptionMethodEnabled(fakeConfig({ some_future_method: false }), id)).toBe(true);
   });
+
+  it('keeps auto session titles disabled when the section is absent', () => {
+    expect(isSubscriptionMethodEnabled(fakeConfig(undefined), 'auto_session_title')).toBe(false);
+  });
+
+  it('enables auto session titles only when explicitly set to true', () => {
+    expect(isSubscriptionMethodEnabled(fakeConfig({}), 'auto_session_title')).toBe(false);
+    expect(
+      isSubscriptionMethodEnabled(fakeConfig({ auto_session_title: true }), 'auto_session_title'),
+    ).toBe(true);
+  });
 });

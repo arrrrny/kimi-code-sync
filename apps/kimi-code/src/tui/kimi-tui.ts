@@ -291,6 +291,7 @@ function createInitialAppState(input: KimiTUIStartupInput): AppState {
     notifications: input.tuiConfig.notifications,
     upgrade: input.tuiConfig.upgrade,
     statusLine: input.tuiConfig.statusLine,
+    markdown: input.tuiConfig.markdown,
     favoriteModels: input.tuiConfig.favoriteModels ?? [],
     availableModels: {},
     availableProviders: {},
