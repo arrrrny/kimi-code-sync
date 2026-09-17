@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import type { LlmModel } from '#human/llm/model';
 
-import { planOpenAIRequest } from '#human/llm/requester/bases/openai/requester';
-import { planOpenAIResponsesRequest } from '#human/llm/requester/bases/openai-responses/requester';
-import { planAnthropicRequest } from '#human/llm/requester/bases/anthropic/requester';
+import { prepareOpenAIRequest } from '#human/llm/requester/bases/openai/requester';
+import { prepareOpenAIResponsesRequest } from '#human/llm/requester/bases/openai-responses/requester';
+import { prepareAnthropicRequest } from '#human/llm/requester/bases/anthropic/requester';
 
 function makeModel(provider = 'openai', baseUrl = 'https://api.example.com/v1'): LlmModel {
   return {
@@ -20,7 +20,7 @@ describe('x-opencode-session header', () => {
   describe('openai (chat completions)', () => {
     it('sets x-opencode-session when cacheKey is provided', () => {
       const model = makeModel();
-      const request = planOpenAIRequest({
+      const request = prepareOpenAIRequest({
         model,
         messages: [],
         tools: [],
@@ -31,7 +31,7 @@ describe('x-opencode-session header', () => {
 
     it('does not set x-opencode-session when cacheKey is absent', () => {
       const model = makeModel();
-      const request = planOpenAIRequest({
+      const request = prepareOpenAIRequest({
         model,
         messages: [],
         tools: [],
@@ -43,7 +43,7 @@ describe('x-opencode-session header', () => {
   describe('openai-responses', () => {
     it('sets x-opencode-session when cacheKey is provided', () => {
       const model = makeModel();
-      const request = planOpenAIResponsesRequest({
+      const request = prepareOpenAIResponsesRequest({
         model,
         messages: [],
         tools: [],
@@ -54,7 +54,7 @@ describe('x-opencode-session header', () => {
 
     it('does not set x-opencode-session when cacheKey is absent', () => {
       const model = makeModel();
-      const request = planOpenAIResponsesRequest({
+      const request = prepareOpenAIResponsesRequest({
         model,
         messages: [],
         tools: [],
@@ -66,7 +66,7 @@ describe('x-opencode-session header', () => {
   describe('anthropic', () => {
     it('sets x-opencode-session when cacheKey is provided', () => {
       const model = makeModel('anthropic');
-      const request = planAnthropicRequest({
+      const request = prepareAnthropicRequest({
         model,
         messages: [],
         tools: [],
@@ -77,7 +77,7 @@ describe('x-opencode-session header', () => {
 
     it('does not set x-opencode-session when cacheKey is absent', () => {
       const model = makeModel('anthropic');
-      const request = planAnthropicRequest({
+      const request = prepareAnthropicRequest({
         model,
         messages: [],
         tools: [],

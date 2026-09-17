@@ -27,6 +27,7 @@ import {
 import { handleLoginCommand, handleLogoutCommand } from './auth';
 import { handleBtwCommand } from './btw';
 import { handleCopyCommand } from './copy';
+import { handleDesktopCommand } from './desktop';
 import {
   handleCompactCommand,
   handleCompactThresholdCommand,
@@ -88,6 +89,7 @@ import { handleRemoteControlCommand, handleWebCommand } from './web';
 export { handleLoginCommand, handleLogoutCommand } from './auth';
 export { handleBtwCommand } from './btw';
 export { handleCopyCommand } from './copy';
+export { handleDesktopCommand } from './desktop';
 export { handleAddDirCommand } from './add-dir';
 export {
   handleCompactCommand,
@@ -644,6 +646,9 @@ async function handleBuiltInSlashCommand(
       return;
     case 'web':
       await handleWebCommand(host);
+      return;
+    case 'desktop':
+      await handleDesktopCommand(host);
       return;
     case 'remote-control':
       await handleRemoteControlCommand(host);
