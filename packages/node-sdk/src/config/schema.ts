@@ -46,6 +46,7 @@ const StringRecordSchema = z.record(z.string(), z.string());
 export const ProviderApiKeySchema = z.object({
   key: z.string().min(1),
   name: z.string().min(1),
+  proxyUrl: z.string().optional(),
 });
 
 export type ProviderApiKey = z.infer<typeof ProviderApiKeySchema>;
@@ -55,6 +56,7 @@ export const ProviderConfigSchema = z.object({
   apiKey: z.string().optional(),
   apiKeys: z.record(z.string(), ProviderApiKeySchema).optional(),
   activeApiKeyId: z.string().optional(),
+  rotateKeys: z.boolean().optional(),
   baseUrl: z.string().optional(),
   proxyUrl: z.string().optional(),
   free_models_only: z.boolean().optional(),

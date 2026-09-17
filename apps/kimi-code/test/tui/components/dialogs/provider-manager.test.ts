@@ -30,6 +30,7 @@ function makeComponent(overrides: Partial<ProviderManagerOptions> = {}): Provide
     onRemoveKey: vi.fn(),
     onSetActiveKey: vi.fn(),
     onSetProxyUrl: vi.fn(),
+    onToggleRotation: vi.fn(),
     onClose: vi.fn(),
     ...overrides,
   });
@@ -110,6 +111,126 @@ describe('ProviderManagerComponent', () => {
     expect(lines[titleIdx + 2]).toBe('');
     // Only the top and bottom full-width borders remain — two, not three.
     expect(lines.filter(isBorder).length).toBe(2);
+  });
+
+  it('shows a key row with its name, a masked preview and the current marker, and no proxy text', () => {
+    const component = makeComponent({
+      providers: {
+        acme: {
+          type: 'openai',
+          baseUrl: 'https://acme.test',
+          apiKeys: {
+            key1: { key: 'sk-alpha-secret-value', name: 'work' },
+            key2: { key: 'sk-beta-secret-value', name: 'spare' },
+          },
+          activeApiKeyId: 'key1',
+        },
+      } as unknown as Record<string, ProviderConfig>,
+    });
+
+    const plain = rendered(component);
+
+    expect(plain).toContain('work');
+    expect(plain).toContain('spare');
+    expect(plain).toContain('sk-alpha...alue');
+    expect(plain).not.toContain('sk-alpha-secret-value');
+    expect(plain).toContain('← current');
+    expect(plain).not.toContain('proxy:');
+  });
+
+  it('shows the rotation state and the R hint for a provider with several keys', () => {
+    const keys = {
+      key1: { key: 'sk-alpha-secret-value', name: 'work' },
+      key2: { key: 'sk-beta-secret-value', name: 'spare' },
+    };
+    const rotationOff = makeComponent({
+      providers: {
+        acme: { type: 'openai', baseUrl: 'https://acme.test', apiKeys: keys, activeApiKeyId: 'key1' },
+      } as unknown as Record<string, ProviderConfig>,
+    });
+    const rotationOn = makeComponent({
+      providers: {
+        acme: {
+          type: 'openai',
+          baseUrl: 'https://acme.test',
+          apiKeys: keys,
+          activeApiKeyId: 'key1',
+          rotateKeys: true,
+        },
+      } as unknown as Record<string, ProviderConfig>,
+    });
+
+    expect(rendered(rotationOff)).toContain('rotate keys: off');
+    expect(rendered(rotationOn)).toContain('rotate keys: on');
+
+    const hint = rotationOff
+      .render(120)
+      .map((line) => line.replaceAll(SGR, ''))
+      .find((line) => line.includes('navigate'));
+    expect(hint).toContain('R rotate keys');
+  });
+
+  it("shows a key's own proxy host on its row", () => {
+    const component = makeComponent({
+      providers: {
+        acme: {
+          type: 'openai',
+          baseUrl: 'https://acme.test',
+          apiKeys: {
+            key1: {
+              key: 'sk-alpha-secret-value',
+              name: 'work',
+              proxyUrl: 'http://127.0.0.1:8081',
+            },
+          },
+        },
+      } as unknown as Record<string, ProviderConfig>,
+    });
+
+    const plain = rendered(component);
+
+    expect(plain).toContain('proxy:');
+    expect(plain).toContain('127.0.0.1:8081');
+  });
+
+  it("never renders a key's proxy userinfo or the key secret", () => {
+    const component = makeComponent({
+      providers: {
+        acme: {
+          type: 'openai',
+          baseUrl: 'https://acme.test',
+          apiKeys: {
+            key1: {
+              key: 'sk-alpha-secret-value',
+              name: 'work',
+              proxyUrl: 'http://proxy-user:proxy-pass@127.0.0.1:8081',
+            },
+          },
+        },
+      } as unknown as Record<string, ProviderConfig>,
+    });
+
+    const plain = rendered(component);
+
+    expect(plain).toContain('127.0.0.1:8081');
+    expect(plain).not.toContain('proxy-user');
+    expect(plain).not.toContain('proxy-pass');
+    expect(plain).not.toContain('sk-alpha-secret-value');
+  });
+
+  it('shows no proxy text for a key without a proxy of its own', () => {
+    const component = makeComponent({
+      providers: {
+        acme: {
+          type: 'openai',
+          baseUrl: 'https://acme.test',
+          proxyUrl: 'http://127.0.0.1:8080',
+          apiKeys: { key1: { key: 'sk-alpha-secret-value', name: 'work' } },
+        },
+      } as unknown as Record<string, ProviderConfig>,
+    });
+
+    expect(rendered(component)).not.toContain('proxy:');
   });
 
   it('deletes the highlighted provider via the D key with a y/N confirm', () => {

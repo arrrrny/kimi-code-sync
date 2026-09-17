@@ -265,6 +265,70 @@ export function promptProxyUrl(host: SlashCommandHost, providerName: string): Pr
   });
 }
 
+/**
+ * Asks for the optional proxy of one API key. The answer is tri-state:
+ * `undefined` = the user cancelled the whole add-key flow, `{}` = accepted
+ * with no proxy of its own (inherit the provider's), `{ proxyUrl }` = use
+ * this proxy. A non-empty value must parse as an absolute proxy URL;
+ * anything else re-prompts instead of being returned.
+ */
+export async function promptKeyProxyUrl(
+  host: SlashCommandHost,
+  platformName: string,
+): Promise<KeyProxyAnswer | undefined> {
+  let subtitle =
+    'Enter a proxy URL for this key (e.g. http://localhost:8080). Leave empty to use the provider proxy.';
+  for (;;) {
+    const value = await promptKeyProxyUrlOnce(host, platformName, subtitle);
+    if (value === undefined) return undefined;
+    if (value.length === 0) return {};
+    if (!isProxyUrl(value)) {
+      subtitle = `"${value}" is not a valid proxy URL. Enter an absolute http, https or socks URL, or leave empty.`;
+      continue;
+    }
+    return { proxyUrl: value };
+  }
+}
+
+const PROXY_PROTOCOLS = new Set(['http:', 'https:', 'socks:', 'socks4:', 'socks5:', 'socks5h:']);
+
+function isProxyUrl(value: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return false;
+  }
+  return PROXY_PROTOCOLS.has(parsed.protocol) && parsed.host.length > 0;
+}
+
+function promptKeyProxyUrlOnce(
+  host: SlashCommandHost,
+  platformName: string,
+  subtitle: string,
+): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    const dialog = new ApiKeyInputDialogComponent(
+      platformName,
+      [subtitle],
+      (result: ApiKeyInputResult) => {
+        host.restoreEditor();
+        resolve(result.kind === 'ok' ? result.value : undefined);
+      },
+      {
+        title: `Enter proxy URL for ${platformName}`,
+        mask: false,
+        allowEmpty: true,
+      },
+    );
+    host.mountEditorReplacement(dialog);
+  });
+}
+
+export interface KeyProxyAnswer {
+  readonly proxyUrl?: string;
+}
+
 export function runModelSelector(
   host: SlashCommandHost,
   modelDict: Record<string, ModelAlias>,

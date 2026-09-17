@@ -38,6 +38,7 @@ import { daemonFileRefFromPart } from '#/agent/media/mediaRef';
 import { materializePromptDaemonRefs } from '#/agent/media/promptMediaIntake';
 import { ISessionMediaStore } from '#/agent/media/sessionMediaStore';
 import { IAgentProfileService } from '#/agent/profile/profile';
+import { WarningIssued } from '#/agent/profile/profileOps';
 import { IAgentScopeContext } from '#/agent/scopeContext/scopeContext';
 import { IAgentStateService } from '#/agent/state/agentState';
 import { IFileService } from '#/app/file/fileService';
@@ -1554,6 +1555,15 @@ export class AgentLoopService extends Disposable implements IAgentLoopService {
           this.closeFailedMachineStep(turn, step, 'error');
         }
         turn.current = undefined;
+        if (event.detail !== undefined) {
+          void this.dispatcher.dispatch(
+            new WarningIssued({
+              agentId: this.scopeContext.agentId,
+              code: 'api-key-rotation',
+              message: event.detail,
+            }),
+          );
+        }
         return;
       }
       case 'retrying': {

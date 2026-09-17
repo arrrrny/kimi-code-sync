@@ -7,11 +7,82 @@
  * a small host rig.
  * Run: pnpm -C apps/kimi-code exec vitest run test/tui/commands/provider.test.ts
  */
-import type { ModelAlias } from '@moonshot-ai/kimi-code-sdk';
+import type { ModelAlias, ProviderConfig } from '@moonshot-ai/kimi-code-sdk';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { SlashCommandHost } from '#/tui/commands';
-import { setDefaultModel } from '#/tui/commands/provider';
+import { handleProviderCommand, setDefaultModel } from '#/tui/commands/provider';
+import { promptKeyProxyUrl } from '#/tui/commands/prompts';
+
+const ESC = String.fromCodePoint(27);
+
+type MountedPanel = {
+  handleInput: (data: string) => void;
+  render: (width: number) => string[];
+};
+
+/**
+ * Host rig for the provider-manager flows. The harness config surface is a
+ * single mutable snapshot, so a write followed by a re-read behaves like the
+ * real one; `mountEditorReplacement` records every panel in mount order.
+ */
+function makeFlowHost(providers: Record<string, ProviderConfig> = {}) {
+  const mounts: MountedPanel[] = [];
+  const snapshot: { providers: Record<string, ProviderConfig> } = { providers };
+  const replaceConfigSections = vi.fn(async (sections: Record<string, unknown>) => {
+    snapshot.providers = sections['providers'] as Record<string, ProviderConfig>;
+  });
+  const setConfig = vi.fn(async (patch: Record<string, unknown>) => {
+    snapshot.providers = patch['providers'] as Record<string, ProviderConfig>;
+    return patch;
+  });
+  const appState: Record<string, unknown> = {
+    availableProviders: snapshot.providers,
+    availableModels: {},
+    model: 'acme/m1',
+  };
+  const host = {
+    state: { appState },
+    harness: {
+      supportsAtomicSectionReplace: () => true,
+      replaceConfigSections,
+      setConfig,
+      getConfig: vi.fn(async () => ({ providers: snapshot.providers })),
+    },
+    authFlow: {
+      refreshConfigAfterLogin: vi.fn(async () => {
+        appState['availableProviders'] = snapshot.providers;
+        return false;
+      }),
+    },
+    restoreEditor: vi.fn(),
+    mountEditorReplacement: vi.fn((panel: MountedPanel) => {
+      mounts.push(panel);
+    }),
+    showError: vi.fn(),
+    showStatus: vi.fn(),
+    showNotice: vi.fn(),
+    track: vi.fn(),
+  } as unknown as SlashCommandHost & {
+    harness: { replaceConfigSections: ReturnType<typeof vi.fn>; setConfig: ReturnType<typeof vi.fn> };
+    showError: ReturnType<typeof vi.fn>;
+    showStatus: ReturnType<typeof vi.fn>;
+  };
+
+  const nextMount = async (index: number): Promise<MountedPanel> => {
+    await vi.waitFor(() => {
+      expect(mounts.length).toBeGreaterThan(index);
+    });
+    return mounts[index]!;
+  };
+
+  return { host, mounts, nextMount, replaceConfigSections, setConfig, snapshot };
+}
+
+function submit(panel: MountedPanel, value: string): void {
+  if (value.length > 0) panel.handleInput(value);
+  panel.handleInput('\r');
+}
 
 function makeHost(
   options: {
@@ -151,5 +222,182 @@ describe('setDefaultModel', () => {
     expect(
       host.waitForLazyCreation.mock.invocationCallOrder[0]!,
     ).toBeLessThan(host.harness.setConfig.mock.invocationCallOrder[0]!);
+  });
+});
+
+describe('handleProviderCommand key flows', () => {
+  const acme = (): Record<string, ProviderConfig> => ({
+    acme: { type: 'openai', baseUrl: 'https://acme.test' } as ProviderConfig,
+  });
+
+  const twoKeyAcme = (): Record<string, ProviderConfig> => ({
+    acme: {
+      type: 'openai',
+      baseUrl: 'https://acme.test',
+      apiKeys: {
+        key1: { key: 'sk-alpha-secret-value', name: 'work', proxyUrl: 'http://127.0.0.1:8081' },
+        key2: { key: 'sk-beta-secret-value', name: 'spare' },
+      },
+      activeApiKeyId: 'key1',
+    },
+  });
+
+  it('adds a key through name, secret, then one optional proxy question', async () => {
+    const { host, mounts, nextMount, replaceConfigSections } = makeFlowHost(acme());
+
+    void handleProviderCommand(host);
+    mounts[0]!.handleInput('a');
+    submit(await nextMount(1), 'work');
+    submit(await nextMount(2), 'sk-alpha-secret-value');
+    const proxy = await nextMount(3);
+    expect(proxy.render(80).join('\n')).toContain('proxy URL');
+
+    submit(proxy, '');
+    await nextMount(4);
+
+    expect(replaceConfigSections).toHaveBeenCalledTimes(1);
+  });
+
+  it('stores no per-key proxy when the proxy answer is empty', async () => {
+    const { host, mounts, nextMount, replaceConfigSections } = makeFlowHost(acme());
+
+    void handleProviderCommand(host);
+    mounts[0]!.handleInput('a');
+    submit(await nextMount(1), 'work');
+    submit(await nextMount(2), 'sk-alpha-secret-value');
+    submit(await nextMount(3), '');
+    await nextMount(4);
+
+    const written = replaceConfigSections.mock.calls[0]![0] as {
+      providers: Record<string, ProviderConfig>;
+    };
+    const entry = written.providers['acme']!.apiKeys!['key1']!;
+
+    expect(entry).toEqual({ key: 'sk-alpha-secret-value', name: 'work' });
+    expect(entry.proxyUrl).toBeUndefined();
+  });
+
+  it('persists a supplied proxy with the key through the existing write path', async () => {
+    const { host, mounts, nextMount, replaceConfigSections, setConfig } = makeFlowHost(acme());
+
+    void handleProviderCommand(host);
+    mounts[0]!.handleInput('a');
+    submit(await nextMount(1), 'work');
+    submit(await nextMount(2), 'sk-alpha-secret-value');
+    submit(await nextMount(3), 'http://127.0.0.1:8081');
+    await nextMount(4);
+
+    expect(setConfig).not.toHaveBeenCalled();
+    const written = replaceConfigSections.mock.calls[0]![0] as {
+      providers: Record<string, ProviderConfig>;
+    };
+    const provider = written.providers['acme']!;
+
+    expect(provider.apiKeys!['key1']).toEqual({
+      key: 'sk-alpha-secret-value',
+      name: 'work',
+      proxyUrl: 'http://127.0.0.1:8081',
+    });
+    expect(provider.activeApiKeyId).toBe('key1');
+  });
+
+  it('abandons the flow and writes nothing when the proxy prompt is cancelled', async () => {
+    const { host, mounts, nextMount, replaceConfigSections, setConfig } = makeFlowHost(acme());
+
+    void handleProviderCommand(host);
+    mounts[0]!.handleInput('a');
+    submit(await nextMount(1), 'work');
+    submit(await nextMount(2), 'sk-alpha-secret-value');
+    (await nextMount(3)).handleInput(ESC);
+    await nextMount(4);
+
+    expect(replaceConfigSections).not.toHaveBeenCalled();
+    expect(setConfig).not.toHaveBeenCalled();
+    expect(host.showStatus).not.toHaveBeenCalled();
+  });
+
+  it('flips only rotate_keys from the R key, leaving the keys and their proxies alone', async () => {
+    const { host, mounts, replaceConfigSections } = makeFlowHost(twoKeyAcme());
+
+    void handleProviderCommand(host);
+    mounts[0]!.handleInput('R');
+    await vi.waitFor(() => {
+      expect(replaceConfigSections).toHaveBeenCalledTimes(1);
+    });
+
+    const written = replaceConfigSections.mock.calls[0]![0] as {
+      providers: Record<string, ProviderConfig>;
+    };
+    const provider = written.providers['acme']!;
+
+    expect(provider.rotateKeys).toBe(true);
+    expect(provider.activeApiKeyId).toBe('key1');
+    expect(provider.apiKeys).toEqual(twoKeyAcme()['acme']!.apiKeys);
+    expect(host.showStatus).toHaveBeenCalledWith('Key rotation enabled for acme (2 keys)');
+  });
+
+  it('writes nothing when R is pressed on a provider with a single key', async () => {
+    const providers: Record<string, ProviderConfig> = {
+      acme: {
+        type: 'openai',
+        baseUrl: 'https://acme.test',
+        apiKeys: { key1: { key: 'sk-alpha-secret-value', name: 'work' } },
+        activeApiKeyId: 'key1',
+      },
+    };
+    const { host, mounts, replaceConfigSections, setConfig } = makeFlowHost(providers);
+
+    void handleProviderCommand(host);
+    mounts[0]!.handleInput('R');
+    await vi.waitFor(() => {
+      expect(host.showError).toHaveBeenCalled();
+    });
+
+    expect(replaceConfigSections).not.toHaveBeenCalled();
+    expect(setConfig).not.toHaveBeenCalled();
+    expect(host.showStatus).not.toHaveBeenCalled();
+  });
+});
+
+describe('promptKeyProxyUrl', () => {
+  it('resolves undefined when the user cancels', async () => {
+    const { host, nextMount } = makeFlowHost();
+
+    const answer = promptKeyProxyUrl(host, 'acme/work');
+    const dialog = await nextMount(0);
+    dialog.handleInput(ESC);
+
+    await expect(answer).resolves.toBeUndefined();
+  });
+
+  it('accepts an empty answer as "no proxy of my own"', { timeout: 3000 }, async () => {
+    const { host, nextMount } = makeFlowHost();
+
+    const answer = promptKeyProxyUrl(host, 'acme/work');
+    const dialog = await nextMount(0);
+    dialog.handleInput('\r');
+
+    await expect(answer).resolves.toStrictEqual({});
+  });
+
+  it('resolves a value with surrounding whitespace trimmed', async () => {
+    const { host, nextMount } = makeFlowHost();
+
+    const answer = promptKeyProxyUrl(host, 'acme/work');
+    const dialog = await nextMount(0);
+    submit(dialog, '  http://127.0.0.1:8081  ');
+
+    await expect(answer).resolves.toStrictEqual({ proxyUrl: 'http://127.0.0.1:8081' });
+  });
+
+  it('re-prompts on an invalid proxy address instead of resolving it', async () => {
+    const { host, nextMount } = makeFlowHost();
+
+    const answer = promptKeyProxyUrl(host, 'acme/work');
+    submit(await nextMount(0), 'not-a-url');
+    submit(await nextMount(1), 'ftp://127.0.0.1:8081');
+    submit(await nextMount(2), 'http://127.0.0.1:8081');
+
+    await expect(answer).resolves.toStrictEqual({ proxyUrl: 'http://127.0.0.1:8081' });
   });
 });

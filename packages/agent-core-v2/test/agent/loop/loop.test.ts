@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IDisposable } from '#/_base/di/lifecycle';
 import { Event } from '#/_base/event';
 import { IAgentProfileService } from '#/index';
+import { WarningIssued } from '#/agent/profile/profileOps';
 import { IAgentLLMRequesterService } from '#/agent/llmRequester/llmRequester';
 import type { ModelRequestTiming } from '#/llm-adapter/model/model-requester';
 import { APIProviderRateLimitError } from '#/llm-adapter/contract/errors';
@@ -2254,3 +2255,53 @@ function deferred(): { readonly promise: Promise<void>; readonly resolve: () => 
   });
   return { promise, resolve };
 }
+
+describe('Agent loop api key rotation notice', () => {
+  it('reports the provider and the new key without leaking the key value', async () => {
+    const maxAttemptsPerStep = 3;
+    const ctx = createTestAgent({
+      initialConfig: {
+        loopControl: { maxAttemptsPerStep },
+        providers: {
+          'test-provider': {
+            type: 'kimi',
+            apiKey: 'sk-legacy-key',
+            baseUrl: 'https://api.example.test/v1',
+            rotateKeys: true,
+            activeApiKeyId: 'k1',
+            apiKeys: {
+              k1: { key: 'sk-live-SECRET-ONE', name: 'primary' },
+              k2: { key: 'sk-live-SECRET-TWO', name: 'personal' },
+            },
+          },
+        },
+      },
+    } as unknown as TestAgentOptions);
+    try {
+      await ctx.restorePersisted();
+      const warnings: WarningIssued[] = [];
+      const subscription = ctx.get(IEventBus).subscribe((event) => {
+        if (event instanceof WarningIssued) warnings.push(event);
+      });
+      for (let i = 0; i < maxAttemptsPerStep; i += 1) {
+        ctx.mockNextProviderResponse({ error: new APIProviderRateLimitError('slow down', null, 1) });
+      }
+      ctx.mockNextResponse({ type: 'text', text: 'answered on the next key' });
+
+      await ctx.rpc.prompt({ input: [{ type: 'text', text: 'hello' }] });
+      await ctx.untilTurnEnd();
+      subscription.dispose();
+
+      const rotations = warnings.filter((warning) => warning.code === 'api-key-rotation');
+      expect(rotations).toHaveLength(1);
+      expect(rotations[0]?.message).toContain('test-provider');
+      expect(rotations[0]?.message).toContain('personal');
+      expect(rotations[0]?.message).toContain('k2');
+      expect(rotations[0]?.message).not.toContain('sk-live-SECRET-ONE');
+      expect(rotations[0]?.message).not.toContain('sk-live-SECRET-TWO');
+      expect(rotations[0]?.message).not.toContain('sk-legacy-key');
+    } finally {
+      await ctx.dispose();
+    }
+  });
+});

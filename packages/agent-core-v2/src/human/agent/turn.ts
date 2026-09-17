@@ -218,6 +218,11 @@ export type TurnOutput =
   | { type: 'failed'; error: unknown; produced: HistoryMessage[] }
   | { type: 'aborted'; produced: HistoryMessage[] };
 
+export interface PendingRecovery {
+  readonly proposal: LlmRecoveryProposal & LlmRecoveryRecord;
+  readonly cause: Extract<TurnEvent, { type: 'turn.failure.evaluated' }>['cause'];
+}
+
 export interface TurnMachineContext {
   input: TurnInput;
   produced: HistoryMessage[];
@@ -232,6 +237,7 @@ export interface TurnMachineContext {
   delayMs: number;
   appliedRecoveries: LlmRecoveryRecord[];
   attemptMessageOverride?: readonly Message[];
+  pendingRecovery?: PendingRecovery;
   paused: boolean;
   outcome?: 'done' | 'failed' | 'aborted';
   error?: unknown;
@@ -334,6 +340,7 @@ function llmRecoveringEvent(
     type: 'llm.recovering',
     strategy: record.strategy,
     action: record.action,
+    detail: record.detail,
     ...retryErrorFields(error),
   };
 }
@@ -381,6 +388,15 @@ export function createTurnMachine(
       onBeforeStepActor: fromPromise<void, TurnBeforeStepContext>(async ({ input }) => {
         await options?.onBeforeStep?.(input);
       }),
+      applyRecoveryActor: fromPromise<void, PendingRecovery['proposal'] | undefined>(
+        async ({ input }) => {
+          try {
+            await input?.beforeNextAttempt?.();
+          } catch {
+            return;
+          }
+        },
+      ),
     },
     actions: {
       forwardToParent: ({ self, event }) => {
@@ -483,6 +499,7 @@ export function createTurnMachine(
                 ? withAbort(context.input.parentSignal)
                 : createAbortScope(),
             step: ({ context }) => context.step + 1,
+            pendingRecovery: undefined,
           }),
           {
             type: 'signalParent',
@@ -637,6 +654,8 @@ export function createTurnMachine(
                 error: event.error,
                 messages: baseMessages(context),
                 appliedRecoveries: context.appliedRecoveries,
+                attempt: context.attempt,
+                maxAttempts: resolveMaxAttempts(retry),
                 credentialProvider: context.input.request.credentialProvider,
               }),
             })),
@@ -644,32 +663,17 @@ export function createTurnMachine(
           'turn.failure.evaluated': [
             {
               guard: ({ event }) => event.proposal !== undefined,
-              target: 'thinking',
-              reenter: true,
+              target: 'applyingRecovery',
               actions: [
-                ({ context, event }) => {
+                ({ context }) => {
                   context.accumulator.rollback();
-                  event.proposal?.beforeNextAttempt?.();
                 },
-                assign(({ context, event }) => {
-                  const proposal = event.proposal as LlmRecoveryProposal & LlmRecoveryRecord;
-                  return {
-                    appliedRecoveries: [
-                      ...context.appliedRecoveries,
-                      { strategy: proposal.strategy, action: proposal.action },
-                    ],
-                    attemptMessageOverride: proposal.attemptMessageOverride ?? context.attemptMessageOverride,
-                    attempt: 1,
-                  };
-                }),
-                {
-                  type: 'sendToParent',
-                  params: ({ context, event }) =>
-                    llmRecoveringEvent(
-                      context.appliedRecoveries.at(-1) as LlmRecoveryRecord,
-                      event.cause.error,
-                    ),
-                },
+                assign(({ event }) => ({
+                  pendingRecovery: {
+                    proposal: event.proposal as LlmRecoveryProposal & LlmRecoveryRecord,
+                    cause: event.cause,
+                  },
+                })),
               ],
             },
             {
@@ -711,6 +715,47 @@ export function createTurnMachine(
               },
               'salvageAborted',
             ],
+          },
+        },
+      },
+      applyingRecovery: {
+        invoke: {
+          src: 'applyRecoveryActor',
+          input: ({ context }) => context.pendingRecovery?.proposal,
+          onDone: {
+            target: 'thinking',
+            actions: [
+              assign(({ context }) => {
+                const pending = context.pendingRecovery as PendingRecovery;
+                return {
+                  appliedRecoveries: [
+                    ...context.appliedRecoveries,
+                    {
+                      strategy: pending.proposal.strategy,
+                      action: pending.proposal.action,
+                      detail: pending.proposal.detail,
+                    },
+                  ],
+                  attemptMessageOverride:
+                    pending.proposal.attemptMessageOverride ?? context.attemptMessageOverride,
+                  attempt: 1,
+                };
+              }),
+              {
+                type: 'sendToParent',
+                params: ({ context }) =>
+                  llmRecoveringEvent(
+                    context.appliedRecoveries.at(-1) as LlmRecoveryRecord,
+                    (context.pendingRecovery as PendingRecovery).cause.error,
+                  ),
+              },
+            ],
+          },
+        },
+        on: {
+          'turn.abort': {
+            target: 'aborted',
+            actions: assign({ outcome: 'aborted' as const }),
           },
         },
       },

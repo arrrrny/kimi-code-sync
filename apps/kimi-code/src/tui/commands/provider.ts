@@ -38,6 +38,7 @@ import {
   promptBaseUrl,
   promptCatalogProviderSelection,
   promptKeyName,
+  promptKeyProxyUrl,
   promptProxyUrl,
 } from './prompts';
 import type { SlashCommandHost } from './dispatch';
@@ -86,6 +87,11 @@ function buildProviderManagerOptions(host: SlashCommandHost): ProviderManagerOpt
     onSetProxyUrl: (providerId) => {
       void handleProviderProxyUrl(host, providerId).catch((error: unknown) => {
         host.showError(`Set proxy URL failed: ${formatErrorMessage(error)}`);
+      });
+    },
+    onToggleRotation: (providerId) => {
+      void handleProviderKeyRotationToggle(host, providerId).catch((error: unknown) => {
+        host.showError(`Toggle key rotation failed: ${formatErrorMessage(error)}`);
       });
     },
     onClose: () => {
@@ -158,6 +164,13 @@ async function handleProviderKeyAdd(host: SlashCommandHost, providerId: string):
     return;
   }
 
+  // Prompt for the key's optional proxy; empty means "inherit the provider's".
+  const keyProxy = await promptKeyProxyUrl(host, `${providerId}/${name}`);
+  if (keyProxy === undefined) {
+    reopenProviderManager(host);
+    return;
+  }
+
   // Generate a unique key ID
   const keyId = generateKeyId(provider);
 
@@ -170,7 +183,7 @@ async function handleProviderKeyAdd(host: SlashCommandHost, providerId: string):
   }
 
   const apiKeys = existingProvider.apiKeys ? { ...existingProvider.apiKeys } : {};
-  apiKeys[keyId] = { key: apiKey, name };
+  apiKeys[keyId] = { key: apiKey, name, proxyUrl: keyProxy.proxyUrl };
 
   providers[providerId] = {
     ...existingProvider,
@@ -255,6 +268,44 @@ async function handleProviderKeySetActive(host: SlashCommandHost, providerId: st
   await host.authFlow.refreshConfigAfterLogin();
   const keyName = provider.apiKeys[keyId].name;
   host.showStatus(`Set active API key to "${keyName}" for ${providerId}`);
+  reopenProviderManager(host);
+}
+
+async function handleProviderKeyRotationToggle(
+  host: SlashCommandHost,
+  providerId: string,
+): Promise<void> {
+  const config = await host.harness.getConfig();
+  const providers = { ...config.providers };
+  const provider = providers[providerId];
+  if (!provider) {
+    host.showError(`Provider ${providerId} not found`);
+    return;
+  }
+
+  const rotateKeys = provider.rotateKeys !== true;
+  const keyCount = Object.keys(provider.apiKeys ?? {}).length;
+  if (keyCount < 2) {
+    host.showError(
+      `Key rotation needs at least two API keys for ${providerId}; only ${String(keyCount)} configured.`,
+    );
+    return;
+  }
+  providers[providerId] = { ...provider, rotateKeys };
+
+  // Use replaceConfigSections if available (v2) to ensure full replacement,
+  // otherwise fall back to setConfig (v1 deep merge).
+  if (host.harness.supportsAtomicSectionReplace()) {
+    await host.harness.replaceConfigSections({ providers });
+  } else {
+    await host.harness.setConfig({ providers });
+  }
+  await host.authFlow.refreshConfigAfterLogin();
+  host.showStatus(
+    rotateKeys
+      ? `Key rotation enabled for ${providerId} (${String(keyCount)} keys)`
+      : `Key rotation disabled for ${providerId}`,
+  );
   reopenProviderManager(host);
 }
 

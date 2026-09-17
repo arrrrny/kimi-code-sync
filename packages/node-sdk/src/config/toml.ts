@@ -322,9 +322,33 @@ function transformProviderData(data: Record<string, unknown>): Record<string, un
       out[targetKey] = isPlainObject(value) ? transformPlainObject(value) : value;
     } else if (targetKey === 'env' || targetKey === 'customHeaders') {
       out[targetKey] = cloneObjectValue(value);
+    } else if (targetKey === 'apiKeys') {
+      out[targetKey] = transformApiKeys(value);
     } else {
       out[targetKey] = value;
     }
+  }
+  return out;
+}
+
+function transformApiKeys(value: unknown): unknown {
+  if (!isPlainObject(value)) return value;
+  const out: Record<string, unknown> = {};
+  for (const [keyId, entry] of Object.entries(value)) {
+    if (!isPlainObject(entry)) {
+      out[keyId] = entry;
+      continue;
+    }
+    const converted = transformPlainObject(entry);
+    if (typeof converted['proxyUrl'] === 'string') {
+      const trimmed = converted['proxyUrl'].trim();
+      if (trimmed.length === 0) {
+        delete converted['proxyUrl'];
+      } else {
+        converted['proxyUrl'] = trimmed;
+      }
+    }
+    out[keyId] = converted;
   }
   return out;
 }
@@ -513,9 +537,31 @@ function providerToToml(provider: ProviderConfig, rawProvider: unknown): Record<
       out[camelToSnake(key)] = oauthToToml(value as OAuthRef);
     } else if ((key === 'env' || key === 'customHeaders') && value !== undefined) {
       out[camelToSnake(key)] = cloneUnknown(value);
+    } else if (key === 'apiKeys' && value !== undefined) {
+      out[camelToSnake(key)] = apiKeysToToml(value, out[camelToSnake(key)]);
     } else {
       setDefined(out, camelToSnake(key), value);
     }
+  }
+  return out;
+}
+
+function apiKeysToToml(value: unknown, rawValue: unknown): unknown {
+  if (!isPlainObject(value)) return value;
+  const rawSub = cloneRecord(rawValue);
+  const out: Record<string, unknown> = {};
+  for (const [keyId, entry] of Object.entries(value)) {
+    if (!isPlainObject(entry)) {
+      out[keyId] = entry;
+      continue;
+    }
+    const converted = cloneRecord(rawSub[keyId]);
+    for (const [field, fieldValue] of Object.entries(entry)) {
+      setDefined(converted, camelToSnake(field), fieldValue);
+    }
+    delete converted['proxy_url'];
+    setDefined(converted, 'proxy_url', entry['proxyUrl']);
+    out[keyId] = converted;
   }
   return out;
 }

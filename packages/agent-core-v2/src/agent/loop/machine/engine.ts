@@ -9,6 +9,7 @@ import { createTurnMachine, type AssistantEntry, type HistoryMessage, type Syste
 import { messageAppended, turnEnded } from '#human/agent/events';
 import { agentSlices, type AgentEventStore } from '#human/agent/slices';
 import { credentialsRecovery } from '#human/credentials/credentials';
+import { keyRotationRecovery } from '#human/credentials/keyRotationRecovery';
 import { createEventStoreSync } from '#human/eventStore/eventStore';
 import type { ExternalEvent } from '#human/eventStore/events';
 import { memoryJournal, type SyncStoreJournal } from '#human/eventStore/journal';
@@ -90,6 +91,7 @@ export type MachineEngineEvent =
       readonly step: number;
       readonly strategy: string;
       readonly action: string;
+      readonly detail?: string;
       readonly errorName: string;
       readonly errorMessage: string;
       readonly statusCode?: number;
@@ -318,6 +320,7 @@ export function machineEngineAttachBundle(options: CreateMachineEngineOptions): 
     resolve: () => current()?.resolve(),
     canRecover: (error) => current()?.canRecover?.(error) === true,
     invalidate: () => current()?.invalidate?.(),
+    rotation: () => current()?.rotation?.(),
   };
   const baseJournal = options.journal;
   const initialTurnId = options.initialTurnId ?? 0;
@@ -329,7 +332,10 @@ export function machineEngineAttachBundle(options: CreateMachineEngineOptions): 
     turnLogic: createTurnMachine(requester.requester, {
       retry: { maxAttemptsPerStep: options.maxAttemptsPerStep },
       recovery: {
-        propose: (ctx) => credentialsRecovery.propose(ctx) ?? options.recovery?.propose(ctx),
+        propose: (ctx) =>
+          keyRotationRecovery.propose(ctx) ??
+          credentialsRecovery.propose(ctx) ??
+          options.recovery?.propose(ctx),
       },
     }),
     toolLogic: createToolMachine(tools.executor),
@@ -409,6 +415,7 @@ export function attachMachineEngine(
         step: currentStep,
         strategy: event.strategy,
         action: event.action,
+        detail: event.detail,
         errorName: event.errorName,
         errorMessage: event.errorMessage,
         statusCode: event.statusCode,
