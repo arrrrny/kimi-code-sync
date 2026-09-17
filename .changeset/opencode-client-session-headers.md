@@ -3,4 +3,4 @@
 "@moonshot-ai/agent-core-v2": patch
 ---
 
-Send OpenCode's `ses_`-formatted session id and the OpenCode client user agent on OpenCode endpoints.
+Send OpenCode's `ses_`-formatted session id, scoped to the active API key, and the OpenCode client user agent on OpenCode endpoints.

@@ -10,7 +10,8 @@ const OPENCODE_BASE_URL = 'https://opencode.ai/zen/v1';
 const OPENCODE_GO_BASE_URL = 'https://opencode.ai/zen/go/v1';
 const OPENCODE_USER_AGENT = 'opencode/1.17.0';
 const KIMI_SESSION_ID = 'session_0923e81c-92bb-4bf0-80d8-4d0dbfdbd067';
-const OPENCODE_SESSION_ID = 'ses_0923e81c92bb4bf080d84d0dbf';
+const OPENCODE_SESSION_ID = 'ses_0923e81c92bb4bf080d88b6a72';
+const OPENCODE_SESSION_ID_WITHOUT_KEY = 'ses_0923e81c92bb4bf080d84d0dbf';
 
 function makeModel(provider = 'openai', baseUrl = 'https://api.example.com/v1'): LlmModel {
   return {
@@ -20,6 +21,16 @@ function makeModel(provider = 'openai', baseUrl = 'https://api.example.com/v1'):
     baseUrl,
     apiKey: 'sk-probe',
   };
+}
+
+function sessionHeaderFor(cacheKey: string, apiKey?: string): string | undefined {
+  const model: LlmModel = apiKey === undefined ? makeModel() : { ...makeModel(), apiKey };
+  return planOpenAIRequest({
+    model,
+    messages: [],
+    tools: [],
+    cacheKey,
+  }).headers?.['x-opencode-session'];
 }
 
 describe('x-opencode-session header', () => {
@@ -160,37 +171,43 @@ describe('x-opencode-session header', () => {
 });
 
 describe('opencode session id derivation', () => {
-  function sessionHeaderFor(cacheKey: string): string | undefined {
-    return planOpenAIRequest({
-      model: makeModel(),
-      messages: [],
-      tools: [],
-      cacheKey,
-    }).headers?.['x-opencode-session'];
-  }
-
-  it('strips the session prefix and dashes and truncates to 26 characters', () => {
-    expect(sessionHeaderFor('session_0923e81c-92bb-4bf0-80d8-4d0dbfdbd067')).toBe(
-      'ses_0923e81c92bb4bf080d84d0dbf',
-    );
+  it('strips the session prefix and dashes and truncates the session part', () => {
+    expect(sessionHeaderFor(KIMI_SESSION_ID)).toBe(OPENCODE_SESSION_ID);
+    expect(sessionHeaderFor(KIMI_SESSION_ID)?.replace('ses_', '')).toHaveLength(26);
   });
 
   it('lowercases and drops characters outside the hex alphabet', () => {
     expect(sessionHeaderFor('session_AB12CD34-ef56-4789-9012-3456789ABCDE')).toBe(
-      'ses_ab12cd34ef5647899012345678',
+      'ses_ab12cd34ef56478990128b6a72',
     );
   });
 
-  it('pads short cache keys to 26 characters', () => {
-    expect(sessionHeaderFor('probe')).toBe('ses_be000000000000000000000000');
+  it('pads short cache keys', () => {
+    expect(sessionHeaderFor('probe')).toBe('ses_be0000000000000000008b6a72');
   });
 
   it('accepts keys already carrying the ses prefix', () => {
-    expect(sessionHeaderFor('ses_abc')).toBe('ses_abc00000000000000000000000');
+    expect(sessionHeaderFor('ses_abc')).toBe('ses_abc000000000000000008b6a72');
   });
 
   it('keeps the same session id across calls for one cache key', () => {
     expect(sessionHeaderFor(KIMI_SESSION_ID)).toBe(sessionHeaderFor(KIMI_SESSION_ID));
+  });
+
+  it('changes the session id when the api key changes', () => {
+    expect(sessionHeaderFor(KIMI_SESSION_ID, 'sk-other')).toBe('ses_0923e81c92bb4bf080d83dcad3');
+    expect(sessionHeaderFor(KIMI_SESSION_ID, 'sk-other')).not.toBe(OPENCODE_SESSION_ID);
+  });
+
+  it('omits the key fingerprint when the model carries no api key', () => {
+    const model: LlmModel = { ...makeModel(), apiKey: undefined };
+    const request = planOpenAIRequest({
+      model,
+      messages: [],
+      tools: [],
+      cacheKey: KIMI_SESSION_ID,
+    });
+    expect(request.headers?.['x-opencode-session']).toBe(OPENCODE_SESSION_ID_WITHOUT_KEY);
   });
 
   it('ignores an unparseable base url', () => {
