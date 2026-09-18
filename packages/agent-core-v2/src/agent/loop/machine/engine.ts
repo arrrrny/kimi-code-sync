@@ -9,6 +9,7 @@ import { createTurnMachine, type AssistantEntry, type HistoryMessage, type Syste
 import { messageAppended, turnEnded } from '#human/agent/events';
 import { agentSlices, type AgentEventStore } from '#human/agent/slices';
 import { credentialsRecovery } from '#human/credentials/credentials';
+import { keyRotationRecovery } from '#human/credentials/keyRotationRecovery';
 import { createEventStoreSync } from '#human/eventStore/eventStore';
 import type { ExternalEvent } from '#human/eventStore/events';
 import { memoryJournal, type SyncStoreJournal } from '#human/eventStore/journal';
@@ -17,9 +18,9 @@ import type { FinishInfo } from '#human/llm/finish-reason';
 import type { StreamedMessagePart } from '#human/llm/message';
 import { UNKNOWN_CAPABILITY } from '#human/llm/capability';
 import type { LlmModel } from '#human/llm/model';
-import type { LlmRecovery, LlmRecoveryRecord } from '#human/llm/requester/recovery';
+import type { LlmRecovery, LlmRecoveryContext, LlmRecoveryRecord } from '#human/llm/requester/recovery';
 import type { LlmCredentialProvider, LlmRequestConfig } from '#human/llm/requester/requester';
-import { resolveMaxAttempts } from '#human/llm/requester/retry';
+import { resolveMaxAttempts, retryErrorFields } from '#human/llm/requester/retry';
 import type { ToolResult as MachineToolResult, ToolUpdate } from '#human/tool/executor';
 import { createToolMachine } from '#human/tool/machine';
 import type { ToolDefinition } from '#human/tool/tool';
@@ -90,6 +91,7 @@ export type MachineEngineEvent =
       readonly step: number;
       readonly strategy: string;
       readonly action: string;
+      readonly detail?: string;
       readonly errorName: string;
       readonly errorMessage: string;
       readonly statusCode?: number;
@@ -277,6 +279,18 @@ export interface MachineEngineAttachBundle {
   readonly requester: MachineRequester;
   readonly machineTools: MachineTools;
   readonly promptGate?: PromptGate;
+  readonly failureNotice: { current: LlmRecoveryRecord | undefined };
+}
+
+function exhaustedRecovery(
+  recoveries: readonly (LlmRecovery | undefined)[],
+  ctx: LlmRecoveryContext,
+): LlmRecoveryRecord | undefined {
+  for (const recovery of recoveries) {
+    const record = recovery?.exhausted?.(ctx);
+    if (record !== undefined) return record;
+  }
+  return undefined;
 }
 
 export function machineEngineAttachBundle(options: CreateMachineEngineOptions): MachineEngineAttachBundle {
@@ -318,18 +332,30 @@ export function machineEngineAttachBundle(options: CreateMachineEngineOptions): 
     resolve: () => current()?.resolve(),
     canRecover: (error) => current()?.canRecover?.(error) === true,
     invalidate: () => current()?.invalidate?.(),
+    rotation: () => current()?.rotation?.(),
   };
   const baseJournal = options.journal;
   const initialTurnId = options.initialTurnId ?? 0;
   const journal = engineJournal(baseJournal, initialTurnId);
   const store: AgentEventStore = createEventStoreSync({ journal, slices: agentSlices });
+  const failureNotice: { current: LlmRecoveryRecord | undefined } = { current: undefined };
   tools.sync();
   return {
     store,
     turnLogic: createTurnMachine(requester.requester, {
       retry: { maxAttemptsPerStep: options.maxAttemptsPerStep },
       recovery: {
-        propose: (ctx) => credentialsRecovery.propose(ctx) ?? options.recovery?.propose(ctx),
+        propose: (ctx) => {
+          const proposal =
+            keyRotationRecovery.propose(ctx) ??
+            credentialsRecovery.propose(ctx) ??
+            options.recovery?.propose(ctx);
+          failureNotice.current =
+            proposal === undefined
+              ? exhaustedRecovery([keyRotationRecovery, credentialsRecovery, options.recovery], ctx)
+              : undefined;
+          return proposal;
+        },
       },
     }),
     toolLogic: createToolMachine(tools.executor),
@@ -338,6 +364,7 @@ export function machineEngineAttachBundle(options: CreateMachineEngineOptions): 
     requester,
     machineTools: tools,
     promptGate: options.promptGate,
+    failureNotice,
   };
 }
 
@@ -364,6 +391,7 @@ export function attachMachineEngine(
       split = createDeltaSplitter();
       pendingFailure = undefined;
       lastRetry = undefined;
+      bundle.failureNotice.current = undefined;
       publish({ type: 'turnStarted', machineTurnId: event.turnId, queueItemId: event.queueItemId, entry: event.entry });
     }),
     ref.on('step.started', (event) => {
@@ -372,6 +400,7 @@ export function attachMachineEngine(
     ref.on('llm.sent', (event) => {
       split = createDeltaSplitter();
       lastRetry = undefined;
+      bundle.failureNotice.current = undefined;
       tools.beginBatch();
       publish({ type: 'stepStarted', step: currentStep, recovery: event.recovery });
     }),
@@ -409,6 +438,7 @@ export function attachMachineEngine(
         step: currentStep,
         strategy: event.strategy,
         action: event.action,
+        detail: event.detail,
         errorName: event.errorName,
         errorMessage: event.errorMessage,
         statusCode: event.statusCode,
@@ -486,6 +516,18 @@ export function attachMachineEngine(
           error: failure.error,
           rawError: requester.lastError(),
         });
+        const notice = bundle.failureNotice.current;
+        bundle.failureNotice.current = undefined;
+        if (notice?.detail !== undefined) {
+          publish({
+            type: 'recovering',
+            step: failure.step,
+            strategy: notice.strategy,
+            action: notice.action,
+            detail: notice.detail,
+            ...retryErrorFields(failure.error),
+          });
+        }
       }
       publish({
         type: 'turnSettled',

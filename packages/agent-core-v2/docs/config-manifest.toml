@@ -393,6 +393,7 @@ merge_all_available_skills = true
   # api_key: string
   # api_keys: record<string, object>
   # active_api_key_id: string
+  # rotate_keys: boolean
   # oauth: object
     # storage: "file" | "keyring"
     # key: string

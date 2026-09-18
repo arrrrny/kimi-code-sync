@@ -17,7 +17,7 @@ Kimi Code CLI 支持同时接入多家模型供应商服务，模型在供应商
 
 所有供应商默认以流式方式与模型交互。thinking、视觉、工具调用等能力按模型名前缀自动匹配，通常不需要手动声明。
 
-**凭证优先级**：`api_key` 直接字段 > `[providers.<name>.env]` 子表键 > 两者都缺时启动报错。CLI 不会从 shell 环境变量自动取凭证，详见[配置覆盖：供应商凭证](./overrides.md#供应商凭证)。
+**凭证优先级**：`api_keys` 中由 `active_api_key_id` 选中的密钥 > `api_key` 直接字段 > `[providers.<name>.env]` 子表键 > 都缺时启动报错。CLI 不会从 shell 环境变量自动取凭证，详见[配置覆盖：供应商凭证](./overrides.md#供应商凭证)。
 
 ## `/provider` — 交互式供应商管理
 
@@ -28,7 +28,9 @@ Kimi Code CLI 支持同时接入多家模型供应商服务，模型在供应商
 管理器按来源把供应商显示为一行行条目。操作方式：
 
 - ↑/↓ 移动光标，←/→ 翻页
-- `d` 键删除当前供应商（有 `[y/N]` 确认）
+- 按 `a` 为选中的供应商添加密钥（添加流程会一并询问该密钥的可选代理），按 `s` 把选中的密钥设为当前使用
+- 按 `d` 删除选中的供应商或密钥（有 `[y/N]` 确认）
+- 按 `p` 设置供应商代理，按 `r` 开关[自动密钥轮换](#多个-api-密钥与自动轮换)（开启时至少需要两个密钥）
 - 在 `[ Add New Platform ]` 行按 Enter 添加新供应商
 
 添加时有两条路径：
@@ -41,6 +43,38 @@ Kimi Code CLI 支持同时接入多家模型供应商服务，模型在供应商
 :::
 
 非交互环境下也可以用 shell 命令完成同样操作：[`kimi provider`](../reference/kimi-command.md#kimi-provider)。
+
+## 多个 API 密钥与自动轮换
+
+一个供应商可以同时保存多个 API 密钥。每个密钥是 `api_keys` 子表里的一项，同一时刻只有一个是当前密钥，请求只携带当前密钥的凭证。打开 `rotate_keys` 后，当前密钥被拒绝时 CLI 会自动换到下一个密钥，共享密钥额度用尽或触发限流时，正在进行的会话不会就此中断。
+
+```toml
+[providers.openai]
+type = "openai"
+active_api_key_id = "team"
+rotate_keys = true
+
+[providers.openai.api_keys.team]
+key = "sk-xxxxx"
+name = "Team"
+
+[providers.openai.api_keys.backup]
+key = "sk-yyyyy"
+name = "Backup"
+proxy_url = "http://127.0.0.1:1080"
+```
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `api_keys` | `table<string, table>` | — | 具名密钥表；每项包含 `key`、`name`，可选 `proxy_url` |
+| `active_api_key_id` | `string` | — | 当前使用的密钥 ID；不填时供应商回退到单个 `api_key` 字段 |
+| `rotate_keys` | `boolean` | `false` | 当前密钥被拒绝时切换到下一个密钥 |
+
+轮换按供应商逐个开启，并且至少需要两个密钥；只有一个密钥的供应商行为完全不变。开启后，CLI 按配置文件里的顺序切换到下一个密钥（到末尾后回到第一个），并在会话中以警告形式提示切换到的供应商和密钥名。触发条件很窄：HTTP `403`，或当前步骤的重试预算耗尽后仍然限流。其它失败（`401`、网络错误、`5xx`）仍按原有方式处理。使用 `oauth` 凭证的供应商（`/login` 托管账号）不会轮换。
+
+切换会持久化：轮换会把新的 `active_api_key_id` 写回 `config.toml`，因此下次启动仍使用 CLI 最终选定的密钥。
+
+每个密钥也可以带自己的 `proxy_url`，用于走不同的出口网关。代理按请求解析，密钥优先：当前密钥的 `proxy_url` 覆盖供应商级 [`proxy_url`](./config-files.md#providers)；密钥没填则继承供应商的值；两者都没有则直连。
 
 ## `kimi`
 

@@ -45,7 +45,79 @@ describe('providers TOML transforms', () => {
       oauth: { storage: 'file', key: 'k', oauth_host: 'example.com' },
     });
   });
+
+  it('carries rotate_keys through the transform and the provider schema', () => {
+    const from = providersFromToml({
+      kilo: { type: 'openai', rotate_keys: true },
+    }) as Record<string, unknown>;
+    const parsed = ProvidersSectionSchema.parse(from);
+    expect(parsed['kilo']).toEqual({ type: 'openai', rotateKeys: true });
+
+    const back = providersToToml(parsed, {
+      kilo: { type: 'openai', rotate_keys: true },
+    }) as Record<string, Record<string, unknown>>;
+    expect(back['kilo']).toEqual({ type: 'openai', rotate_keys: true });
+  });
+
+  it('round-trips a key entry proxy_url and preserves unknown key fields', () => {
+    const raw = {
+      kilo: {
+        type: 'openai',
+        api_keys: {
+          key1: {
+            key: 'sk-alpha',
+            name: 'work',
+            proxy_url: 'http://127.0.0.1:8081',
+            quota_tier: 'gold',
+          },
+          key2: { key: 'sk-beta', name: 'personal' },
+        },
+      },
+    };
+    const from = providersFromToml(raw) as Record<string, unknown>;
+    const parsed = ProvidersSectionSchema.parse(from);
+    expect(parsed['kilo']?.apiKeys).toEqual({
+      key1: { key: 'sk-alpha', name: 'work', proxyUrl: 'http://127.0.0.1:8081' },
+      key2: { key: 'sk-beta', name: 'personal' },
+    });
+
+    const back = providersToToml(parsed, raw) as Record<string, Record<string, unknown>>;
+    expect(back['kilo']?.['api_keys']).toEqual({
+      key1: {
+        key: 'sk-alpha',
+        name: 'work',
+        proxy_url: 'http://127.0.0.1:8081',
+        quota_tier: 'gold',
+      },
+      key2: { key: 'sk-beta', name: 'personal' },
+    });
+  });
+
+  it('treats an empty key proxy_url as absent on read and on write', () => {
+    const raw = {
+      kilo: {
+        type: 'openai',
+        api_keys: { key1: { key: 'sk-alpha', name: 'work', proxy_url: '   ' } },
+      },
+    };
+    const parsed = ProvidersSectionSchema.parse(providersFromToml(raw));
+    expect(parsed['kilo']?.apiKeys).toEqual({ key1: { key: 'sk-alpha', name: 'work' } });
+
+    const back = providersToToml(parsed, raw) as Record<string, Record<string, unknown>>;
+    expect(back['kilo']?.['api_keys']).toEqual({ key1: { key: 'sk-alpha', name: 'work' } });
+  });
 });
+
+const KEYED_PROVIDER: ProviderConfig = {
+  type: 'openai',
+  apiKey: 'sk-legacy',
+  apiKeys: {
+    key1: { key: 'sk-alpha', name: 'work' },
+    key2: { key: 'sk-beta', name: 'personal' },
+  },
+  activeApiKeyId: 'key1',
+  proxyUrl: 'http://127.0.0.1:8080',
+};
 
 describe('ProviderService', () => {
   function createService(providers: Readonly<Record<string, ProviderConfig>> = {}): ProviderService {
@@ -133,6 +205,45 @@ describe('ProviderService', () => {
     await service.delete('moonshot');
     expect(service.getDefaultProvider()).toBeUndefined();
     expect(pointerEvents).toEqual(['moonshot', undefined]);
+  });
+
+  it('setActiveApiKey advances the cursor only after the persist chain ran', async () => {
+    const service = createService({ kilo: KEYED_PROVIDER });
+    const persistedActiveKeys: Array<string | undefined> = [];
+    service.onDidChangeProviders((e) => {
+      e.waitUntil(
+        new Promise<void>((resolve) => setTimeout(resolve, 20)).then(() => {
+          persistedActiveKeys.push(service.get('kilo')?.activeApiKeyId);
+        }),
+      );
+    });
+
+    await service.setActiveApiKey('kilo', 'key2');
+    expect(persistedActiveKeys).toEqual(['key2']);
+    expect(service.get('kilo')?.activeApiKeyId).toBe('key2');
+  });
+
+  it('setActiveApiKey leaves every other field and every other provider untouched', async () => {
+    const service = createService({ kilo: KEYED_PROVIDER, other: { type: 'kimi' } });
+
+    await service.setActiveApiKey('kilo', 'key2');
+
+    expect(service.get('kilo')).toEqual({ ...KEYED_PROVIDER, activeApiKeyId: 'key2' });
+    expect(service.get('other')).toEqual({ type: 'kimi' });
+  });
+
+  it('setActiveApiKey keeps the advanced key in memory when a persist listener fails', async () => {
+    const service = createService({ kilo: KEYED_PROVIDER });
+    service.onDidChangeProviders((e) => {
+      e.waitUntil(Promise.reject(new Error('persist failed')));
+    });
+
+    const outcome = await service.setActiveApiKey('kilo', 'key2').then(
+      () => 'resolved',
+      () => 'rejected',
+    );
+    expect(outcome).toBe('resolved');
+    expect(service.get('kilo')?.activeApiKeyId).toBe('key2');
   });
 
   it('a mutation resolves only after the listeners’ waitUntil work completes', async () => {

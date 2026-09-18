@@ -7,7 +7,7 @@ import { IConfigService } from '#/app/config/config';
 import { ConfigErrors } from '#/app/config/errors';
 import { UNKNOWN_CAPABILITY } from '#/llm-adapter/contract/capability';
 import { emptyUsage } from '#human/llm/usage';
-import type { LlmRequester } from '#human/llm/requester/requester';
+import type { LlmRequestConfig, LlmRequester } from '#human/llm/requester/requester';
 import { IProtocolAdapterRegistry } from '#/llm-adapter/protocol/protocol';
 import '#/llm-adapter/protocol/protocolAdapterRegistry';
 import {
@@ -509,6 +509,237 @@ describe('Model assembly (pure data)', () => {
         true,
       );
       await expect(model.credentialProvider?.resolve()).resolves.toEqual({ apiKey: 'tok-1' });
+    } finally {
+      host.dispose();
+    }
+  });
+
+  it('follows the active key for a provider configured with apiKeys', async () => {
+    const { host, catalog, providers } = createHost({
+      providers: {
+        kilo: {
+          type: 'openai',
+          baseUrl: 'https://api.example.test/v1',
+          apiKeys: {
+            key1: { key: 'sk-alpha', name: 'work' },
+            key2: { key: 'sk-beta', name: 'personal', proxyUrl: 'http://127.0.0.1:8081' },
+          },
+          activeApiKeyId: 'key1',
+          rotateKeys: true,
+        },
+      },
+      models: { m1: { provider: 'kilo', model: 'gpt-5', maxContextSize: 128000 } },
+    });
+    try {
+      const model = catalog.get('m1');
+      expect(await model.credentialProvider?.resolve()).toEqual({ apiKey: 'sk-alpha' });
+
+      await providers.setActiveApiKey('kilo', 'key2');
+
+      expect(await model.credentialProvider?.resolve()).toEqual({
+        apiKey: 'sk-beta',
+        proxyUrl: 'http://127.0.0.1:8081',
+      });
+      expect(model.credentialProvider?.rotation?.()?.keyCount).toBe(2);
+    } finally {
+      host.dispose();
+    }
+  });
+
+  it('resolves the provider env key for a model whose provider also declares apiKeys', async () => {
+    const { host, catalog } = createHost({
+      providers: {
+        kilo: {
+          type: 'openai',
+          baseUrl: 'https://api.example.test/v1',
+          apiKeys: { key1: { key: 'sk-alpha', name: 'work' } },
+          env: { OPENAI_API_KEY: 'sk-from-env' },
+        },
+      },
+      models: { m1: { provider: 'kilo', model: 'gpt-5', maxContextSize: 128000 } },
+    });
+    try {
+      const model = catalog.get('m1');
+      expect(await model.credentialProvider?.resolve()).toEqual({ apiKey: 'sk-from-env' });
+    } finally {
+      host.dispose();
+    }
+  });
+
+  it('exposes no rotation controller for an oauth-backed model', () => {
+    const tokenProvider = stubTokenProvider(['tok-1']);
+    const { host, catalog } = createHost(
+      {
+        providers: {
+          kimi: {
+            type: 'kimi',
+            oauth: { storage: 'file', key: 'kimi' },
+            baseUrl: 'https://api.moonshot.ai/v1',
+          },
+        },
+        models: { k1: { provider: 'kimi', model: 'kimi-k2', maxContextSize: 1 } },
+      },
+      stubModelOAuthTokens(tokenProvider),
+    );
+    try {
+      const model = catalog.get('k1');
+      expect(model.credentialProvider?.rotation?.()).toBeUndefined();
+      expect(model.credentialProvider?.canRecover?.(Object.assign(new Error('x'), { status: 401 }))).toBe(
+        true,
+      );
+    } finally {
+      host.dispose();
+    }
+  });
+});
+
+const proxySections: Record<string, unknown> = {
+  providers: {
+    kilo: {
+      type: 'openai',
+      baseUrl: 'https://api.example.test/v1',
+      proxyUrl: 'http://provider.example.test:8080',
+      apiKeys: {
+        key1: { key: 'sk-alpha', name: 'work', proxyUrl: 'http://key1.example.test:8081' },
+        key2: { key: 'sk-beta', name: 'personal' },
+        key3: { key: 'sk-gamma', name: 'backup', proxyUrl: 'http://key3.example.test:8083' },
+      },
+      activeApiKeyId: 'key1',
+      rotateKeys: true,
+    },
+  },
+  models: {
+    m1: { provider: 'kilo', model: 'gpt-5', maxContextSize: 128000 },
+    m2: { provider: 'kilo', model: 'gpt-5-mini', maxContextSize: 128000 },
+  },
+};
+
+const REQUEST_INPUT = { systemPrompt: 'sys', tools: [], messages: [] };
+
+function proxyCatalog(sections: Record<string, unknown>): {
+  host: ReturnType<typeof createScopedTestHost>;
+  catalog: ModelCatalog;
+  providers: IProviderService;
+  requests: LlmRequestConfig[];
+} {
+  const { host, models, providers } = createHost(sections);
+  const requests: LlmRequestConfig[] = [];
+  const requester: LlmRequester = {
+    generate: (config, _content, control) => {
+      requests.push(config);
+      control.onEvent?.({ type: 'llm.streaming.part', part: { type: 'text', text: 'ok' } });
+      control.onEvent?.({
+        type: 'llm.streaming.finish',
+        finish: { finishReason: 'completed', rawFinishReason: 'stop' },
+      });
+      control.onEvent?.({ type: 'llm.done' });
+      return Promise.resolve();
+    },
+  };
+  const registry = {
+    _serviceBrand: undefined,
+    supportedProtocols: () => [],
+    resolveAdapterIdentity: () => {
+      throw new Error('not exercised');
+    },
+    resolveProviderBaseId: () => {
+      throw new Error('not exercised');
+    },
+    resolveCapability: () => UNKNOWN_CAPABILITY,
+    resolve: (model: Model) => ({
+      requester,
+      protocol: 'openai',
+      model: {
+        provider: 'fake',
+        model: model.name,
+        capability: {
+          image_in: false,
+          video_in: false,
+          audio_in: false,
+          thinking: false,
+          tool_use: true,
+        },
+        proxyUrl: model.proxyUrl,
+      },
+    }),
+  } as unknown as IProtocolAdapterRegistry;
+  const catalog = new ModelCatalog(
+    new ProviderCatalogRuntimeService(models, providers),
+    providers,
+    models,
+    stubModelOAuthTokens(),
+    registry,
+    { headers: {}, thirdPartyHeaders: {} },
+  );
+  return { host, catalog, providers, requests };
+}
+
+async function drain(stream: AsyncIterable<unknown>): Promise<unknown[]> {
+  const events: unknown[] = [];
+  for await (const event of stream) events.push(event);
+  return events;
+}
+
+describe('per-key proxy cascade on the request path', () => {
+  it("applies the active key's proxy over the provider proxy for a request", async () => {
+    const { host, catalog, requests } = proxyCatalog(proxySections);
+    try {
+      expect(catalog.get('m1').proxyUrl).toBe('http://provider.example.test:8080');
+
+      await drain(catalog.getRequester('m1').request(REQUEST_INPUT));
+
+      expect(requests[0]?.model.proxyUrl).toBe('http://key1.example.test:8081');
+    } finally {
+      host.dispose();
+    }
+  });
+
+  it('falls back to the provider proxy when the active key declares none', async () => {
+    const { host, catalog, providers, requests } = proxyCatalog(proxySections);
+    try {
+      await providers.setActiveApiKey('kilo', 'key2');
+
+      await drain(catalog.getRequester('m1').request(REQUEST_INPUT));
+
+      expect(requests[0]?.model.proxyUrl).toBe('http://provider.example.test:8080');
+    } finally {
+      host.dispose();
+    }
+  });
+
+  it('issues the request without a proxy when neither the provider nor the key declares one', async () => {
+    const { host, catalog, requests } = proxyCatalog({
+      providers: {
+        kilo: {
+          type: 'openai',
+          baseUrl: 'https://api.example.test/v1',
+          apiKeys: { key1: { key: 'sk-alpha', name: 'work' } },
+          activeApiKeyId: 'key1',
+        },
+      },
+      models: { m1: { provider: 'kilo', model: 'gpt-5', maxContextSize: 128000 } },
+    });
+    try {
+      expect(catalog.get('m1').proxyUrl).toBeUndefined();
+
+      await drain(catalog.getRequester('m1').request(REQUEST_INPUT));
+
+      expect(requests[0]?.model.proxyUrl).toBeUndefined();
+    } finally {
+      host.dispose();
+    }
+  });
+
+  it('carries the active key proxy for every model bound to the provider', async () => {
+    const { host, catalog, providers, requests } = proxyCatalog(proxySections);
+    try {
+      await drain(catalog.getRequester('m2').request(REQUEST_INPUT));
+      expect(requests[0]?.model.proxyUrl).toBe('http://key1.example.test:8081');
+
+      await providers.setActiveApiKey('kilo', 'key3');
+
+      await drain(catalog.getRequester('m2').request(REQUEST_INPUT));
+      expect(requests[1]?.model.proxyUrl).toBe('http://key3.example.test:8083');
     } finally {
       host.dispose();
     }

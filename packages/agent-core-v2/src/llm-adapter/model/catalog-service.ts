@@ -7,6 +7,9 @@ import { Error2 } from '#/_base/errors/errors';
 
 import type { CatalogModel, CatalogProviderInfo } from '#human/llm/provider-catalog';
 import {
+  createKeyedCredentialProvider,
+} from '../provider/apiKeyRotation';
+import {
   createOAuthCredentialProvider,
   createStaticCredentialProvider,
 } from '#human/credentials/credentials';
@@ -455,6 +458,14 @@ export class ModelCatalog extends Disposable implements IModelCatalog {
     auth: ResolvedModelAuthMaterial,
   ): LlmCredentialProvider {
     if (auth.apiKey !== undefined) {
+      const configured = this.providers.get(providerName);
+      if (configured !== undefined && Object.keys(configured.apiKeys ?? {}).length > 0) {
+        return createKeyedCredentialProvider({
+          providers: this.providers,
+          providerName,
+          fallbackApiKey: auth.apiKey,
+        });
+      }
       return createStaticCredentialProvider(auth.apiKey);
     }
     if (auth.oauth !== undefined) {
