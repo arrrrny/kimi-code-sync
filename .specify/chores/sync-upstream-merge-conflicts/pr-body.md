@@ -74,20 +74,17 @@ both features and threads the fork's active key through upstream's new shared cr
 
 ### CI result
 
-All checks pass **except `test (5)`**, and that failure is not a regression introduced here:
+**All checks pass** (`mergeStateStatus: CLEAN`). One flaky upstream test is worth recording:
 
-- `test (5)` fails on
+- On the first CI run, `test (5)` failed on
   `kap-server test/modelCatalogCatalog.test.ts > server-v2 /api/v1 catalog browse + import endpoints
   > re-imports an existing id as a refresh: credentials replaced, stale aliases dropped`
-  (`Error: waitForServerState timed out`).
-- **Upstream's own CI fails that exact test, with that exact error, at `a80fe31cf`** — the very commit
-  this sync merges. The fork is inheriting an already-red upstream check.
-- It is timing-sensitive rather than deterministic: on the merged tree locally the same file passes
-  **27/27**.
+  (`Error: waitForServerState timed out`); the re-run passed it.
+- **Upstream's own CI failed that exact test, with that exact error, at `a80fe31cf`** — the very commit
+  this sync merges — so it is an upstream-owned timing flake, not a regression introduced here.
+- It is non-deterministic by nature: on the merged tree locally the same file passes **27/27**.
 
-So this PR is mergeable and green apart from a check that is red upstream too. Merging it carries
-that upstream failure into `master` until upstream fixes it; holding the sync until then is the other
-option. That call is the maintainer's.
+If `test (5)` goes red on a future run, re-run the job — it is that same flake.
 
 ## Notes
 

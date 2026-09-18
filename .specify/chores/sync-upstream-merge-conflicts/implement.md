@@ -114,19 +114,18 @@ hang was machine speed.
 
 ### CI result (PR #90)
 
-Every check passes **except `test (5)`**, which fails on
-`kap-server test/modelCatalogCatalog.test.ts > server-v2 /api/v1 catalog browse + import endpoints >
-re-imports an existing id as a refresh: credentials replaced, stale aliases dropped`
-(`Error: waitForServerState timed out`).
+**All checks pass** (`mergeStateStatus: CLEAN`). One flaky upstream test is worth recording:
 
-- **Upstream's own CI fails that exact test, with that exact error, at `a80fe31cf`** — the very commit
-  this sync merges. The fork inherits an already-red upstream check; it is **not** a regression from
-  the conflict resolution.
-- It is timing-sensitive rather than deterministic: on the merged tree locally the same file passes
-  **27/27**.
+- On the first CI run `test (5)` failed on
+  `kap-server test/modelCatalogCatalog.test.ts > server-v2 /api/v1 catalog browse + import endpoints >
+  re-imports an existing id as a refresh: credentials replaced, stale aliases dropped`
+  (`Error: waitForServerState timed out`); the re-run passed it.
+- **Upstream's own CI failed that exact test, with that exact error, at `a80fe31cf`** — the very commit
+  this sync merges. It is an upstream-owned timing flake, **not** a regression from the conflict
+  resolution.
+- It is non-deterministic by nature: on the merged tree locally the same file passes **27/27**.
 
-Decision for the maintainer: merge now and carry the upstream failure into `master`, or hold the sync
-until upstream fixes it.
+If `test (5)` goes red on a future run, re-run the job — it is that same flake.
 
 Toolchain note: this checkout's default `node` is v22.22.3, which fails on the repo's `#/…` subpath
 imports (`ERR_INVALID_MODULE_SPECIFIER`). All commands above were run with `/usr/local/bin/node`
