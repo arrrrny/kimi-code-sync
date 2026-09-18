@@ -37,12 +37,12 @@ Kimi Code CLI 有三个地方可以影响运行参数：配置文件、命令行
 
 对单个供应商，凭证按以下顺序解析：
 
-1. `[providers.<name>].api_key`：配置文件里直接写的密钥
-2. `[providers.<name>].api_key_env`：指定一个 shell 环境变量名，从该变量读取密钥
-3. `[providers.<name>.env]` 子表里的对应键（`KIMI_API_KEY`、`ANTHROPIC_API_KEY` 等）：上面两个字段都不存在时才读这里
-4. 三者都缺 → 启动报错，提示该供应商缺少凭证
+1. `[providers.<name>.api_keys]` 中由 `active_api_key_id` 选中的具名密钥：优先级最高，也是轮换切换的目标，见[多个 API 密钥与自动轮换](./providers.md#多个-api-密钥与自动轮换)
+2. `[providers.<name>].api_key` 或 `[providers.<name>].api_key_env`：配置文件里直接写的密钥，或指定一个 shell 环境变量名、从该变量读取密钥
+3. `[providers.<name>.env]` 子表里的对应键（`KIMI_API_KEY`、`ANTHROPIC_API_KEY` 等）：以上字段都不存在时才读这里
+4. 都缺 → 启动报错，提示该供应商缺少凭证
 
-`api_key` 和 `api_key_env` 是互斥的替代项，不是优先级回退链：只能设置其中一个——同时设置会被判为配置冲突，`api_key_env` 与 `oauth` 同设同样会被拒绝。
+`api_key` 和 `api_key_env` 是互斥的替代项，不是优先级回退链：只能设置其中一个——同时设置会被判为配置冲突，`api_key_env` 与 `oauth` 同设同样会被拒绝。`api_keys` 里的具名密钥在上述规则中同样算作内联密钥：`api_keys` / `active_api_key_id` 与 `api_key_env`（或 `oauth`）同设会被判为配置冲突，而不是按上表的顺序解析。需要保留轮换密钥列表时，请删掉 `api_key_env` 字段。
 
 `api_key_env` 是「不从 shell 环境变量取凭证」唯一有意开放的例外：密钥在每次请求时从进程自身的环境中重新读取，不会被缓存到进程生命周期之外，也不写进 `config.toml`。注意，运行中的进程只能看到它启动时的环境——轮换变量需要重启 kimi / TUI 或 kap-server 进程；在父 shell 里重新 `export` 只影响新启动的进程。声明了 `api_key_env` 但变量未设置或为空时，会快速失败并报错，指明供应商和变量名——会话就绪检查（print 模式、kap-server 会话创建）和请求发送时都会拦截——绝不静默忽略，也不回退到其他凭证来源。
 

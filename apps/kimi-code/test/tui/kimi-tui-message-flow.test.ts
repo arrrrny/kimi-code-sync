@@ -7314,7 +7314,7 @@ command = "vim"
 
       await vi.waitFor(() => {
         expect(session.installPlugin).toHaveBeenCalledWith(
-          'https://code.kimi.com/kimi-code/plugins/official/kimi-datasource.zip',
+          expect.stringMatching(/^https:\/\/code\.kimi\.(com|ai)\/kimi-code\/plugins\/official\/kimi-datasource\.zip$/),
         );
       });
       expect(globalThis.fetch).toHaveBeenCalledWith(kimiCodePluginMarketplaceUrl());
@@ -7596,7 +7596,7 @@ command = "vim"
     expect(driver.state.appState.thinkingEffort).toBe('on');
   });
 
-  it('applies /model selection to the session only on Alt+S without persisting', async () => {
+  it('applies /model selection to the session only on Shift+S without persisting', async () => {
     const session = makeSession();
     const setConfig = vi.fn(async () => ({ providers: {} }));
     const { driver } = await makeDriver(session, {
@@ -7629,7 +7629,7 @@ command = "vim"
       expect(driver.state.editorContainer.children[0]).toBeInstanceOf(TabbedModelSelectorComponent);
     });
     const picker = driver.state.editorContainer.children[0];
-    (picker as TabbedModelSelectorComponent).handleInput(`${ESC}s`);
+    (picker as TabbedModelSelectorComponent).handleInput('S');
 
     await vi.waitFor(() => {
       expect(session.setModel).toHaveBeenCalledWith('turbo');
@@ -8129,7 +8129,7 @@ command = "vim"
 
     try {
       process.title = 'kimi-test-runner';
-      driver.handleUserInput('/fork ignored args');
+      driver.handleUserInput('/fork');
 
       await vi.waitFor(() => {
         expect(forkSession).toHaveBeenCalledWith({

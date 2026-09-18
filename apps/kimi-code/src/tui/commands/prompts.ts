@@ -128,6 +128,28 @@ export function promptApiKey(
   });
 }
 
+export function promptKeyName(
+  host: SlashCommandHost,
+  title: string = 'Enter a name for this API key',
+): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    const dialog = new ApiKeyInputDialogComponent(
+      title,
+      ['This name helps you identify the key in the provider manager.'],
+      (result: ApiKeyInputResult) => {
+        host.restoreEditor();
+        resolve(result.kind === 'ok' ? result.value.trim() : undefined);
+      },
+      {
+        title: 'API Key Name',
+        mask: false,
+        emptyHint: 'Name cannot be empty.',
+      },
+    );
+    host.mountEditorReplacement(dialog);
+  });
+}
+
 /**
  * Asks for the provider endpoint the catalog did not declare (or declared
  * only as an env placeholder) — required for catalog imports whose protocol
@@ -222,6 +244,89 @@ export async function promptModelSelectionForCatalog(
   if (selection === undefined) return undefined;
   const model = models.find((m) => `${providerId}/${m.id}` === selection.alias);
   return model ? { model, thinking: selection.thinking } : undefined;
+}
+
+export function promptProxyUrl(host: SlashCommandHost, providerName: string): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    const dialog = new ApiKeyInputDialogComponent(
+      providerName,
+      ['Enter proxy URL for this provider (e.g. http://localhost:8080). Leave empty to disable.'],
+      (result: ApiKeyInputResult) => {
+        host.restoreEditor();
+        resolve(result.kind === 'ok' ? (result.value.trim() || undefined) : undefined);
+      },
+      {
+        title: `Enter proxy URL for ${providerName}`,
+        mask: false,
+        emptyHint: 'Proxy URL can be empty to disable.',
+      },
+    );
+    host.mountEditorReplacement(dialog);
+  });
+}
+
+/**
+ * Asks for the optional proxy of one API key. The answer is tri-state:
+ * `undefined` = the user cancelled the whole add-key flow, `{}` = accepted
+ * with no proxy of its own (inherit the provider's), `{ proxyUrl }` = use
+ * this proxy. A non-empty value must parse as an absolute proxy URL;
+ * anything else re-prompts instead of being returned.
+ */
+export async function promptKeyProxyUrl(
+  host: SlashCommandHost,
+  platformName: string,
+): Promise<KeyProxyAnswer | undefined> {
+  let subtitle =
+    'Enter a proxy URL for this key (e.g. http://localhost:8080). Leave empty to use the provider proxy.';
+  for (;;) {
+    const value = await promptKeyProxyUrlOnce(host, platformName, subtitle);
+    if (value === undefined) return undefined;
+    if (value.length === 0) return {};
+    if (!isProxyUrl(value)) {
+      subtitle = `"${value}" is not a valid proxy URL. Enter an absolute http, https or socks URL, or leave empty.`;
+      continue;
+    }
+    return { proxyUrl: value };
+  }
+}
+
+const PROXY_PROTOCOLS = new Set(['http:', 'https:', 'socks:', 'socks4:', 'socks5:', 'socks5h:']);
+
+function isProxyUrl(value: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return false;
+  }
+  return PROXY_PROTOCOLS.has(parsed.protocol) && parsed.host.length > 0;
+}
+
+function promptKeyProxyUrlOnce(
+  host: SlashCommandHost,
+  platformName: string,
+  subtitle: string,
+): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    const dialog = new ApiKeyInputDialogComponent(
+      platformName,
+      [subtitle],
+      (result: ApiKeyInputResult) => {
+        host.restoreEditor();
+        resolve(result.kind === 'ok' ? result.value : undefined);
+      },
+      {
+        title: `Enter proxy URL for ${platformName}`,
+        mask: false,
+        allowEmpty: true,
+      },
+    );
+    host.mountEditorReplacement(dialog);
+  });
+}
+
+export interface KeyProxyAnswer {
+  readonly proxyUrl?: string;
 }
 
 export function runModelSelector(

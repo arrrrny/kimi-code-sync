@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest';
 
 import { pluginManifestSchema } from '../src/contract/global/plugins.js';
 import { mcpServerAuthFlowHandleSchema } from '../src/contract/global/mcpManagement.js';
+import { providerConfigSchema } from '../src/contract/global/providers.js';
 import { createSessionOptionsSchema } from '../src/contract/session/lifecycle.js';
 import { promptPayloadSchema } from '../src/contract/agent/schemas.js';
 
@@ -30,6 +31,30 @@ const timeoutCases = [
   { surface, field: 'startupTimeoutMs' as const, parse },
   { surface, field: 'toolTimeoutMs' as const, parse },
 ]);
+
+describe('provider config contract validation', () => {
+  it('keeps rotateKeys and a key entry proxyUrl through a client round-trip', () => {
+    const parsed = providerConfigSchema.parse({
+      type: 'openai',
+      activeApiKeyId: 'key2',
+      rotateKeys: true,
+      apiKeys: {
+        key1: { key: 'sk-alpha', name: 'work', proxyUrl: 'http://127.0.0.1:8081' },
+        key2: { key: 'sk-beta', name: 'personal' },
+      },
+    });
+
+    expect(parsed).toEqual({
+      type: 'openai',
+      activeApiKeyId: 'key2',
+      rotateKeys: true,
+      apiKeys: {
+        key1: { key: 'sk-alpha', name: 'work', proxyUrl: 'http://127.0.0.1:8081' },
+        key2: { key: 'sk-beta', name: 'personal' },
+      },
+    });
+  });
+});
 
 describe('MCP timeout contract validation', () => {
   it.each(timeoutCases)('accepts the maximum $field for $surface', ({ field, parse }) => {
