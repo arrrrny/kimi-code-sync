@@ -1342,6 +1342,28 @@ describe('ModelCatalog enumeration', () => {
     }
   });
 
+  it('reports a rotation provider that also declares api_key_env as a credential conflict', async () => {
+    vi.stubEnv('KIMI_TEST_ROTATION_ENV_KEY', 'sk-from-env');
+    const { host, catalog } = createHost({
+      providers: {
+        rot: {
+          type: 'openai',
+          baseUrl: 'https://rot.example.test/v1',
+          apiKeys: { k1: { key: 'sk-rotated', name: 'primary' } },
+          activeApiKeyId: 'k1',
+          apiKeyEnv: 'KIMI_TEST_ROTATION_ENV_KEY',
+        },
+      },
+      models: {},
+    });
+    try {
+      const [provider] = await catalog.listProviders();
+      expect(provider).toMatchObject({ id: 'rot', has_api_key: true, status: 'error' });
+    } finally {
+      host.dispose();
+    }
+  });
+
   it('marks an OAuth provider connected when a cached token exists', async () => {
     const { host, catalog } = createHost(
       {

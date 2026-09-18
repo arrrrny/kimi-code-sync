@@ -98,40 +98,21 @@ interface ProviderView {
   readonly freeModelsOnly?: boolean;
 }
 
-function getActiveProviderApiKey(provider: ProviderView): string | undefined {
-  if (!provider) return undefined;
-  // 1. Named keys with active selection
-  if (provider.apiKeys && provider.activeApiKeyId) {
-    const active = provider.apiKeys[provider.activeApiKeyId];
-    if (active && typeof active.key === 'string' && active.key.length > 0) {
-      return active.key;
-    }
-  }
-  // 2. Legacy single key
-  if (typeof provider.apiKey === 'string' && provider.apiKey.length > 0) {
-    return provider.apiKey;
-  }
-  return undefined;
-}
-
 /**
- * Resolves the Bearer key for `type: 'kimi'` providers: the inline `apiKey`
- * wins, then a declared `apiKeyEnv` naming an environment variable (read from
- * `process.env` at refresh time), with `env.KIMI_API_KEY` as the documented
- * config-file fallback. A declared `apiKeyEnv` whose variable is unset or
- * empty throws — silently falling through to another key source could send
- * requests (and bill) under the wrong account.
+ * Resolves the Bearer key for `type: 'kimi'` providers: the rotation map's
+ * active named key, then the inline `apiKey`, then a declared `apiKeyEnv` naming
+ * an environment variable (read from `process.env` at refresh time), with
+ * `env.KIMI_API_KEY` as the documented config-file fallback. A declared
+ * `apiKeyEnv` whose variable is unset or empty throws — silently falling through
+ * to another key source could send requests (and bill) under the wrong account.
  *
- * Credential conflicts (`apiKey`+`apiKeyEnv`, `apiKeyEnv`+`oauth`,
- * `apiKey`+`oauth`) throw here too: refresh must not honor a configuration the
- * chat path would refuse, and the open-platform rewrite must never pick one
- * side of a conflict to persist.
+ * Credential conflicts (`apiKey`/`apiKeys`+`apiKeyEnv`, `apiKeyEnv`+`oauth`,
+ * `apiKey`/`apiKeys`+`oauth`) throw here too: refresh must not honor a
+ * configuration the chat path would refuse, and the open-platform rewrite must
+ * never pick one side of a conflict to persist.
  */
 function resolveProviderApiKey(provider: ProviderView, providerName: string): string | undefined {
-  const declared = declaredProviderCredential(
-    { ...provider, apiKey: getActiveProviderApiKey(provider) },
-    providerName,
-  );
+  const declared = declaredProviderCredential(provider, providerName);
   if (declared.kind === 'conflict') {
     throw new Error(declared.message);
   }

@@ -291,7 +291,10 @@ export class ModelCatalog extends Disposable implements IModelCatalog {
     providerId: string,
     provider: CatalogProviderInfo,
   ): Promise<ProviderCredentialState> {
-    const declared = declaredProviderCredential(provider, providerId);
+    const declared = declaredProviderCredential(
+      this.providers.get(providerId) ?? provider,
+      providerId,
+    );
     return {
       hasApiKey: hasConfiguredApiKey(provider),
       hasOAuthToken: await this.hasCachedToken(providerId, provider),
