@@ -117,7 +117,11 @@ function turnInputIndicesThrough(
   turnIndex: number,
 ): ReadonlySet<number> {
   const inputIndices: number[] = [];
-  const appends: { readonly record: WireRecord; readonly visibleTurnIndex: number }[] = [];
+  const appends: {
+    readonly record: WireRecord;
+    readonly recordIndex: number;
+    readonly visibleTurnIndex: number;
+  }[] = [];
   let visibleTurnIndex = 0;
   for (let index = 0; index < records.length; index += 1) {
     const record = records[index]!;
@@ -126,13 +130,13 @@ function turnInputIndicesThrough(
       continue;
     }
     if (!isUserVisibleTurnRecord(record)) continue;
-    appends.push({ record, visibleTurnIndex });
+    appends.push({ record, recordIndex: index, visibleTurnIndex });
     visibleTurnIndex += 1;
   }
   const unused = [...inputIndices];
   const retained = new Set<number>();
   for (const append of appends) {
-    const matchAt = findMatchingTurnInput(records, unused, append.record);
+    const matchAt = findMatchingTurnInput(records, unused, append.record, append.recordIndex);
     if (matchAt === -1) continue;
     const [inputIndex] = unused.splice(matchAt, 1);
     if (append.visibleTurnIndex <= turnIndex && inputIndex !== undefined) {
@@ -146,12 +150,19 @@ function findMatchingTurnInput(
   records: readonly WireRecord[],
   pending: readonly number[],
   turnRecord: WireRecord,
+  beforeIndex: number,
 ): number {
-  const exact = pending.findIndex((index) =>
-    turnInputMatchesRecord(records[index]!, turnRecord, true),
+  const exact = pending.findIndex(
+    (inputIndex) =>
+      inputIndex < beforeIndex &&
+      turnInputMatchesRecord(records[inputIndex]!, turnRecord, true),
   );
   if (exact !== -1) return exact;
-  return pending.findIndex((index) => turnInputMatchesRecord(records[index]!, turnRecord, false));
+  return pending.findIndex(
+    (inputIndex) =>
+      inputIndex < beforeIndex &&
+      turnInputMatchesRecord(records[inputIndex]!, turnRecord, false),
+  );
 }
 
 function turnInputMatchesRecord(
