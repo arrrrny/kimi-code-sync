@@ -39,6 +39,7 @@ export const providerConfigSchema = z.object({
 
   type: providerTypeSchema.optional(),
   apiKey: z.string().optional(),
+  apiKeyEnv: z.string().optional(),
   apiKeys: z.record(z.string(), providerApiKeySchema).optional(),
   activeApiKeyId: z.string().optional(),
   rotateKeys: z.boolean().optional(),

@@ -144,6 +144,7 @@ export interface ManagedKimiProviderConfig {
   type: ManagedKimiCodeProtocol;
   baseUrl?: string | undefined;
   apiKey?: string | undefined;
+  apiKeyEnv?: string;
   oauth?: ManagedKimiOAuthRef | undefined;
   readonly [key: string]: unknown;
 }

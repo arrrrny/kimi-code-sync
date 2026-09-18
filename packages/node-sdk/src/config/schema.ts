@@ -54,6 +54,7 @@ export type ProviderApiKey = z.infer<typeof ProviderApiKeySchema>;
 export const ProviderConfigSchema = z.object({
   type: ProviderTypeSchema,
   apiKey: z.string().optional(),
+  apiKeyEnv: z.string().optional(),
   apiKeys: z.record(z.string(), ProviderApiKeySchema).optional(),
   activeApiKeyId: z.string().optional(),
   rotateKeys: z.boolean().optional(),

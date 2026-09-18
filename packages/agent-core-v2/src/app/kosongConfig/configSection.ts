@@ -50,6 +50,7 @@ export const ProviderConfigSchema = z.object({
 
   type: ProviderTypeSchema.optional(),
   apiKey: z.string().optional(),
+  apiKeyEnv: z.string().optional(),
   apiKeys: z
     .record(z.string(), z.object({ key: z.string(), name: z.string(), proxyUrl: z.string().optional() }))
     .optional(),
@@ -168,6 +169,9 @@ function providerEntryToToml(
   rawProvider: unknown,
 ): Record<string, unknown> {
   const out = cloneRecord(rawProvider);
+  for (const key of PROVIDER_CREDENTIAL_FIELDS) {
+    if (provider[key] === undefined) delete out[camelToSnake(key)];
+  }
   for (const [key, value] of Object.entries(provider)) {
     if (key === 'oauth' && isPlainObject(value)) {
       out[camelToSnake(key)] = plainObjectToToml(value, undefined);
@@ -181,6 +185,8 @@ function providerEntryToToml(
   }
   return out;
 }
+
+const PROVIDER_CREDENTIAL_FIELDS = ['apiKey', 'oauth', 'apiKeyEnv'] as const;
 
 registerConfigSection(PROVIDERS_SECTION, ProvidersSectionSchema, {
   defaultValue: {},

@@ -27,6 +27,7 @@ export interface ProviderConfig {
 
   type?: ProviderType;
   apiKey?: string;
+  apiKeyEnv?: string;
   apiKeys?: Record<string, ProviderApiKey>;
   activeApiKeyId?: string;
   rotateKeys?: boolean;

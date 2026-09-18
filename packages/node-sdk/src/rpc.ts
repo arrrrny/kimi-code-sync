@@ -38,6 +38,8 @@ import type {
   ForkSessionInput,
   GenerateSessionTitleInput,
   GetConfigOptions,
+  ImportCustomRegistryOptions,
+  ImportCustomRegistryResult,
   GetCronTasksResult,
   GlobalMcpServerAuthStatus,
   McpManagedServerInfo,
@@ -259,6 +261,10 @@ export abstract class SDKRpcClientBase {
   abstract removeProvider(providerId: string): Promise<KimiConfig>;
 
   abstract supportsAtomicSectionReplace(): boolean;
+
+  abstract importCustomRegistry(
+    options: ImportCustomRegistryOptions,
+  ): Promise<ImportCustomRegistryResult>;
 
   abstract replaceConfigSections(sections: Record<string, unknown>): Promise<void>;
 
