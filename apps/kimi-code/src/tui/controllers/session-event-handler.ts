@@ -302,6 +302,8 @@ export class SessionEventHandler {
       case 'compaction.blocked': break;
       case 'compaction.cancelled': this.handleCompactionCancel(event, sendQueued); break;
       case 'subagent.spawned':
+        this.host.surveyController.notifySubagentSpawned(event);
+        this.subAgentEventHandler.handleLifecycleEvent(event); break;
       case 'subagent.started':
       case 'subagent.suspended':
       case 'subagent.completed':
@@ -619,7 +621,7 @@ export class SessionEventHandler {
 
   private handleToolCall(event: ToolCallStartedEvent): void {
     const { streamingUI } = this.host;
-    this.host.surveyController.notifyToolCallStarted();
+    this.host.surveyController.notifyToolCallStarted(event.toolCallId, event.name);
     streamingUI.flushNow();
     const { turnId, step } = streamingUI.getTurnContext();
     const toolCall: ToolCallBlockData = {

@@ -1422,6 +1422,10 @@ export class AgentTranscriptProjector {
     const skip = origin.kind === 'user' ? origin.skillActivations?.length ?? 0 : 0;
     const input = skip > 0 ? event.input.slice(skip) : event.input;
     const files = origin.attachments ?? [];
+    const promptIds =
+      origin.kind === 'user'
+        ? (event.promptIds ?? this.unpairedSteerPromptIds.shift())
+        : undefined;
     const step = this.currentStep;
     if (step !== undefined && step.state === 'running') {
       const ops: TranscriptOperation[] = [];
@@ -1431,7 +1435,7 @@ export class AgentTranscriptProjector {
         step.stepId,
         input,
         files,
-        origin.kind === 'user' ? this.unpairedSteerPromptIds.shift() : undefined,
+        promptIds,
         frameOrigin,
       );
       return ops;
@@ -1439,7 +1443,7 @@ export class AgentTranscriptProjector {
     this.pendingSteers.push({
       input,
       files,
-      promptIds: origin.kind === 'user' ? this.unpairedSteerPromptIds.shift() : undefined,
+      promptIds,
       origin: frameOrigin,
     });
     return [];
