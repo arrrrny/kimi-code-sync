@@ -23,6 +23,7 @@ import { IAgentToolRegistryService } from '#/agent/toolRegistry/toolRegistry';
 import { IConfigService } from '#/app/config/config';
 import { AgentErrorEvent } from '#/agent/mcp/mcpEvents';
 import { type FinishReason } from '#human/llm/finish-reason';
+import { API_KEY_ROTATION_STRATEGY } from '#human/credentials/keyRotationRecovery';
 import { mergeInPlace } from '#/llm-adapter/contract/message';
 import type { ContentPart, UserMessage } from '#human/llm/message';
 import { emptyUsage, type TokenUsage } from '#human/llm/usage';
@@ -38,6 +39,7 @@ import { daemonFileRefFromPart } from '#/agent/media/mediaRef';
 import { materializePromptDaemonRefs } from '#/agent/media/promptMediaIntake';
 import { ISessionMediaStore } from '#/agent/media/sessionMediaStore';
 import { IAgentProfileService } from '#/agent/profile/profile';
+import { WarningIssued } from '#/agent/profile/profileOps';
 import { IAgentScopeContext } from '#/agent/scopeContext/scopeContext';
 import { IAgentStateService } from '#/agent/state/agentState';
 import { IFileService } from '#/app/file/fileService';
@@ -125,6 +127,10 @@ export const loopLastRequestTraceIdKey = defineState<string | undefined>(
 export const loopDisposingKey = defineState<boolean>('loop.disposing', () => false);
 
 const MAX_STEP_SIGNAL_LISTENERS = 64;
+
+const RECOVERY_WARNING_CODES: Partial<Record<string, string>> = {
+  [API_KEY_ROTATION_STRATEGY]: 'api-key-rotation',
+};
 
 export class AgentLoopService extends Disposable implements IAgentLoopService {
   declare readonly _serviceBrand: undefined;
@@ -729,6 +735,10 @@ export class AgentLoopService extends Disposable implements IAgentLoopService {
       return this.cancelWaiter(waiter, cancellation);
     }
     return this.cancelActiveTurn(target?.turnId, cancellation);
+  }
+
+  cancelFromUser(turnId?: number): void {
+    this.cancel(turnId === undefined ? undefined : { turnId });
   }
 
   private cancelWaiter(waiter: PromptWaiter, cancellation: unknown): boolean {
@@ -1550,6 +1560,15 @@ export class AgentLoopService extends Disposable implements IAgentLoopService {
           this.closeFailedMachineStep(turn, step, 'error');
         }
         turn.current = undefined;
+        if (event.detail !== undefined) {
+          void this.dispatcher.dispatch(
+            new WarningIssued({
+              agentId: this.scopeContext.agentId,
+              code: RECOVERY_WARNING_CODES[event.strategy],
+              message: event.detail,
+            }),
+          );
+        }
         return;
       }
       case 'retrying': {

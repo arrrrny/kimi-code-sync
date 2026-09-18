@@ -37,9 +37,9 @@ Provider credentials (`api_key`, `base_url`) follow their own resolution rules, 
 
 For a single provider, credentials are resolved in this order:
 
-1. `[providers.<name>].api_key`: key written directly in the config file
-2. `[providers.<name>].api_key_env`: name of a shell environment variable to read the key from
-3. The matching key inside the `[providers.<name>.env]` sub-table (`KIMI_API_KEY`, `ANTHROPIC_API_KEY`, etc.): consulted only when neither field above is present
+1. The named key selected by `active_api_key_id` inside `[providers.<name>.api_keys]`: highest priority, and the key that rotation advances from when it is rejected; see [Multiple API keys and automatic rotation](./providers.md#multiple-api-keys-and-automatic-rotation)
+2. `[providers.<name>].api_key` or `[providers.<name>].api_key_env`: the key written directly in the config file, or the name of a shell environment variable to read the key from
+3. The matching key inside the `[providers.<name>.env]` sub-table (`KIMI_API_KEY`, `ANTHROPIC_API_KEY`, etc.): consulted only when none of the fields above is present
 4. If all are absent, startup fails with an error indicating the provider is missing credentials
 
 `api_key` and `api_key_env` are alternatives, not a priority chain: set exactly one — setting both is rejected as a configuration conflict, as is setting `api_key_env` together with `oauth`.

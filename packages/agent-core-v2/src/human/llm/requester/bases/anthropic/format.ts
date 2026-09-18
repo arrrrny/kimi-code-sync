@@ -203,6 +203,7 @@ export interface AnthropicRequestParams {
   readonly params: Anthropic.MessageCreateParamsStreaming;
   readonly betas: readonly string[];
   readonly useBetaApi: boolean;
+  readonly headers?: Record<string, string>;
 }
 
 export interface AnthropicFormatOptions {

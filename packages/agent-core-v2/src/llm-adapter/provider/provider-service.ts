@@ -69,6 +69,13 @@ export class ProviderService extends Disposable implements IProviderService {
     await this.applyRecords({ ...this.providers, [name]: config });
   }
 
+  async setActiveApiKey(name: string, keyId: string): Promise<void> {
+    await this.ready;
+    const config = this.providers[name];
+    if (config === undefined) return;
+    await this.set(name, { ...config, activeApiKeyId: keyId });
+  }
+
   async delete(name: string): Promise<void> {
     await this.ready;
     if (!(name in this.providers)) return;

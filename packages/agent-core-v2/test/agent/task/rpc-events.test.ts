@@ -939,6 +939,7 @@ describe('AgentTaskService — notification delivery', () => {
         code: ErrorCodes.SESSION_BUSY,
         details: { reason: 'loop' },
       });
+      expect(active.state).toBe('running');
       expect(active.signal.aborted).toBe(false);
       expect(
         ctx.context.get().filter((message) => message.origin?.kind === 'task'),

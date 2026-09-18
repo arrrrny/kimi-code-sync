@@ -18,6 +18,15 @@ import type { ModelRecord } from './model';
 import type { ResolvedModelAuthMaterial } from './model.types';
 import { drivesThinkingThroughTraits } from './thinking';
 
+function getActiveProviderApiKey(provider: ProviderConfig | undefined): string | undefined {
+  if (!provider) return undefined;
+  if (provider.apiKeys && provider.activeApiKeyId) {
+    const active = provider.apiKeys[provider.activeApiKeyId];
+    if (active) return active.key;
+  }
+  return provider.apiKey;
+}
+
 export function resolveModelAuthMaterial(args: {
   readonly modelId: string;
   readonly model: ModelRecord;
@@ -46,7 +55,10 @@ export function resolveModelAuthMaterial(args: {
     providerAuthType === undefined
       ? {}
       : explainProviderEndpoint(providerAuthType, args.provider?.env ?? {});
-  const declared = declaredProviderCredential(args.provider ?? {}, args.providerName);
+  const declared = declaredProviderCredential(
+    { ...args.provider, apiKey: getActiveProviderApiKey(args.provider) },
+    args.providerName,
+  );
   if (declared.kind === 'conflict') {
     throw new Error2(CONFIG_INVALID_ERROR_CODE, declared.message);
   }
