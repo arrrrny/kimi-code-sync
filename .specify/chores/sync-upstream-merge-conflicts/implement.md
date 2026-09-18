@@ -109,9 +109,24 @@ fails locally. Evidence gathered:
 
 Conclusion: the conflict resolution did **not** cause this — the sync faithfully carries upstream's
 own code, and the same failure reproduces on unmodified upstream. Master passes (13.4s) only because
-it predates upstream's change. It may still pass on GitHub's faster runners, so **CI on the PR is the
-arbiter**; if it fails there, the fix belongs to upstream's quiesce timing (or to faking `Date` in
-that test) — a human decision, not a conflict-resolution choice.
+it predates upstream's change. **CI confirmed this**: the test passes on PR #90's CI, so the local
+hang was machine speed.
+
+### CI result (PR #90)
+
+Every check passes **except `test (5)`**, which fails on
+`kap-server test/modelCatalogCatalog.test.ts > server-v2 /api/v1 catalog browse + import endpoints >
+re-imports an existing id as a refresh: credentials replaced, stale aliases dropped`
+(`Error: waitForServerState timed out`).
+
+- **Upstream's own CI fails that exact test, with that exact error, at `a80fe31cf`** — the very commit
+  this sync merges. The fork inherits an already-red upstream check; it is **not** a regression from
+  the conflict resolution.
+- It is timing-sensitive rather than deterministic: on the merged tree locally the same file passes
+  **27/27**.
+
+Decision for the maintainer: merge now and carry the upstream failure into `master`, or hold the sync
+until upstream fixes it.
 
 Toolchain note: this checkout's default `node` is v22.22.3, which fails on the repo's `#/…` subpath
 imports (`ERR_INVALID_MODULE_SPECIFIER`). All commands above were run with `/usr/local/bin/node`

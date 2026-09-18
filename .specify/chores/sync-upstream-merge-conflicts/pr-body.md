@@ -62,18 +62,32 @@ both features and threads the fork's active key through upstream's new shared cr
   `https-proxy-agent` (upstream dropped them; the fork's provider-proxy feature needs them), which
   matches the lockfile.
 - `packages/node-sdk` `test/config.test.ts`: 4 passed.
-- `packages/agent-core-v2`: **7007 passed, 1 skipped**. Four tests failed on timing locally and were
-  investigated rather than waved through:
+- `packages/agent-core-v2`: **7007 passed, 1 skipped** locally. Four tests failed on timing locally and
+  were investigated rather than waved through:
   - Three in `test/agent/task/taskManager.test.ts` pass with a raised timeout, but take 78s / 77s /
     39s on this machine (CI expects ~1s each) — machine-speed, not hangs.
   - `test/tool/tool.test.ts > returns the spawned agent id when a foreground subagent times out`
-    hangs locally. **This is not caused by the conflict resolution**: the merged
+    hangs locally. This is not caused by the conflict resolution: the merged
     `agentLifecycleService.ts` is byte-identical to `upstream/main`'s, and the same test fails
-    identically against **pure `upstream/main`**. Upstream's new settle deadline
-    (`setTimeout(…, promptIdleDeadline - Date.now())`) interacts with the test faking only
-    `setTimeout`/`clearTimeout` and not `Date.now()` while advancing the clock by two hours. It
-    passes on `master` (13.4s) because `master` predates that upstream change. CI on this PR is the
-    real arbiter for it.
+    identically against pure `upstream/main` locally. **It passes on CI**, confirming the local hang
+    was machine speed.
+
+### CI result
+
+All checks pass **except `test (5)`**, and that failure is not a regression introduced here:
+
+- `test (5)` fails on
+  `kap-server test/modelCatalogCatalog.test.ts > server-v2 /api/v1 catalog browse + import endpoints
+  > re-imports an existing id as a refresh: credentials replaced, stale aliases dropped`
+  (`Error: waitForServerState timed out`).
+- **Upstream's own CI fails that exact test, with that exact error, at `a80fe31cf`** — the very commit
+  this sync merges. The fork is inheriting an already-red upstream check.
+- It is timing-sensitive rather than deterministic: on the merged tree locally the same file passes
+  **27/27**.
+
+So this PR is mergeable and green apart from a check that is red upstream too. Merging it carries
+that upstream failure into `master` until upstream fixes it; holding the sync until then is the other
+option. That call is the maintainer's.
 
 ## Notes
 
