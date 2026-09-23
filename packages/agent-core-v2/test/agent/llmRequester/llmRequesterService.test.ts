@@ -17,6 +17,9 @@ import { AgentLLMRequesterService, KIMI_CODE_INFINITE_RETRY_ENV } from '#/agent/
 import { IAgentLLMRequesterService } from '#/agent/llmRequester/llmRequester';
 import { createMachineRequester } from '#/agent/loop/machine/requester';
 import { IBootstrapService } from '#/app/bootstrap/bootstrap';
+import { FALLBACK_MODEL_SECTION } from '#/app/kosongConfig/configSection';
+import { IFlagService } from '#/app/flag/flag';
+import { FALLBACK_MODEL_FLAG_ID } from '#/session/fallback/flag';
 import {
   createTurnMachine,
   type AssistantEntry,
@@ -215,28 +218,51 @@ function createService(
     readonly mediaResolver?: Partial<IAgentMediaResolverService>;
     readonly contextMessages?: Message[];
     readonly env?: Record<string, string>;
+    readonly fallbackFlag?: boolean;
+    readonly fallbackConfig?: { readonly model?: string; readonly secondaryModel?: string };
+    readonly sessionModelOverrides?: { readonly fallback?: string; readonly fallbackSecondary?: string };
   } = {},
 ) {
   const ix = disposables.add(new TestInstantiationService());
   ix.stub(IBootstrapService, stubBootstrap('/tmp/kimi-code-llm-requester-test', options.env ?? {}));
   const thinkingLevel = options.thinkingLevel ?? 'off';
+  let profileModelAlias = 'm';
   const profile: Partial<IAgentProfileService> = {
     hasProvider: () => true,
     resolveModelContext: () => ({
-      modelAlias: 'm',
+      modelAlias: profileModelAlias,
       modelCapabilities: capabilities,
       maxOutputSize: undefined,
       alwaysThinking: undefined,
       thinkingLevel,
       reservedContextSize: undefined,
       compactionTriggerRatio: undefined,
+      compactionTokenBudget: undefined,
       compactionMaxAttempts: undefined,
     }),
+    resolveModelContextFor: (modelAlias) => ({
+      modelAlias,
+      modelCapabilities: capabilities,
+      maxOutputSize: undefined,
+      alwaysThinking: undefined,
+      thinkingLevel,
+      reservedContextSize: undefined,
+      compactionTriggerRatio: undefined,
+      compactionTokenBudget: undefined,
+      compactionMaxAttempts: undefined,
+    }),
+    getEffectiveThinkingLevel: () => thinkingLevel,
+    getSessionModelOverride: (kind) =>
+      kind === 'fallback'
+        ? options.sessionModelOverrides?.fallback
+        : kind === 'fallbackSecondary'
+          ? options.sessionModelOverrides?.fallbackSecondary
+          : undefined,
     resolveRequestParams: () => ({}),
     getSystemPrompt: () => 'system',
     data: () => ({
       cwd: '',
-      modelAlias: 'm',
+      modelAlias: profileModelAlias,
       modelCapabilities: capabilities,
       thinkingLevel,
       systemPrompt: 'system',
@@ -260,8 +286,12 @@ function createService(
   };
   const tools = { list: () => [] };
   const config: Partial<IConfigService> = {
-    get: (() => undefined) as IConfigService['get'],
+    get: ((section: string) =>
+      section === FALLBACK_MODEL_SECTION ? options.fallbackConfig : undefined) as IConfigService['get'],
   };
+  ix.stub(IFlagService, {
+    enabled: (id) => id === FALLBACK_MODEL_FLAG_ID && (options.fallbackFlag ?? false),
+  });
   const log = { info: () => undefined, warn: () => undefined };
   const telemetryRecords: TelemetryRecord[] = [];
   const telemetry = recordingTelemetry(telemetryRecords);
@@ -328,6 +358,9 @@ function createService(
     telemetry,
     telemetryRecords,
     measuredCalls,
+    setModelAlias: (alias: string) => {
+      profileModelAlias = alias;
+    },
   };
 }
 
@@ -1300,6 +1333,69 @@ describe('AgentLLMRequesterService tool call id normalization', () => {
 
     const result = await service.request();
     expect(result.message.toolCalls[0]!.id).toBe('Bash_0__2');
+  });
+});
+
+describe('AgentLLMRequesterService terminal-error fallback', () => {
+  it('retries on the configured fallback model after a terminal 400', async () => {
+    const calls = { value: 0 };
+    const requester = createRequester(calls, new APIStatusError(400, 'endpoint broken'));
+    const { service, events } = createService(requester, undefined, {
+      fallbackFlag: true,
+      fallbackConfig: { model: 'fallback-alias' },
+    });
+    const onAttemptRetry = vi.fn();
+
+    const result = await service.request({ onAttemptRetry });
+
+    expect(result.message.content).toEqual([{ type: 'text', text: 'ok' }]);
+    expect(calls.value).toBe(2);
+    expect(result.model).toBe('fallback-alias');
+    expect(onAttemptRetry).toHaveBeenCalledTimes(1);
+    expect(events.filter((event) => event.type === 'warning')).toEqual([
+      expect.objectContaining({ type: 'warning', code: 'fallback-model' }),
+    ]);
+  });
+
+  it('propagates the terminal error when the fallback binding does not change the model', async () => {
+    const calls = { value: 0 };
+    const requester = createRequester(calls, new APIStatusError(400, 'endpoint broken'));
+    const { service, events } = createService(requester, undefined, {
+      sessionModelOverrides: { fallback: 'm' },
+    });
+
+    await expect(service.request()).rejects.toMatchObject({ statusCode: 400 });
+    expect(calls.value).toBe(1);
+    expect(events.filter((event) => event.type === 'warning')).toEqual([]);
+  });
+
+  it('retries on the inherited fallback override after a terminal 400', async () => {
+    const calls = { value: 0 };
+    const requester = createRequester(calls, new APIStatusError(400, 'endpoint broken'));
+    const { service } = createService(requester, undefined, {
+      sessionModelOverrides: { fallback: 'inherited-fallback' },
+    });
+
+    const result = await service.request();
+
+    expect(calls.value).toBe(2);
+    expect(result.model).toBe('inherited-fallback');
+  });
+
+  it('drops the active fallback when the profile model is rebound', async () => {
+    const calls = { value: 0 };
+    const requester = createRequester(calls, new APIStatusError(400, 'endpoint broken'));
+    const { service, setModelAlias } = createService(requester, undefined, {
+      fallbackFlag: true,
+      fallbackConfig: { model: 'fallback-alias' },
+    });
+
+    const fallbackResult = await service.request();
+    expect(fallbackResult.model).toBe('fallback-alias');
+
+    setModelAlias('m2');
+    const reboundResult = await service.request();
+    expect(reboundResult.model).toBe('m2');
   });
 });
 

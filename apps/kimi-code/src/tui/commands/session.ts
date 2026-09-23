@@ -2,6 +2,8 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+import type { Session } from '@moonshot-ai/kimi-code-sdk';
+
 import { detectInstallSource } from '#/cli/update/source';
 import { copyTextToClipboard } from '#/utils/clipboard/clipboard-text';
 import { detectShellEnvironment } from '#/utils/process/shell-env';
@@ -49,16 +51,21 @@ export async function handleTitleCommand(host: SlashCommandHost, args: string): 
 }
 
 export async function handleForkCommand(host: SlashCommandHost, args: string): Promise<void> {
-  void args;
+  if (args.trim() !== '') {
+    host.showError('Unknown arguments; /fork takes no args');
+    return;
+  }
   const session = host.session;
   if (session === undefined) {
     host.showError(NO_ACTIVE_SESSION_MESSAGE);
     return;
   }
 
+  const { id, title } = forkInput(host, session);
+  let forkId: string;
   try {
-    const forked = await host.harness.forkSession({ id: session.id });
-    const forkId = forked.id;
+    const forked = await host.harness.forkSession({ id, title });
+    forkId = forked.id;
     try {
       await forked.close();
     } catch (error) {
@@ -66,32 +73,71 @@ export async function handleForkCommand(host: SlashCommandHost, args: string): P
       host.showError(`Session forked (${forkId}), but failed to release its runtime: ${msg}`);
       return;
     }
-    // Stay in the source session: switching to the fork would close the
-    // source, killing its in-flight turn and background tasks. The fork is
-    // an independent copy the user can switch to explicitly via /sessions,
-    // or enter from a new CLI process with the printed resume command.
-    const command = forkResumeCommand(host.state.appState.workDir, forkId);
-    let clipboardNote: string;
-    try {
-      const method = await copyTextToClipboard(command);
-      // OSC 52 delivery is fire-and-forget: terminals without OSC 52 support
-      // silently drop the sequence, so only native delivery may claim success
-      // (same wording convention as /copy).
-      clipboardNote =
-        method === 'native'
-          ? 'Command copied to clipboard'
-          : 'Command copied via terminal escape sequence (unverified)';
-    } catch {
-      clipboardNote = 'Failed to copy command to clipboard';
-    }
-    host.showStatus(
-      `Session forked (${forkId}). Still in the original session; switch to the fork via /sessions.\n` +
-        `  To enter the fork in a new process, run: ${command}\n` +
-        `  ${clipboardNote}`,
-    );
   } catch (error) {
     const msg = formatErrorMessage(error);
     host.showError(`Failed to fork session: ${msg}`);
+    return;
+  }
+  // Stay in the source session: switching to the fork would close the
+  // source, killing its in-flight turn and background tasks. The fork is
+  // an independent copy the user can switch to explicitly via /sessions,
+  // or enter from a new CLI process with the printed resume command.
+  const command = forkResumeCommand(host.state.appState.workDir, forkId);
+  let clipboardNote: string;
+  try {
+    const method = await copyTextToClipboard(command);
+    // OSC 52 delivery is fire-and-forget: terminals without OSC 52 support
+    // silently drop the sequence, so only native delivery may claim success
+    // (same wording convention as /copy).
+    clipboardNote =
+      method === 'native'
+        ? 'Command copied to clipboard'
+        : 'Command copied via terminal escape sequence (unverified)';
+  } catch {
+    clipboardNote = 'Failed to copy command to clipboard';
+  }
+  host.showStatus(
+    `Session forked (${forkId}). Still in the original session; switch to the fork via /sessions.\n` +
+      `  To enter the fork in a new process, run: ${command}\n` +
+      `  ${clipboardNote}`,
+  );
+}
+
+export async function handleForkAndSwitchCommand(host: SlashCommandHost, args: string): Promise<void> {
+  if (args.trim() !== '') {
+    host.showError('Unknown arguments; /fork-and-switch takes no args');
+    return;
+  }
+  const session = host.session;
+  if (session === undefined) {
+    host.showError(NO_ACTIVE_SESSION_MESSAGE);
+    return;
+  }
+  if (host.state.appState.streamingPhase !== 'idle') {
+    host.showError('Cannot fork-and-switch while streaming — press Esc or Ctrl-C first.');
+    return;
+  }
+
+  const { id, title } = forkInput(host, session);
+  const forked = await host.harness.forkSession({ id, title }).catch((error: unknown) => {
+    host.showError(`Failed to fork session: ${formatErrorMessage(error)}`);
+    return undefined;
+  });
+  if (forked === undefined) return;
+
+  try {
+    await host.switchToSession(
+      forked,
+      `Switched to fork (${forked.id}) of "${title.replace(/^Fork: /, '')}". Source session was closed; any background tasks on it ended.`,
+    );
+  } catch (error) {
+    const msg = formatErrorMessage(error);
+    try {
+      await forked.close();
+    } catch {
+      /* swallow: we already have a more informative error from the switch */
+    }
+    host.showError(`Forked (${forked.id}) but failed to switch: ${msg}`);
   }
 }
 
@@ -103,6 +149,22 @@ function forkResumeCommand(workDir: string, forkId: string): string {
   // cmd.exe and PowerShell (`cd /d` would break PowerShell).
   const changeDir = process.platform === 'win32' ? `pushd ${dir}` : `cd ${dir}`;
   return `${changeDir} && kimi --resume ${quoteShellArg(forkId)}`;
+}
+
+function forkSourceTitle(host: SlashCommandHost, session: Session): string {
+  const currentTitle = host.state.appState.sessionTitle?.trim();
+  if (currentTitle !== undefined && currentTitle.length > 0) return currentTitle;
+
+  const summaryTitle =
+    typeof session.summary?.title === 'string' ? session.summary.title.trim() : '';
+  return summaryTitle.length > 0 ? summaryTitle : session.id;
+}
+
+function forkInput(host: SlashCommandHost, session: Session): { id: string; title: string } {
+  return {
+    id: session.id,
+    title: `Fork: ${forkSourceTitle(host, session)}`,
+  };
 }
 
 export async function handleExportMdCommand(host: SlashCommandHost, args: string): Promise<void> {

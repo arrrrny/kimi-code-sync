@@ -11,19 +11,28 @@ export interface OAuthRef {
 
 export type ModelSource = 'static' | 'discover' | 'oauth-catalog';
 
+export interface ProviderApiKey {
+  key: string;
+  name: string;
+}
+
 export interface ProviderConfig {
   modelSource?: ModelSource;
 
   baseUrl?: string;
+  proxyUrl?: string;
   customHeaders?: Record<string, string>;
   defaultModel?: string;
 
   type?: ProviderType;
   apiKey?: string;
   apiKeyEnv?: string;
+  apiKeys?: Record<string, ProviderApiKey>;
+  activeApiKeyId?: string;
   oauth?: OAuthRef;
   env?: Record<string, string>;
   source?: Record<string, unknown>;
+  free_models_only?: boolean;
 }
 
 export type ProvidersSection = Record<string, ProviderConfig>;

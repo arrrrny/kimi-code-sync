@@ -173,6 +173,7 @@ describe('AgentConversationUndoService', () => {
       code: ErrorCodes.SESSION_BUSY,
       details: { reason: 'loop' },
     });
+    expect(turn.state).toBe('running');
     expect(turn.signal.aborted).toBe(false);
     expect(loop.snapshot().state).toBe('running');
     expect(ctx.context.get()).toBe(history);
