@@ -2256,7 +2256,7 @@ describe('AgentTranscriptProjector', () => {
     ]);
   });
 
-  it('projects turn.steer as a user frame at the next step start, pairing promptIds from prompt.steered', () => {
+  it('projects turn.steer as a user frame at the next step start, using promptIds from the steer event', () => {
     const projector = new AgentTranscriptProjector('main', TEST_SESSION_ID);
     const tx = new AgentTranscript('main');
     const feed = (event: ProjectorBusEvent): void => void tx.apply(projector.map(event));
@@ -2284,6 +2284,8 @@ describe('AgentTranscriptProjector', () => {
           { type: 'video_url', videoUrl: { url: 'kimi-file://f_vid2', name: 'queued.mp4' } },
         ],
         origin: { kind: 'user' },
+        promptIds: ['p2'],
+        messageId: 'm-steer',
       }),
     );
     expect(turnOps('t3', tx.getItems()).steps).toHaveLength(1);
@@ -2353,6 +2355,8 @@ describe('AgentTranscriptProjector', () => {
             },
           },
         ],
+        promptIds: ['p2', 'p3'],
+        messageId: 'm-look',
         origin: {
           kind: 'user',
           skillActivations: [
@@ -2415,7 +2419,7 @@ describe('AgentTranscriptProjector', () => {
     feed(ev({ type: 'turn.step.started', turnId: 5, step: 1 }));
     feed(ev({ type: 'prompt.steered', activePromptId: 'active', promptIds: ['queued'], content: [{ type: 'text', text: 'queued input' }], steeredAt: '2026-01-01T00:00:02.000Z' }));
     feed(ev({ type: 'turn.steer', input: [{ type: 'text', text: 'User activated the skill' }], origin }));
-    feed(ev({ type: 'turn.steer', input: [{ type: 'text', text: 'queued input' }], origin: { kind: 'user' } }));
+    feed(ev({ type: 'turn.steer', input: [{ type: 'text', text: 'queued input' }], origin: { kind: 'user' }, promptIds: ['queued'] }));
     const frames = turnOps('t5', tx.getItems()).steps[0]!.frames;
     expect(frames[0]).toMatchObject({ role: 'user', text: 'User activated the skill', origin: { kind: 'skill_activation', trigger: 'user-slash', skillName: 'example-skill' } });
     expect((frames[0] as { promptIds?: readonly string[] }).promptIds).toBeUndefined();
@@ -2536,6 +2540,8 @@ describe('AgentTranscriptProjector', () => {
         type: 'turn.steer',
         input: [{ type: 'text', text: 'last word' }],
         origin: { kind: 'user' },
+        promptIds: ['p2'],
+        messageId: 'm-last',
       }),
     );
     feed(ev({ type: 'turn.ended', turnId: 6, reason: 'cancelled', interruptReason: 'user_cancelled' }));
@@ -2577,6 +2583,8 @@ describe('AgentTranscriptProjector', () => {
           kind: 'user',
           skillActivations: [{ activationId: 'a1', skillName: 'review', skillArgs: 'strict' }],
         },
+        promptIds: ['p2'],
+        messageId: 'm-last-2',
       }),
     );
     feed(ev({ type: 'turn.ended', turnId: 7, reason: 'cancelled', interruptReason: 'user_cancelled' }));
@@ -2618,6 +2626,8 @@ describe('AgentTranscriptProjector', () => {
         type: 'turn.steer',
         input: [{ type: 'text', text: 'steered mid-attach' }],
         origin: { kind: 'user' },
+        promptIds: ['p2'],
+        messageId: 'm-mid',
       }),
     );
     expect(ops).toHaveLength(2);
@@ -2957,8 +2967,8 @@ describe('AgentTranscriptProjector', () => {
       const records = [
         { type: 'context.append_message', message: { role: 'user', content: [{ type: 'text', text: 'active' }], toolCalls: [], origin: { kind: 'user' } }, time: 1000 },
         { type: 'context.append_message', message: { role: 'assistant', content: [{ type: 'text', text: 'working' }], toolCalls: [] }, time: 2000 },
-        { type: 'turn.steer', input: [{ type: 'text', text: 'steered in' }], origin: { kind: 'user' }, time: 3000 },
-        { type: 'context.append_message', message: { role: 'user', content: [{ type: 'text', text: 'steered in' }], toolCalls: [], origin: { kind: 'user' } }, time: 3001 },
+        { type: 'context.append_message', message: { id: 'm-steer', role: 'user', content: [{ type: 'text', text: 'steered in' }], toolCalls: [], origin: { kind: 'user' } }, time: 3000 },
+        { type: 'turn.steer', input: [{ type: 'text', text: 'steered in' }], origin: { kind: 'user' }, messageId: 'm-steer', promptIds: ['p2'], time: 3001 },
         { type: 'context.append_message', message: { role: 'assistant', content: [{ type: 'text', text: 'noted' }], toolCalls: [] }, time: 4000 },
       ];
       await writeFile(join(wireDir, 'wire.jsonl'), `${records.map((r) => JSON.stringify(r)).join('\n')}\n`);
@@ -2974,6 +2984,7 @@ describe('AgentTranscriptProjector', () => {
         role: 'user',
         text: 'steered in',
         origin: { kind: 'user' },
+        promptIds: ['p2'],
       });
     } finally {
       await rm(home, { recursive: true, force: true });
