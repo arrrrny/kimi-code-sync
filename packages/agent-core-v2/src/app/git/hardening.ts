@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFile, realpath, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join, normalize, resolve } from 'node:path';
 
@@ -112,7 +113,10 @@ export async function hardenedGitConfigArgs(
   const gitDir = await findGitDir(cwd);
   const stamp = await gitConfigStamp(cwd, gitDir);
   const cached = filterArgsCache.get(cwd);
-  if (stamp !== null && cached?.stamp === stamp) return cached.args;
+  if (stamp !== null && cached?.stamp === stamp) {
+    if (!(await coreWorktreeSafe(cwd, probe, gitDir))) return null;
+    return cached.args;
+  }
   if (!(await coreWorktreeSafe(cwd, probe, gitDir))) return null;
   const filterArgs = await probeFilterArgs(cwd, probe);
   if (filterArgs === null) return null;
@@ -128,8 +132,10 @@ async function coreWorktreeSafe(
 ): Promise<boolean> {
   if (gitDir === null) return true;
   let resolvedGitDir: string;
+  let workTreeRoot: string;
   try {
     const realGitPath = await realpath(gitDir);
+    workTreeRoot = dirname(realGitPath);
     if ((await stat(realGitPath)).isDirectory()) {
       resolvedGitDir = realGitPath;
     } else {
@@ -140,7 +146,6 @@ async function coreWorktreeSafe(
   } catch {
     return false;
   }
-  const workTreeRoot = dirname(gitDir);
   const results = await Promise.all(
     ['--local', '--worktree'].map((scope) =>
       probe([
@@ -202,10 +207,7 @@ async function gitConfigStamp(cwd: string, found: string | null): Promise<string
     const commondir = await readFile(join(gitDir, 'commondir'), 'utf8').catch(() => undefined);
     const configPaths = resolveConfigPaths(gitDir, commondir);
     const stamps = await Promise.all(configPaths.map(stampConfigPath));
-    for (const path of configPaths) {
-      const content = await readFile(path, 'utf8').catch(() => null);
-      if (content !== null && INCLUDE_SECTION_RE.test(content)) return null;
-    }
+    if (stamps.includes(null)) return null;
     return stamps.join('|');
   } catch {
     return null;
@@ -227,11 +229,9 @@ async function findGitDir(start: string): Promise<string | null> {
   }
 }
 
-async function stampConfigPath(path: string): Promise<string> {
-  try {
-    const stats = await stat(path);
-    return `${path}:${String(stats.mtimeMs)}:${String(stats.size)}`;
-  } catch {
-    return `${path}:missing`;
-  }
+async function stampConfigPath(path: string): Promise<string | null> {
+  const content = await readFile(path, 'utf8').catch(() => null);
+  if (content === null) return `${path}:missing`;
+  if (INCLUDE_SECTION_RE.test(content)) return null;
+  return `${path}:${createHash('sha256').update(content).digest('hex')}`;
 }

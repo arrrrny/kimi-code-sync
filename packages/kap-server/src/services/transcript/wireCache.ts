@@ -12,6 +12,7 @@ export interface WireRecordCacheOptions {
 
 const DEFAULT_MAX_ENTRIES = 256;
 const DEFAULT_MAX_TOTAL_BYTES = 256 * 1024 * 1024;
+const APPEND_CHUNK_BYTES = 1024 * 1024;
 const EMPTY_BUFFER = Buffer.alloc(0);
 
 interface WireCacheEntry {
@@ -95,44 +96,52 @@ export class WireRecordCache {
 
   private async readAppended(wirePath: string, entry: WireCacheEntry, size: number): Promise<void> {
     const handle = await open(wirePath, 'r');
-    let region: Buffer;
+    const parsed: ContextRecord[] = [];
+    let lineCount = entry.lineCount;
+    let offset = entry.offset;
+    let tail = entry.tail;
     try {
-      const length = size - entry.offset;
-      const buf = Buffer.allocUnsafe(length);
-      let position = 0;
-      while (position < length) {
-        const { bytesRead } = await handle.read(
-          buf,
-          position,
-          length - position,
-          entry.offset + position,
-        );
-        if (bytesRead === 0) break;
-        position += bytesRead;
+      while (offset + tail.length < size) {
+        const cursor = offset + tail.length;
+        const length = Math.min(size - cursor, APPEND_CHUNK_BYTES);
+        const chunk = Buffer.allocUnsafe(length);
+        let position = 0;
+        while (position < length) {
+          const { bytesRead } = await handle.read(
+            chunk,
+            position,
+            length - position,
+            cursor + position,
+          );
+          if (bytesRead === 0) break;
+          position += bytesRead;
+        }
+        if (position === 0) break;
+        const head = chunk.subarray(0, position);
+        const region = tail.length === 0 ? head : Buffer.concat([tail, head]);
+        let start = 0;
+        for (;;) {
+          const nl = region.indexOf(0x0a, start);
+          if (nl === -1) break;
+          lineCount += 1;
+          const record = parseWireLine(
+            region.subarray(start, nl).toString('utf8'),
+            wirePath,
+            lineCount,
+          );
+          if (record !== undefined) parsed.push(record);
+          start = nl + 1;
+        }
+        offset += start;
+        tail = start === region.length ? EMPTY_BUFFER : Buffer.from(region.subarray(start));
       }
-      region = position === length ? buf : buf.subarray(0, position);
     } finally {
       await handle.close();
     }
-    let start = 0;
-    let lineCount = entry.lineCount;
-    const parsed: ContextRecord[] = [];
-    for (;;) {
-      const nl = region.indexOf(0x0a, start);
-      if (nl === -1) break;
-      lineCount += 1;
-      const record = parseWireLine(
-        region.subarray(start, nl).toString('utf8'),
-        wirePath,
-        lineCount,
-      );
-      if (record !== undefined) parsed.push(record);
-      start = nl + 1;
-    }
     for (const record of parsed) entry.records.push(record);
     entry.lineCount = lineCount;
-    entry.offset += start;
-    entry.tail = start === region.length ? EMPTY_BUFFER : Buffer.from(region.subarray(start));
+    entry.offset = offset;
+    entry.tail = tail;
   }
 
   private evict(wirePath: string, entry: WireCacheEntry): void {

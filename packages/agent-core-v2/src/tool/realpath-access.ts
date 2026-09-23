@@ -79,10 +79,11 @@ async function realRoots(
 ): Promise<readonly string[]> {
   const roots: string[] = [];
   for (const dir of [workspace.workspaceDir, ...workspace.additionalDirs]) {
+    roots.push(dir);
     try {
       roots.push(await fs.realpath(dir));
     } catch {
-      roots.push(dir);
+      continue;
     }
   }
   return roots;
