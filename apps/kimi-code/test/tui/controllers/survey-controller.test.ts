@@ -2360,7 +2360,6 @@ describe('SurveyController copilot stats', () => {
         parentToolCallId: `tc-agent-${String(turn)}`,
         model: turn % 2 === 0 ? 'k3' : 'k2',
       });
-      harness.controller.notifyToolCallEnded(`tc-agent-${String(turn)}`);
       harness.controller.notifyTurnEnded();
     }
     harness.elapse(2000);
@@ -2392,7 +2391,6 @@ describe('SurveyController copilot stats', () => {
       swarmIndex: 1,
       model: 'k2',
     });
-    harness.controller.notifyToolCallEnded('tc-swarm-1');
     harness.elapse(2000);
 
     const appeared = trackedEvent(harness, 'appeared');
@@ -2407,7 +2405,6 @@ describe('SurveyController copilot stats', () => {
     harness.runTurns(5);
     harness.controller.notifyToolCallStarted('tc-tower', 'TowerSpawn');
     harness.controller.notifySubagentSpawned({ parentToolCallId: 'tc-tower', model: 'k2' });
-    harness.controller.notifyToolCallEnded('tc-tower');
     harness.elapse(2000);
 
     const appeared = trackedEvent(harness, 'appeared');

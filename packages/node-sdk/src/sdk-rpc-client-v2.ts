@@ -228,6 +228,7 @@ import {
   type ServicesAccessor,
   type SessionSummary as V2SessionSummary,
 } from '@moonshot-ai/agent-core-v2';
+import type { SessionModelOverrides } from '@moonshot-ai/agent-core-v2/agent/profile/profile';
 import {
   RPCError,
   type AgentHandle,
@@ -236,7 +237,6 @@ import {
   type ImportCustomRegistryResult,
 } from '@moonshot-ai/klient';
 import { RegistryImportError } from '#/catalog';
-import type { SessionModelOverrides } from '@moonshot-ai/agent-core-v2/agent/profile/profile';
 import { createKlient } from '@moonshot-ai/klient/memory';
 import { assertKimiHostIdentity, createKimiDefaultHeaders } from '@moonshot-ai/kimi-code-oauth';
 

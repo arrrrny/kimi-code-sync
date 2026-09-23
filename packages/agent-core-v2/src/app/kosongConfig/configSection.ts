@@ -51,8 +51,11 @@ export const ProviderConfigSchema = z.object({
   type: ProviderTypeSchema.optional(),
   apiKey: z.string().optional(),
   apiKeyEnv: z.string().optional(),
-  apiKeys: z.record(z.string(), z.object({ key: z.string(), name: z.string() })).optional(),
+  apiKeys: z
+    .record(z.string(), z.object({ key: z.string(), name: z.string(), proxyUrl: z.string().optional() }))
+    .optional(),
   activeApiKeyId: z.string().optional(),
+  rotateKeys: z.boolean().optional(),
   oauth: OAuthRefSchema.optional(),
   env: StringRecordSchema.optional(),
   source: z.record(z.string(), z.unknown()).optional(),
@@ -102,9 +105,51 @@ function providerEntryFromToml(data: Record<string, unknown>): Record<string, un
       out[targetKey] = isPlainObject(value) ? transformPlainObject(value) : value;
     } else if (targetKey === 'env' || targetKey === 'customHeaders') {
       out[targetKey] = isPlainObject(value) ? cloneRecord(value) : value;
+    } else if (targetKey === 'apiKeys') {
+      out[targetKey] = apiKeysFromToml(value);
     } else {
       out[targetKey] = value;
     }
+  }
+  return out;
+}
+
+function apiKeysFromToml(value: unknown): unknown {
+  if (!isPlainObject(value)) return value;
+  const out: Record<string, unknown> = {};
+  for (const [keyId, entry] of Object.entries(value)) {
+    out[keyId] = isPlainObject(entry) ? apiKeyEntryFromToml(entry) : entry;
+  }
+  return out;
+}
+
+function apiKeyEntryFromToml(entry: Record<string, unknown>): Record<string, unknown> {
+  const out = transformPlainObject(entry);
+  const proxyUrl = out['proxyUrl'];
+  if (typeof proxyUrl === 'string') {
+    const trimmed = proxyUrl.trim();
+    if (trimmed.length === 0) {
+      delete out['proxyUrl'];
+    } else {
+      out['proxyUrl'] = trimmed;
+    }
+  }
+  return out;
+}
+
+function apiKeysToToml(value: unknown, rawValue: unknown): unknown {
+  if (!isPlainObject(value)) return value;
+  const rawSub = cloneRecord(rawValue);
+  const out: Record<string, unknown> = {};
+  for (const [keyId, entry] of Object.entries(value)) {
+    if (!isPlainObject(entry)) {
+      out[keyId] = entry;
+      continue;
+    }
+    const converted = plainObjectToToml(entry, rawSub[keyId]);
+    delete converted['proxy_url'];
+    setDefined(converted, 'proxy_url', entry['proxyUrl']);
+    out[keyId] = converted;
   }
   return out;
 }
@@ -132,6 +177,8 @@ function providerEntryToToml(
       out[camelToSnake(key)] = plainObjectToToml(value, undefined);
     } else if ((key === 'env' || key === 'customHeaders') && value !== undefined) {
       out[camelToSnake(key)] = cloneRecord(value);
+    } else if (key === 'apiKeys' && value !== undefined) {
+      out[camelToSnake(key)] = apiKeysToToml(value, out[camelToSnake(key)]);
     } else {
       setDefined(out, camelToSnake(key), value);
     }

@@ -64,6 +64,7 @@ interface KeyRow {
   readonly label: string; // key name
   readonly preview: string; // masked key preview
   readonly isActive: boolean;
+  readonly proxyUrl?: string; // the key's own proxy, if it declares one
 }
 
 export interface ProviderManagerOptions {
@@ -84,6 +85,8 @@ export interface ProviderManagerOptions {
   readonly onSetActiveKey: (providerId: string, keyId: string) => void;
   /** Set proxy URL for a provider. */
   readonly onSetProxyUrl: (providerId: string) => void;
+  /** Turn automatic API key rotation on or off for a provider. */
+  readonly onToggleRotation: (providerId: string) => void;
   readonly onClose: () => void;
 }
 
@@ -97,6 +100,8 @@ interface SourceRow {
   readonly hasActive: boolean;
   /** Optional base URL extracted from the provider config. */
   readonly baseUrl?: string;
+  /** True when automatic key rotation is on for the provider. */
+  readonly rotateKeys?: boolean;
   /** Child key rows for this provider (if it has multiple named keys). */
   readonly keyRows: readonly KeyRow[];
 }
@@ -112,7 +117,7 @@ type Row = SourceRow | AddRow | KeyRow;
 
 const ADD_ROW_LABEL = '[ Add New Platform ]';
 const PAGE_SIZE = 8;
-const HEADER_HINT = '↑↓ navigate · D delete · A add key · S set active · P proxy · Esc cancel';
+const HEADER_HINT = '↑↓ navigate · D delete · A add key · S set active · R rotate keys · P proxy · Esc cancel';
 
 // Narrows a `ProviderConfig` blob to a `CustomRegistrySource` payload.
 // Mirrors `readCustomRegistrySource` in `kimi-tui.ts`. We can't import
@@ -203,6 +208,7 @@ function buildRows(opts: ProviderManagerOptions): readonly Row[] {
             providerIds: [...existing.providerIds, id],
             hasActive: existing.hasActive || isActive,
             baseUrl: existing.baseUrl,
+            rotateKeys: existing.rotateKeys,
             keyRows: existing.keyRows,
           };
         }
@@ -231,6 +237,7 @@ function buildRows(opts: ProviderManagerOptions): readonly Row[] {
       providerIds: [id],
       hasActive: isActive,
       baseUrl,
+      rotateKeys: cfg.rotateKeys === true,
       keyRows,
     });
   }
@@ -260,12 +267,31 @@ function buildKeyRows(providerId: string, provider: ProviderConfig): readonly Ke
     label: keyInfo.name,
     preview: maskApiKey(keyInfo.key),
     isActive: keyId === activeKeyId,
+    proxyUrl: keyInfo.proxyUrl,
   }));
 }
 
 function maskApiKey(key: string): string {
   if (key.length <= 12) return '*'.repeat(key.length);
   return `${key.slice(0, 8)}...${key.slice(-4)}`;
+}
+
+/**
+ * Display form of a per-key proxy: its host alone, so credentials a user
+ * embeds in the URL never reach the dialog. A hand-edited config can hold a
+ * value the URL parser rejects, hence the defensive strip of both the scheme
+ * and any userinfo.
+ */
+function proxyHost(proxyUrl: string): string {
+  try {
+    const host = new URL(proxyUrl).host;
+    if (host.length > 0) return host;
+  } catch {
+    // fall through to the strip below
+  }
+  const withoutScheme = proxyUrl.replace(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//, '');
+  const withoutUserinfo = withoutScheme.slice(withoutScheme.lastIndexOf('@') + 1);
+  return withoutUserinfo.split('/')[0] ?? withoutUserinfo;
 }
 
 export class ProviderManagerComponent extends Container implements Focusable {
@@ -403,6 +429,12 @@ export class ProviderManagerComponent extends Container implements Focusable {
         // Allow setting proxy URL for standalone providers
         const providerId = selected.providerIds[0];
         if (providerId) this.opts.onSetProxyUrl(providerId);
+        return;
+      }
+      if ((ch === 'r' || ch === 'R') && selected.providerIds.length === 1) {
+        // Allow toggling key rotation for standalone providers
+        const providerId = selected.providerIds[0];
+        if (providerId) this.opts.onToggleRotation(providerId);
         return;
       }
       if (ch === 'd' || ch === 'D') {
@@ -555,6 +587,15 @@ function renderRow(
       const urlText = truncateToWidth(row.baseUrl, Math.max(0, width - 6), '…');
       lines.push(currentTheme.fg('textMuted', `      ${urlText}`));
     }
+    if (row.keyRows.length >= 2) {
+      const state = row.rotateKeys === true ? 'on' : 'off';
+      lines.push(
+        currentTheme.fg(
+          row.rotateKeys === true ? 'success' : 'textDim',
+          `      rotate keys: ${state}`,
+        ),
+      );
+    }
     // Key rows are rendered as separate entries in the flat rows array,
     // so we don't render them again here.
   } else if (row.kind === 'key') {
@@ -569,6 +610,10 @@ function renderRow(
       lines.push(currentTheme.fg('success', `${keyLine} ${CURRENT_MARK}`));
     } else {
       lines.push(keyLine);
+    }
+    if (row.proxyUrl !== undefined) {
+      const proxyText = truncateToWidth(proxyHost(row.proxyUrl), Math.max(0, width - 8), '…');
+      lines.push(currentTheme.fg('textMuted', `      proxy: ${proxyText}`));
     }
   }
 

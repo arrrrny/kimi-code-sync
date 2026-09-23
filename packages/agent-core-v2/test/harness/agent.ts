@@ -2715,7 +2715,7 @@ function configWithProvider(
     ...config,
     providers: {
       ...config.providers,
-      [providerName]: providerConfigForAlias(provider),
+      [providerName]: { ...config.providers[providerName], ...providerConfigForAlias(provider) },
     },
     models: {
       ...config.models,

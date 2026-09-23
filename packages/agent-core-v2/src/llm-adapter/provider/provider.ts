@@ -14,6 +14,7 @@ export type ModelSource = 'static' | 'discover' | 'oauth-catalog';
 export interface ProviderApiKey {
   key: string;
   name: string;
+  proxyUrl?: string;
 }
 
 export interface ProviderConfig {
@@ -29,6 +30,7 @@ export interface ProviderConfig {
   apiKeyEnv?: string;
   apiKeys?: Record<string, ProviderApiKey>;
   activeApiKeyId?: string;
+  rotateKeys?: boolean;
   oauth?: OAuthRef;
   env?: Record<string, string>;
   source?: Record<string, unknown>;
@@ -57,6 +59,7 @@ export interface IProviderService {
   list(): Readonly<Record<string, ProviderConfig>>;
   getDefaultProvider(): string | undefined;
   set(name: string, config: ProviderConfig): Promise<void>;
+  setActiveApiKey(name: string, keyId: string): Promise<void>;
   delete(name: string): Promise<void>;
   loadAll(providers: ProvidersSection, defaultProvider: string | undefined): void;
   replaceAll(providers: ProvidersSection): Promise<void>;

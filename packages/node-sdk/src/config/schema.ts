@@ -46,6 +46,7 @@ const StringRecordSchema = z.record(z.string(), z.string());
 export const ProviderApiKeySchema = z.object({
   key: z.string().min(1),
   name: z.string().min(1),
+  proxyUrl: z.string().optional(),
 });
 
 export type ProviderApiKey = z.infer<typeof ProviderApiKeySchema>;
@@ -56,6 +57,7 @@ export const ProviderConfigSchema = z.object({
   apiKeyEnv: z.string().optional(),
   apiKeys: z.record(z.string(), ProviderApiKeySchema).optional(),
   activeApiKeyId: z.string().optional(),
+  rotateKeys: z.boolean().optional(),
   baseUrl: z.string().optional(),
   proxyUrl: z.string().optional(),
   free_models_only: z.boolean().optional(),
@@ -334,7 +336,6 @@ export const KimiConfigSchema = z.object({
   yolo: z.boolean().optional(),
   defaultPermissionMode: PermissionModeSchema.optional(),
   defaultPlanMode: z.boolean().optional(),
-  autoSessionTitle: z.boolean().optional(),
   permission: PermissionConfigSchema.optional(),
   hooks: z.array(HookDefSchema).optional(),
   services: ServicesConfigSchema.optional(),
@@ -390,7 +391,6 @@ export const KimiConfigPatchSchema = z
     yolo: z.boolean().optional(),
     defaultPermissionMode: PermissionModeSchema.optional(),
     defaultPlanMode: z.boolean().optional(),
-    autoSessionTitle: z.boolean().optional(),
     permission: PermissionConfigPatchSchema.optional(),
     hooks: z.array(HookDefSchema).optional(),
     services: ServicesConfigPatchSchema.optional(),

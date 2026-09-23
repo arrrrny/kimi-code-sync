@@ -10,6 +10,7 @@ import type { ProtocolBase, ProtocolRequesterOptions, TraitContext } from '#/llm
 import { resolveModelConnection } from '#/llm/protocol/connection';
 import { applyThinking } from '#/llm/protocol/thinking';
 import { resolveMaxCompletionCap, type FormatRequestInput } from '#/llm/protocol/format';
+import { opencodeSessionHeaders } from '#/llm/protocol/session-headers';
 import {
   mergeRequestHeaders,
   type LlmClientContext,
@@ -38,7 +39,6 @@ import {
   encodeAnthropicMaxTokens,
   encodeAnthropicRequest,
   lowerAnthropicMessages,
-  sessionHeadersForRequest,
   type AnthropicFormatOptions,
   type AnthropicRequestParams,
   convertAnthropicError,
@@ -158,7 +158,7 @@ export function prepareAnthropicRequest(
     betaApi: options?.betaApi === true,
   });
   const finalParams = trait?.buildParams?.(assembly.params, ctx) ?? assembly.params;
-  const headers = sessionHeadersForRequest(input);
+  const headers = opencodeSessionHeaders(input);
   return {
     ...encodeAnthropicRequest({ ...assembly, params: finalParams }),
     ...(headers !== undefined ? { headers } : {}),

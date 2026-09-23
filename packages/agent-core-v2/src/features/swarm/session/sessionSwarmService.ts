@@ -19,7 +19,6 @@ import {
   subagentParentAgentId,
   subagentSwarmItem,
 } from '#/session/agentLifecycle/subagentMetadata';
-import { inheritFallbackOverrides } from '#/session/subagent/configSection';
 import {
   classifyRunTermination,
   emitAgentRunSpawned,
@@ -27,6 +26,7 @@ import {
   SubagentCancelled,
   SubagentFailed,
 } from '#/session/subagent/mirrorAgentRun';
+import { inheritFallbackOverrides } from '#/session/subagent/configSection';
 import { type AgentRunHandle, ISessionSubagentService } from '#/session/subagent/subagent';
 import { ISessionMetadata, type AgentMeta } from '#/session/sessionMetadata/sessionMetadata';
 import { IEventDispatcher } from '#/state/eventDispatcher';

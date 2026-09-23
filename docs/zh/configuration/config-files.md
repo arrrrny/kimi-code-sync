@@ -129,6 +129,10 @@ timeout = 5
 | `oauth` | `table` | 否 | OAuth 凭据引用（`storage`、`key` 两个字段），由登录流程自动注入，通常无需手写 |
 | `env` | `table<string, string>` | 否 | 供应商凭证的备用来源，见 `env` 子表 |
 | `custom_headers` | `table<string, string>` | 否 | 每次请求附加的自定义 HTTP 头 |
+| `proxy_url` | `string` | 否 | 该供应商请求使用的代理；密钥自带的 `proxy_url` 优先于它 |
+| `api_keys` | `table<string, table>` | 否 | 具名 API 密钥表；每项包含 `key`、`name`，可选 `proxy_url` |
+| `active_api_key_id` | `string` | 否 | `api_keys` 中当前使用的密钥 ID |
+| `rotate_keys` | `boolean` | 否 | 当前密钥被拒绝时切换到下一个密钥，见[多个 API 密钥与自动轮换](./providers.md#多个-api-密钥与自动轮换) |
 
 **`env` 子表**：可以把供应商惯用的键名（如 `KIMI_API_KEY`）写在 `[providers.<name>.env]` 里，作为 `api_key` / `base_url` 的备用来源。这个子表**只在配置文件里读取**，不会修改 shell 环境：
 

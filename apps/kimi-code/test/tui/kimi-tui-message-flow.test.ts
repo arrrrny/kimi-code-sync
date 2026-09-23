@@ -7315,7 +7315,7 @@ command = "vim"
 
       await vi.waitFor(() => {
         expect(session.installPlugin).toHaveBeenCalledWith(
-          'https://code.kimi.com/kimi-code/plugins/official/kimi-datasource.zip',
+          expect.stringMatching(/^https:\/\/code\.kimi\.(com|ai)\/kimi-code\/plugins\/official\/kimi-datasource\.zip$/),
         );
       });
       expect(globalThis.fetch).toHaveBeenCalledWith(kimiCodePluginMarketplaceUrl());
