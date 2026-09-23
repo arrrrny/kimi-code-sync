@@ -128,9 +128,24 @@ export function oauthManagedProviderMessage(providerId: string): string {
   return `Custom registry provider "${providerId}" is managed by OAuth; log out before importing it.`;
 }
 
+/**
+ * Mirrors the provider-id rule the models.dev import path and the REST
+ * `providerIdSchema` enforce. A remote `api.json` is untrusted input and its
+ * `id` becomes an own key on `config.providers`, so an id such as `__proto__`
+ * would otherwise reach the object prototype instead of creating a provider.
+ */
+const PROVIDER_ID_PATTERN = /^[\p{L}\p{N}][\p{L}\p{N}\-_ ]*$/u;
+
+export function invalidProviderIdMessage(providerId: string): string {
+  return `Custom registry provider id "${providerId}" cannot be used as a provider id.`;
+}
+
 function assertCustomRegistryProviderId(providerId: string): void {
   if (isReservedProviderId(providerId)) {
     throw new Error(reservedProviderIdMessage(providerId));
+  }
+  if (!PROVIDER_ID_PATTERN.test(providerId)) {
+    throw new Error(invalidProviderIdMessage(providerId));
   }
 }
 
@@ -388,7 +403,6 @@ function retainedApiKeyEnv(
   entry: CustomRegistryProviderEntry,
   source: CustomRegistrySource,
 ): string | undefined {
-  assertCustomRegistryProviderId(entry.id);
   if (isRecord(existing) && existing['oauth'] !== undefined) {
     throw new Error(oauthManagedProviderMessage(entry.id));
   }
@@ -413,6 +427,7 @@ export function applyCustomRegistryProvider(
   source: CustomRegistrySource,
   priorProviders?: Readonly<Record<string, unknown>>,
 ): void {
+  assertCustomRegistryProviderId(entry.id);
   const providerKey = entry.id;
   const existing = priorProviders?.[providerKey] ?? config.providers[providerKey];
   const existingApiKeyEnv = retainedApiKeyEnv(existing, entry, source);

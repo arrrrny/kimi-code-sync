@@ -44,6 +44,7 @@ import { WarningIssued } from '#/agent/profile/profileOps';
 import { IAgentScopeContext } from '#/agent/scopeContext/scopeContext';
 import { IAgentStateService } from '#/agent/state/agentState';
 import { IFileService } from '#/app/file/fileService';
+import { IPluginService } from '#/app/plugin/plugin';
 import type {
   TurnEndedEvent as TurnEndedTelemetryEvent,
   TurnInterruptedEvent,
@@ -172,6 +173,7 @@ export class AgentLoopService extends Disposable implements IAgentLoopService {
     @IWireService private readonly wire: IWireService,
     @IInstantiationService private readonly instantiation: IInstantiationService,
     @IAgentProfileService private readonly profile: IAgentProfileService,
+    @IPluginService private readonly plugins: IPluginService,
   ) {
     super();
     this.states.contributeState(turnKey);
@@ -225,7 +227,8 @@ export class AgentLoopService extends Disposable implements IAgentLoopService {
         this.activeRequestTrace = trace;
       },
       onEvent: (event) => this.projectMachineEvent(event),
-      onToolResult: (toolCallId, result) => this.appendMachineToolResult(toolCallId, result),
+      onToolResult: (toolCallId, result, durationMs) =>
+        this.appendMachineToolResult(toolCallId, result, durationMs),
     };
   }
 
@@ -1223,6 +1226,7 @@ export class AgentLoopService extends Disposable implements IAgentLoopService {
       mode: active.mode ?? 'agent',
       provider_type,
       protocol,
+      enabled_plugins: this.plugins.enabledPluginIds()?.join(','),
     };
     this.telemetry.track2('turn_started', started);
     return active;
@@ -1250,7 +1254,11 @@ export class AgentLoopService extends Disposable implements IAgentLoopService {
       nudge.consumed = true;
       if (nudge.contextMessage !== undefined && nudge.contextMessage.content.length > 0) {
         this.materializeMessage(nudge.contextMessage);
-        if (nudge.promptIds !== undefined && nudge.promptIds.length > 0) {
+        if (
+          nudge.promptIds !== undefined &&
+          nudge.promptIds.length > 0 &&
+          nudge.contextMessage.id !== this.active?.prompt.message.id
+        ) {
           void this.dispatcher.dispatch(
             new TurnSteer({
               agentId: this.scopeContext.agentId,
@@ -1436,6 +1444,7 @@ export class AgentLoopService extends Disposable implements IAgentLoopService {
               encrypted: delta.encrypted,
               detailsIndex: delta.detailsIndex,
               hidden: delta.hidden,
+              reasoningKey: delta.reasoningKey,
             });
             if (part?.type === 'think' && part.hidden === true) return;
             void this.dispatcher.dispatch(
@@ -1681,7 +1690,7 @@ export class AgentLoopService extends Disposable implements IAgentLoopService {
         },
       })) {
         if (result.toolCallId === toolCallId) {
-          this.appendMachineToolResult(toolCallId, result.result);
+          this.appendMachineToolResult(toolCallId, result.result, result.durationMs);
         }
       }
     } catch (error) {
@@ -1715,6 +1724,7 @@ export class AgentLoopService extends Disposable implements IAgentLoopService {
       readonly stopTurn?: boolean;
       readonly stopTurnReason?: string;
     },
+    durationMs?: number,
   ): void {
     const turn = this.active;
     const step = turn?.current;
@@ -1723,7 +1733,7 @@ export class AgentLoopService extends Disposable implements IAgentLoopService {
       type: 'tool.result',
       parentUuid: step.toolCallUuids.get(toolCallId) ?? randomUUID(),
       toolCallId,
-      result: { output: result.output, isError: result.isError, note: result.note },
+      result: { output: result.output, isError: result.isError, note: result.note, durationMs },
     });
     step.resolvedToolIds.add(toolCallId);
     if (result.stopTurn === true) {
@@ -2101,6 +2111,7 @@ export class AgentLoopService extends Disposable implements IAgentLoopService {
       provider_type: turn.providerType,
       protocol: turn.protocol,
       trace_id: traceId,
+      enabled_plugins: this.plugins.enabledPluginIds()?.join(','),
     };
     this.telemetry.track2('turn_ended', ended);
     this.telemetry.setContext({ turn_id: undefined, trace_id: undefined, thinking_effort: undefined });

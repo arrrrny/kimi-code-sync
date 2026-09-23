@@ -732,6 +732,7 @@ export interface AgentStateSnapshot {
       encrypted?: string;
       detailsIndex?: number;
       hidden?: boolean;
+      reasoningKey?: string;
     } | /* ImageURLPart — packages/agent-core-v2/src/human/llm/message.ts */ {
       type: 'image_url';
       imageUrl: {
@@ -926,6 +927,18 @@ export interface AgentStateSnapshot {
       detail?: unknown;
     }>;
     readonly note?: string;
+    readonly usage?: /* TokenUsage — packages/agent-core-v2/src/human/llm/usage.ts */ {
+      inputOther: number;
+      output: number;
+      inputCacheRead: number;
+      inputCacheCreation: number;
+      raw?: Record<string, unknown>;
+    };
+    readonly llmTiming?: /* ContextMessageTiming — packages/agent-core-v2/src/agent/contextMemory/types.ts */ {
+      readonly llmFirstTokenLatencyMs?: number;
+      readonly llmStreamDurationMs?: number;
+    };
+    readonly durationMs?: number;
   })[];
   // src/agent/contextProjector/contextProjectorService.ts
   'contextProjector.lastRepairSignature': string | null;
@@ -1036,6 +1049,7 @@ export interface AgentStateSnapshot {
     encrypted?: string;
     detailsIndex?: number;
     hidden?: boolean;
+    reasoningKey?: string;
   } | /* ImageURLPart — packages/agent-core-v2/src/human/llm/message.ts */ {
     type: 'image_url';
     imageUrl: {

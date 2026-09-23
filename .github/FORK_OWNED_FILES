@@ -33,6 +33,8 @@ apps/kimi-code/test/tui/commands/squeeze-model.test.ts                 :: squeez
 # --- /fork-session alias + /fork-and-switch (PR #38) ---
 apps/kimi-code/src/tui/commands/registry.ts                             :: fork-and-switch
 apps/kimi-code/test/tui/commands/registry.test.ts                       :: fork-session
+# The fork's /fork always passes a title; upstream's assertion drops it.
+apps/kimi-code/test/tui/kimi-tui-message-flow.test.ts                   :: title: 'Fork: Source title',
 
 # --- model favorites (PR #5, spec 004) ---
 apps/kimi-code/test/tui/commands/model-favorites.test.ts                :: model-favorites

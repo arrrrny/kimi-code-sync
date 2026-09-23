@@ -102,8 +102,11 @@ export class SessionSubagentScopeCacheService
       const candidate = this.oldestCandidate(skipped);
       if (candidate === undefined) return;
       const [agentId, attempts] = candidate;
+      const outcome = await this.evict(agentId).catch((error: unknown) => {
+        this.log.debug('subagent scope eviction failed', { agentId, error });
+        return 'failed' as const;
+      });
       this.retired.delete(agentId);
-      const outcome = await this.evict(agentId);
       if (outcome === 'removed' || outcome === 'missing') continue;
       skipped.add(agentId);
       if (outcome === 'deferred') {
