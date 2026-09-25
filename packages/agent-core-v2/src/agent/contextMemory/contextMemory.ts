@@ -16,6 +16,7 @@ export interface ContextCompactionInput {
   readonly keptHeadUserMessageCount?: number;
   readonly droppedCount?: number;
   readonly wireLines?: WireLineRange;
+  readonly handoffPath?: string;
 }
 
 export interface ContextCompactionResult {
@@ -27,6 +28,7 @@ export interface ContextCompactionResult {
   keptUserMessageCount: number;
   keptHeadUserMessageCount?: number;
   droppedCount?: number;
+  handoffPath?: string;
 }
 
 export interface IAgentContextMemoryService {

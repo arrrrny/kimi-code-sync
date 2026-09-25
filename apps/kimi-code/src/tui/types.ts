@@ -186,6 +186,7 @@ export interface CompactionTranscriptData {
   readonly tokensAfter?: number;
   readonly instruction?: string;
   readonly model?: string;
+  readonly handoffPath?: string;
 }
 
 export interface CronTranscriptData {

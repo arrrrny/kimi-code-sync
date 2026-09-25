@@ -11,6 +11,7 @@ import {
   FullCompactionCancel,
   FullCompactionComplete,
 } from '#/agent/fullCompaction/compactionOps';
+import { ContextApplyCompaction } from '#/agent/contextMemory/contextEvents';
 import { AppendLogStore } from '#/persistence/backends/node-fs/appendLogStore';
 import { InMemoryStorageService } from '#/persistence/backends/memory/inMemoryStorageService';
 import { IAppendLogStore } from '#/persistence/interface/appendLogStore';
@@ -169,5 +170,49 @@ describe('fullCompaction ops (wire-backed)', () => {
     );
 
     expect(host.agentState.get(fullCompactionKey).phase).toBe('idle');
+  });
+});
+
+describe('context.apply_compaction handoffPath field', () => {
+  const base = { agentId: 'agent-1', compactedCount: 3, tokensBefore: 100, tokensAfter: 20 };
+
+  it('keeps an optional handoffPath on the current summary shape', () => {
+    const parsed = ContextApplyCompaction.schema.parse({
+      type: 'context.apply_compaction',
+      ...base,
+      summary: 'the summary',
+      handoffPath: '/home/sessions/w/s/agents/a/handoff/2026-09-25T10-00-00-000-001.md',
+    });
+    expect(parsed).toMatchObject({
+      summary: 'the summary',
+      handoffPath: '/home/sessions/w/s/agents/a/handoff/2026-09-25T10-00-00-000-001.md',
+    });
+  });
+
+  it('parses the current summary shape unchanged without a handoffPath', () => {
+    const parsed = ContextApplyCompaction.schema.parse({
+      type: 'context.apply_compaction',
+      ...base,
+      summary: 'the summary',
+    });
+    expect(parsed).toMatchObject({ summary: 'the summary' });
+    expect('handoffPath' in parsed).toBe(false);
+  });
+
+  it('still parses the context-summary and legacy message shapes untouched', () => {
+    const contextSummaryShape = ContextApplyCompaction.schema.parse({
+      type: 'context.apply_compaction',
+      ...base,
+      contextSummary: 'model facing text',
+    });
+    expect(contextSummaryShape).toMatchObject({ contextSummary: 'model facing text' });
+
+    const legacyShape = ContextApplyCompaction.schema.parse({
+      type: 'context.apply_compaction',
+      ...base,
+      summary: { role: 'user', content: 'legacy summary' },
+      count: 2,
+    });
+    expect(legacyShape).toMatchObject({ count: 2 });
   });
 });

@@ -461,6 +461,7 @@ export const compactionResultSchema = z.object({
   keptUserMessageCount: z.number().optional(),
   keptHeadUserMessageCount: z.number().optional(),
   droppedCount: z.number().optional(),
+  handoffPath: z.string().optional(),
 }) satisfies z.ZodType<CompactionResult>;
 
 export const toolUpdateSchema = z.object({

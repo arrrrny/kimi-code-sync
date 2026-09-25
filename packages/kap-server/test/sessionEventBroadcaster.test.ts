@@ -3210,4 +3210,42 @@ describe('sessionEventMessageSchema', () => {
       ).success,
     ).toBe(false);
   });
+
+  it('keeps an optional handoffPath on a compaction completed envelope', () => {
+    const parsed = sessionEventMessageSchema.safeParse(
+      envelope({
+        type: 'compaction.completed',
+        result: {
+          summary: 'Compacted.',
+          compactedCount: 4,
+          tokensBefore: 900,
+          tokensAfter: 120,
+          handoffPath: '/home/sessions/w/s/agents/a/handoff/2026-09-25T10-00-00-000-001.md',
+        },
+      }),
+    );
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.payload).toMatchObject({
+        result: { handoffPath: '/home/sessions/w/s/agents/a/handoff/2026-09-25T10-00-00-000-001.md' },
+      });
+    }
+  });
+
+  it('rejects a non-string handoffPath on a compaction completed envelope', () => {
+    expect(
+      sessionEventMessageSchema.safeParse(
+        envelope({
+          type: 'compaction.completed',
+          result: {
+            summary: 'Compacted.',
+            compactedCount: 4,
+            tokensBefore: 900,
+            tokensAfter: 120,
+            handoffPath: 42,
+          },
+        }),
+      ).success,
+    ).toBe(false);
+  });
 });

@@ -56,6 +56,12 @@ import { ErrorCodes, Error2, isCodedError, isError2, toKimiErrorPayload, unwrapE
 import { AgentErrorEvent } from '#/agent/mcp/mcpEvents';
 import { IEventDispatcher } from '#/state/eventDispatcher';
 import { renderCompactionInstruction } from './compactionInstruction';
+import { COMPACTION_HANDOFF_FLAG_ID } from './flag';
+import {
+  AgentHandoffDocumentService,
+  IAgentHandoffDocumentService,
+} from './handoffDocument';
+import { renderHandoffInstruction, renderHandoffPointerFooter } from './handoffInstruction';
 import { renderContextRecoveryPointer } from './contextRecovery';
 import {
   IAgentFullCompactionService,
@@ -171,6 +177,7 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
     @IConfigService private readonly configService: IConfigService,
     @IFlagService private readonly flags: IFlagService,
     @ILogService private readonly log: ILogService,
+    @IAgentHandoffDocumentService private readonly handoffDocuments: IAgentHandoffDocumentService,
   ) {
     super();
     this.states.contributeState(fullCompactionKey);
@@ -934,22 +941,36 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
       const summary = await this.postProcessSummary(attempt.summary);
       const wireLines = await this.captureWireLines();
       signal.throwIfAborted();
+      const handoff = await this.generateHandoffDocument(
+        active,
+        data,
+        historyForModel,
+        compactionRequestModel,
+        effectiveMaxOutputSize,
+        signal,
+      );
       const recoveryFooter = this.renderRecoveryFooter(wireLines);
       const summaryText = buildCompactionSummaryText(summary);
+      const contextSummary = [summaryText, handoff?.footer, recoveryFooter]
+        .filter((part) => part !== undefined)
+        .join('\n\n');
       const result = this.context.applyCompaction({
         summary,
-        contextSummary:
-          recoveryFooter === undefined ? summaryText : `${summaryText}\n\n${recoveryFooter}`,
+        contextSummary,
         compactedCount: originalHistory.length,
         tokensBefore,
         summaryOutputTokens:
           attempt.usage === null
             ? undefined
             : attempt.usage.output +
-              (recoveryFooter === undefined ? 0 : this.tokenCounting.estimateText(recoveryFooter)),
+              (recoveryFooter === undefined
+                ? 0
+                : this.tokenCounting.estimateText(recoveryFooter) +
+                  (handoff === undefined ? 0 : this.tokenCounting.estimateText(handoff.footer))),
         requestOverheadTokens: this.requestTokens([]),
         droppedCount: droppedCount === 0 ? undefined : droppedCount,
         wireLines,
+        handoffPath: handoff?.path,
       });
 
       const properties: CompactionFinishedEvent = {
@@ -966,6 +987,7 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
         trace_id: attempt.traceId,
         model: effectiveModelAlias,
         model_display: compactionDisplayModel(this.configService, effectiveModelAlias),
+        handoff_generated: handoff !== undefined,
         ...usageTelemetry(attempt.usage),
       };
       this.telemetry.track2('compaction_finished', properties);
@@ -992,6 +1014,69 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
         throw error;
       }
       throw new Error2(ErrorCodes.COMPACTION_FAILED, String(error), { cause: error });
+    }
+  }
+
+  private async generateHandoffDocument(
+    active: ActiveCompaction,
+    data: Readonly<CompactionBeginData>,
+    history: readonly ContextMessage[],
+    model: string | undefined,
+    maxOutputSize: number | undefined,
+    signal: AbortSignal,
+  ): Promise<{ path: string; footer: string } | undefined> {
+    if (data.source !== 'auto' || !this.flags.enabled(COMPACTION_HANDOFF_FLAG_ID)) {
+      return undefined;
+    }
+    try {
+      const handoffInstruction = renderHandoffInstruction({
+        previousHandoffPath: this.handoffDocuments.previousHandoffPath,
+        customInstruction: data.instruction,
+      });
+      const runRequest = async () => {
+        const handoffRequest = this.llmRequester.start(
+          {
+            messages: [...history, createUserMessage(handoffInstruction)],
+            maxOutputSize,
+            model,
+            source: {
+              type: 'operation',
+              turnId: active.originTurnId,
+              requestKind: 'full_compaction_handoff',
+              logFields: {},
+            },
+          },
+          undefined,
+          signal,
+        );
+        return handoffRequest.result;
+      };
+      const finish = await runWithCredentialRecovery(
+        this.llmRequester.currentCredentialProvider(),
+        runRequest,
+        signal,
+      );
+      const document = finish.message.content
+        .filter((part) => part.type === 'text')
+        .map((part) => part.text)
+        .join('')
+        .trim();
+      if (document.length === 0) {
+        throw new APIEmptyResponseError('The handoff response did not contain a usable document.');
+      }
+      const path = await this.handoffDocuments.record(document, Date.now());
+      return { path, footer: renderHandoffPointerFooter(path) };
+    } catch (error) {
+      if (isAbortError(error)) throw error;
+      this.log.warn('compaction handoff generation failed', { reason: String(error) });
+      void this.dispatcher.dispatch(
+        new WarningIssued({
+          agentId: this.agent.agentId,
+          code: 'compaction-handoff-failed',
+          message: 'Generating the compaction handoff document failed; compacting without it.',
+        }),
+      );
+      return undefined;
     }
   }
 
@@ -1166,4 +1251,12 @@ registerScopedService(
   AgentFullCompactionService,
   ScopeActivation.OnScopeCreated,
   'fullCompaction',
+);
+
+registerScopedService(
+  LifecycleScope.Agent,
+  IAgentHandoffDocumentService,
+  AgentHandoffDocumentService,
+  ScopeActivation.OnScopeCreated,
+  'fullCompactionHandoffDocuments',
 );

@@ -593,6 +593,7 @@ export class SessionReplayRenderer {
         tokensBefore: record.result.tokensBefore,
         tokensAfter: record.result.tokensAfter,
         instruction: record.instruction,
+        handoffPath: record.result.handoffPath,
       },
     });
   }

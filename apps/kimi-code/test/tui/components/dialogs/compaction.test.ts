@@ -40,6 +40,36 @@ describe('CompactionComponent', () => {
     }
   });
 
+  it('renders the saved handoff path after compaction completes', () => {
+    const component = new CompactionComponent();
+
+    try {
+      component.markDone(1000, 500, 'summary text', '/home/s/w/agents/a/handoff/x.md');
+      const lines = component.render(120).map(strip);
+      const text = lines.join('\n');
+
+      expect(text).toContain('Compaction complete');
+      expect(text).toContain('Handoff saved: /home/s/w/agents/a/handoff/x.md');
+    } finally {
+      component.dispose();
+    }
+  });
+
+  it('renders no handoff line when the compaction produced none', () => {
+    const component = new CompactionComponent();
+
+    try {
+      component.markDone(1000, 500, 'summary text');
+      const lines = component.render(120).map(strip);
+      const text = lines.join('\n');
+
+      expect(text).toContain('Compaction complete');
+      expect(text).not.toContain('Handoff saved:');
+    } finally {
+      component.dispose();
+    }
+  });
+
   it('does not render a tip after compaction completes', () => {
     const component = new CompactionComponent(undefined, undefined, 'ctrl+s: steer mid-turn');
 

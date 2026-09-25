@@ -12,6 +12,7 @@ import { pluginManifestSchema } from '../src/contract/global/plugins.js';
 import { mcpServerAuthFlowHandleSchema } from '../src/contract/global/mcpManagement.js';
 import { providerConfigSchema } from '../src/contract/global/providers.js';
 import { createSessionOptionsSchema } from '../src/contract/session/lifecycle.js';
+import { compactionCompletedEventSchema } from '../src/contract/agent/events.js';
 import { promptPayloadSchema } from '../src/contract/agent/schemas.js';
 
 type McpTimeoutField = 'startupTimeoutMs' | 'toolTimeoutMs';
@@ -137,5 +138,47 @@ describe('prompt contract validation', () => {
 
   it('accepts a non-empty caller-chosen promptId', () => {
     expect(promptPayloadSchema.safeParse({ input: [], promptId: 'submission-1' }).success).toBe(true);
+  });
+});
+
+describe('compaction completed contract validation', () => {
+  const result = {
+    summary: 'Compacted.',
+    compactedCount: 4,
+    tokensBefore: 900,
+    tokensAfter: 120,
+  };
+
+  it('keeps an optional handoffPath on the result', () => {
+    const parsed = compactionCompletedEventSchema.safeParse({
+      type: 'compaction.completed',
+      result: { ...result, handoffPath: '/home/sessions/w/s/agents/a/handoff/2026-09-25T10-00-00-000-001.md' },
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.result.handoffPath).toBe(
+        '/home/sessions/w/s/agents/a/handoff/2026-09-25T10-00-00-000-001.md',
+      );
+    }
+  });
+
+  it('parses the result unchanged without a handoffPath', () => {
+    const parsed = compactionCompletedEventSchema.safeParse({
+      type: 'compaction.completed',
+      result: { ...result },
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect('handoffPath' in parsed.data.result).toBe(false);
+    }
+  });
+
+  it('rejects a non-string handoffPath', () => {
+    expect(
+      compactionCompletedEventSchema.safeParse({
+        type: 'compaction.completed',
+        result: { ...result, handoffPath: 42 },
+      }).success,
+    ).toBe(false);
   });
 });
