@@ -6,7 +6,7 @@ harness (scripted model output, temp home dirs); none needs a live provider.
 Setup (every shell):
 
 ```bash
-cd /Users/arrrrny/Developer/kimi-code-sync
+cd <repo-root>
 export PATH="/usr/local/lib/node_modules/corepack/shims:$PATH"
 ```
 
