@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'pathe';
 
@@ -29,7 +29,7 @@ import { MASTER_ENV } from '#/app/flag/flagService';
 import { estimateTokensForMessages } from '#/llm-adapter/contract/tokens';
 import { recordingTelemetry, type TelemetryRecord } from '../../app/telemetry/stubs';
 import type { TestAgentContext, TestAgentOptions, TestAgentServiceOverride } from '../../harness';
-import { agentService, appService, appServices, createCommandRunner, execEnvServices, hostEnvironmentServices, requesterFromGenerateFn, sessionServices, testAgent as createTestAgent, type LegacyGenerateResult } from '../../harness';
+import { agentService, appService, appServices, createCommandRunner, execEnvServices, homeDirServices, hostEnvironmentServices, requesterFromGenerateFn, sessionServices, testAgent as createTestAgent, type LegacyGenerateResult } from '../../harness';
 import { IFileSystemStorageService } from '#/persistence/interface/storage';
 import { InMemoryStorageService } from '#/persistence/backends/memory/inMemoryStorageService';
 import { ISessionTokenCountingService } from '#/session/tokenCounting/sessionTokenCounting';
@@ -54,6 +54,20 @@ import { IAgentGoalService } from '#/features/goal/goalService';
 import { HostFileSystem } from '#/os/backends/node-local/hostFsService';
 
 type GenerateFn = NonNullable<TestAgentOptions['generate']>;
+
+function findHandoffDir(root: string): string | undefined {
+  const stack = [root];
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    for (const entry of readdirSync(current, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const child = join(current, entry.name);
+      if (entry.name === 'handoff') return child;
+      stack.push(child);
+    }
+  }
+  return undefined;
+}
 
 function testAgent(
   ...inputs: readonly (TestAgentServiceOverride | TestAgentOptions)[]
@@ -1808,6 +1822,322 @@ describe('FullCompaction', () => {
     expect(firstCallTexts.some((text) => text.includes('history chunk 22'))).toBe(true);
     expect(ctx.contextData().tokenCount).toBeLessThan(maxContextTokens * 0.85);
     await ctx.expectResumeMatches();
+  });
+
+  it('produces a handoff document before an auto compaction replaces the history', async () => {
+    vi.stubEnv('KIMI_CODE_EXPERIMENTAL_COMPACTION_HANDOFF', '1');
+    const homeDir = mkdtempSync(join(tmpdir(), 'kimi-handoff-auto-home-'));
+    try {
+      const ctx = testAgent(homeDirServices(homeDir));
+      ctx.configure({
+        provider: CATALOGUED_PROVIDER,
+        tools: SNAPSHOT_VISIBLE_TOOLS,
+        modelCapabilities: {
+          ...CATALOGUED_MODEL_CAPABILITIES,
+          max_context_tokens: 22_000,
+        },
+      });
+      for (let i = 1; i <= 22; i++) {
+        ctx.appendAssistantTextWithUsage(
+          i,
+          `history chunk ${String(i)} ${'x'.repeat(7_200)}`,
+          i * 1_850,
+        );
+      }
+      const completed = ctx.once('compaction.completed');
+      ctx.mockNextResponse({ type: 'text', text: 'Auto summary.' });
+      ctx.mockNextResponse({
+        type: 'text',
+        text: [
+          '# Handoff',
+          '',
+          '## Session Gist',
+          '',
+          'Long task gist.',
+          '',
+          '## Current State',
+          '',
+          'Mid task.',
+          '',
+          '## The Threads',
+          '',
+          'Next: finish task.',
+          '',
+          '## Gotchas',
+          '',
+          'Beware x.',
+          '',
+          '## Files and Artifacts Touched',
+          '',
+          'a.ts edited.',
+          '',
+          '## Open Questions',
+          '',
+          'None.',
+          '',
+        ].join('\n'),
+      });
+
+      ctx.get(IAgentFullCompactionService).begin({ source: 'auto', instruction: undefined });
+      await completed;
+      await ctx.wire.flush();
+
+      const handoffDir = findHandoffDir(homeDir);
+      expect(handoffDir).toBeDefined();
+      const files = readdirSync(handoffDir!);
+      expect(files).toHaveLength(1);
+      const document = readFileSync(join(handoffDir!, files[0]!), 'utf-8');
+      for (const heading of [
+        'Session Gist',
+        'Current State',
+        'The Threads',
+        'Gotchas',
+        'Files and Artifacts Touched',
+        'Open Questions',
+      ]) {
+        expect(document).toContain(heading);
+      }
+      expect(document).toContain('Long task gist.');
+      expect(ctx.llmCalls).toHaveLength(2);
+      const handoffCallTexts = ctx.llmCalls[1]!.history.map(messageText);
+      expect(handoffCallTexts.some((text) => text.includes('history chunk 22'))).toBe(true);
+      await ctx.expectResumeMatches();
+    } finally {
+      rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves no handoff trace when the compaction-handoff flag is off', async () => {
+    const records: TelemetryRecord[] = [];
+    const ctx = testAgent({ telemetry: recordingTelemetry(records) });
+    ctx.configure({
+      provider: CATALOGUED_PROVIDER,
+      tools: SNAPSHOT_VISIBLE_TOOLS,
+      modelCapabilities: {
+        ...CATALOGUED_MODEL_CAPABILITIES,
+        max_context_tokens: 22_000,
+      },
+    });
+    ctx.appendExchange(1, 'old user one', 'old assistant one', 1_000);
+    const completed = ctx.once('compaction.completed');
+    ctx.mockNextResponse({ type: 'text', text: 'Auto summary.' });
+
+    ctx.get(IAgentFullCompactionService).begin({ source: 'auto', instruction: undefined });
+    await completed;
+    await ctx.wire.flush();
+
+    expect(ctx.llmCalls).toHaveLength(1);
+    const applyRecord = ctx.newEvents().find((entry) => entry.event === 'context.apply_compaction');
+    expect(applyRecord).toBeDefined();
+    expect('handoffPath' in (applyRecord!.args as Record<string, unknown>)).toBe(false);
+    expect(
+      records.find((record) => record.event === 'compaction_finished')?.properties,
+    ).toMatchObject({ handoff_generated: false });
+    await ctx.expectResumeMatches();
+  });
+
+  it('anchors the post-compaction summary, event, and telemetry at the handoff document', async () => {
+    vi.stubEnv('KIMI_CODE_EXPERIMENTAL_COMPACTION_HANDOFF', '1');
+    const homeDir = mkdtempSync(join(tmpdir(), 'kimi-handoff-anchor-home-'));
+    try {
+      const records: TelemetryRecord[] = [];
+      const ctx = testAgent(homeDirServices(homeDir), { telemetry: recordingTelemetry(records) });
+      ctx.configure({
+        provider: CATALOGUED_PROVIDER,
+        modelCapabilities: CATALOGUED_MODEL_CAPABILITIES,
+      });
+      ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
+      const completed = ctx.once('compaction.completed');
+      ctx.mockNextResponse({ type: 'text', text: 'Auto summary.' });
+      ctx.mockNextResponse({ type: 'text', text: '# Handoff\n\n## Session Gist\n\ngist.' });
+
+      ctx.get(IAgentFullCompactionService).begin({ source: 'auto', instruction: undefined });
+      await completed;
+      await ctx.wire.flush();
+
+      const events = ctx.newEvents();
+      const applyRecord = events.find((entry) => entry.event === 'context.apply_compaction');
+      expect(applyRecord).toBeDefined();
+      const args = applyRecord!.args as Record<string, unknown>;
+      const path = args['handoffPath'] as string;
+      expect(path).toMatch(/handoff\/.+\.md$/);
+      const contextSummary = args['contextSummary'] as string;
+      expect(contextSummary).toContain('Auto summary.');
+      expect(contextSummary).toContain(path);
+      expect(contextSummary.indexOf(path)).toBeGreaterThan(contextSummary.indexOf('Auto summary.'));
+      expect(existsSync(path)).toBe(true);
+
+      const completedRecord = events.find((entry) => entry.event === 'compaction.completed');
+      expect(completedRecord).toBeDefined();
+      const result = (completedRecord!.args as Record<string, unknown>)['result'] as Record<
+        string,
+        unknown
+      >;
+      expect(result['handoffPath']).toBe(path);
+      expect('contextSummary' in result).toBe(false);
+      expect(
+        records.find((record) => record.event === 'compaction_finished')?.properties,
+      ).toMatchObject({ handoff_generated: true });
+      await ctx.expectResumeMatches();
+    } finally {
+      rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it('completes the compaction when the handoff request fails', async () => {
+    vi.stubEnv('KIMI_CODE_EXPERIMENTAL_COMPACTION_HANDOFF', '1');
+    const homeDir = mkdtempSync(join(tmpdir(), 'kimi-handoff-fail-home-'));
+    try {
+      const records: TelemetryRecord[] = [];
+      const ctx = testAgent(homeDirServices(homeDir), { telemetry: recordingTelemetry(records) });
+      ctx.configure({
+        provider: CATALOGUED_PROVIDER,
+        modelCapabilities: CATALOGUED_MODEL_CAPABILITIES,
+      });
+      ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
+      const completed = ctx.once('compaction.completed');
+      ctx.mockNextResponse({ type: 'text', text: 'Summary before failed handoff.' });
+      ctx.mockNextProviderResponse({ error: new Error('handoff backend down') });
+
+      ctx.get(IAgentFullCompactionService).begin({ source: 'auto', instruction: undefined });
+      await completed;
+      await ctx.wire.flush();
+
+      expect(ctx.llmCalls).toHaveLength(2);
+      expect(findHandoffDir(homeDir)).toBeUndefined();
+      const events = ctx.newEvents();
+      const applyRecord = events.find((entry) => entry.event === 'context.apply_compaction');
+      expect('handoffPath' in (applyRecord!.args as Record<string, unknown>)).toBe(false);
+      const contextSummary = applyRecord!.args as Record<string, unknown>;
+      expect(contextSummary['contextSummary']).toContain('Summary before failed handoff.');
+      expect(contextSummary['contextSummary']).not.toContain('handoff document');
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          event: 'warning',
+          args: expect.objectContaining({ code: 'compaction-handoff-failed' }),
+        }),
+      );
+      expect(
+        records.find((record) => record.event === 'compaction_finished')?.properties,
+      ).toMatchObject({ handoff_generated: false });
+      expect(records.find((record) => record.event === 'compaction_failed')).toBeUndefined();
+      await ctx.expectResumeMatches();
+    } finally {
+      rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it('never generates a handoff for a manual compaction', async () => {
+    vi.stubEnv('KIMI_CODE_EXPERIMENTAL_COMPACTION_HANDOFF', '1');
+    const ctx = testAgent();
+    ctx.configure({
+      provider: CATALOGUED_PROVIDER,
+      modelCapabilities: CATALOGUED_MODEL_CAPABILITIES,
+    });
+    ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
+    const completed = ctx.once('compaction.completed');
+    ctx.mockNextResponse({ type: 'text', text: 'Manual summary.' });
+
+    await ctx.rpc.beginCompaction({});
+    await completed;
+    await ctx.wire.flush();
+
+    expect(ctx.llmCalls).toHaveLength(1);
+    const applyRecord = ctx.newEvents().find((entry) => entry.event === 'context.apply_compaction');
+    expect(applyRecord).toBeDefined();
+    expect('handoffPath' in (applyRecord!.args as Record<string, unknown>)).toBe(false);
+    await ctx.expectResumeMatches();
+  });
+
+  it('names a second handoff distinctly and points at the first', async () => {
+    vi.stubEnv('KIMI_CODE_EXPERIMENTAL_COMPACTION_HANDOFF', '1');
+    const homeDir = mkdtempSync(join(tmpdir(), 'kimi-handoff-second-home-'));
+    try {
+      const ctx = testAgent(homeDirServices(homeDir));
+      ctx.configure({
+        provider: CATALOGUED_PROVIDER,
+        modelCapabilities: CATALOGUED_MODEL_CAPABILITIES,
+      });
+      ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
+      const firstCompleted = ctx.once('compaction.completed');
+      ctx.mockNextResponse({ type: 'text', text: 'First summary.' });
+      ctx.mockNextResponse({
+        type: 'text',
+        text: '# Handoff\n\n## Session Gist\n\nFirst handoff gist.',
+      });
+      ctx.get(IAgentFullCompactionService).begin({ source: 'auto', instruction: undefined });
+      await firstCompleted;
+
+      const secondCompleted = ctx.once('compaction.completed');
+      ctx.mockNextResponse({ type: 'text', text: 'Second summary.' });
+      ctx.mockNextResponse({
+        type: 'text',
+        text: '# Handoff\n\n## Session Gist\n\nSecond handoff gist.',
+      });
+      ctx.get(IAgentFullCompactionService).begin({ source: 'auto', instruction: undefined });
+      await secondCompleted;
+      await ctx.wire.flush();
+
+      const dir = findHandoffDir(homeDir);
+      expect(dir).toBeDefined();
+      const files = readdirSync(dir!).toSorted();
+      expect(files).toHaveLength(2);
+      const firstPath = join(dir!, files[0]!);
+      expect(readFileSync(firstPath, 'utf-8')).toContain('First handoff gist.');
+      expect(readFileSync(join(dir!, files[1]!), 'utf-8')).toContain('Second handoff gist.');
+      const secondHandoffCall = ctx.llmCalls[3]!;
+      expect(secondHandoffCall.history.map(messageText).join('\n')).toContain(firstPath);
+      await ctx.expectResumeMatches();
+    } finally {
+      rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it('produces a handoff document from the overflow recovery path', async () => {
+    vi.stubEnv('KIMI_CODE_EXPERIMENTAL_COMPACTION_HANDOFF', '1');
+    const homeDir = mkdtempSync(join(tmpdir(), 'kimi-handoff-overflow-home-'));
+    try {
+      let callCount = 0;
+      let handoffHistoryTexts: string[] = [];
+      const generate: GenerateFn = requesterFromGenerateFn(
+        async (_provider, _system, _tools, history, callbacks) => {
+          callCount += 1;
+          if (callCount === 1) {
+            throw new APIContextOverflowError(400, 'Context length exceeded', 'req-handoff-ovf');
+          }
+          if (callCount === 2) {
+            return textResult('Overflow compacted summary.');
+          }
+          if (callCount === 3) {
+            handoffHistoryTexts = history.map(messageText);
+            return textResult('# Handoff\n\n## Session Gist\n\nOverflow gist.');
+          }
+          await callbacks?.onMessagePart?.({ type: 'text', text: 'Recovered after overflow.' });
+          return textResult('Recovered after overflow.');
+        },
+      );
+      const ctx = testAgent(homeDirServices(homeDir), { generate });
+      ctx.configure({
+        provider: CATALOGUED_PROVIDER,
+        modelCapabilities: CATALOGUED_MODEL_CAPABILITIES,
+      });
+      ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
+      ctx.appendExchange(2, 'recent user two', 'recent assistant two', 20);
+
+      await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Retry after overflow' }] });
+      await ctx.untilTurnEnd();
+      await ctx.wire.flush();
+
+      expect(callCount).toBe(4);
+      const dir = findHandoffDir(homeDir);
+      expect(dir).toBeDefined();
+      const files = readdirSync(dir!);
+      expect(files).toHaveLength(1);
+      expect(readFileSync(join(dir!, files[0]!), 'utf-8')).toContain('Overflow gist.');
+      expect(handoffHistoryTexts.some((text) => text.includes('old user one'))).toBe(true);
+    } finally {
+      rmSync(homeDir, { recursive: true, force: true });
+    }
   });
 
   it('cancels when the compacted prefix changes before completion', async () => {

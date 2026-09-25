@@ -96,21 +96,23 @@ export class AgentContextMemoryService extends Disposable implements IAgentConte
   applyCompaction(input: ContextCompactionInput): ContextCompactionResult {
     const history = this.get();
     const result = buildContextCompactionShape(history, input, this.tokenEstimateFns);
-    void this.dispatcher.dispatch(
-      new ContextApplyCompaction({
-        agentId: this.scopeContext.agentId,
-        summary: result.summary,
-        contextSummary: result.contextSummary,
-        compactedCount: result.compactedCount,
-        tokensBefore: result.tokensBefore,
-        tokensAfter: result.tokensAfter,
-        summaryOutputTokens: input.summaryOutputTokens,
-        keptUserMessageCount: result.keptUserMessageCount,
-        keptHeadUserMessageCount: result.keptHeadUserMessageCount,
-        droppedCount: result.droppedCount,
-        wireLines: input.wireLines,
-      }),
-    );
+    const payload = {
+      agentId: this.scopeContext.agentId,
+      summary: result.summary,
+      contextSummary: result.contextSummary,
+      compactedCount: result.compactedCount,
+      tokensBefore: result.tokensBefore,
+      tokensAfter: result.tokensAfter,
+      summaryOutputTokens: input.summaryOutputTokens,
+      keptUserMessageCount: result.keptUserMessageCount,
+      keptHeadUserMessageCount: result.keptHeadUserMessageCount,
+      droppedCount: result.droppedCount,
+      wireLines: input.wireLines,
+    };
+    if (input.handoffPath !== undefined) {
+      payload['handoffPath'] = input.handoffPath;
+    }
+    void this.dispatcher.dispatch(new ContextApplyCompaction(payload));
     this.tokenCounting.rebase(this.scopeContext.agentContext, {
       length: result.messages.length,
       tokens: result.tokensAfter,
@@ -124,6 +126,9 @@ export class AgentContextMemoryService extends Disposable implements IAgentConte
     });
     const { messages: _messages, ...publicResult } = result;
     void _messages;
+    if (input.handoffPath !== undefined) {
+      publicResult.handoffPath = input.handoffPath;
+    }
     return publicResult;
   }
 

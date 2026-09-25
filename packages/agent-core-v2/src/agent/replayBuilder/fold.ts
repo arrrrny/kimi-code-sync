@@ -342,6 +342,7 @@ class WireReplayFoldState {
       keptUserMessageCount: readNumber(record, 'keptUserMessageCount') ?? keptTail.length,
       keptHeadUserMessageCount: readNumber(record, 'keptHeadUserMessageCount'),
       droppedCount: readNumber(record, 'droppedCount'),
+      handoffPath: readString(record, 'handoffPath'),
     };
     this.patchLastCompaction({ result });
     const summaryMessage: ContextMessage = {

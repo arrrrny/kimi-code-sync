@@ -1480,3 +1480,29 @@ describe('turn machine stream state across service-internal retries', () => {
     expect(doneEntries[0]?.message.toolCalls.map((toolCall) => toolCall.id)).toEqual(['call_b']);
   });
 });
+
+describe('AgentLLMRequesterService request kind records', () => {
+  it('records a full_compaction_handoff operation request as kind compaction', async () => {
+    const calls = { value: 0 };
+    const { service, dispatcher, records } = createService(createRequester(calls));
+
+    await service.request({ source: { type: 'operation', requestKind: 'full_compaction_handoff' } });
+    await dispatcher.flush();
+
+    expect(
+      records.filter((record) => record.type === 'llm.request').map((record) => record['kind']),
+    ).toEqual(['compaction', 'compaction']);
+  });
+
+  it('still records a plain operation request as kind loop', async () => {
+    const calls = { value: 0 };
+    const { service, dispatcher, records } = createService(createRequester(calls));
+
+    await service.request({ source: { type: 'operation', requestKind: 'something_else' } });
+    await dispatcher.flush();
+
+    expect(
+      records.filter((record) => record.type === 'llm.request').map((record) => record['kind']),
+    ).toEqual(['loop', 'loop']);
+  });
+});

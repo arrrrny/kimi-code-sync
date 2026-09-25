@@ -36,6 +36,7 @@ export class CompactionComponent extends Container {
   private tokensBefore: number | undefined;
   private tokensAfter: number | undefined;
   private summary: string | undefined;
+  private handoffPath: string | undefined;
   private summaryText: Text | undefined;
   private expanded = false;
 
@@ -89,12 +90,18 @@ export class CompactionComponent extends Container {
     super.invalidate();
   }
 
-  markDone(tokensBefore?: number, tokensAfter?: number, summary?: string): void {
+  markDone(
+    tokensBefore?: number,
+    tokensAfter?: number,
+    summary?: string,
+    handoffPath?: string,
+  ): void {
     if (this.done || this.canceled) return;
     this.done = true;
     this.tokensBefore = tokensBefore;
     this.tokensAfter = tokensAfter;
     this.summary = summary;
+    this.handoffPath = handoffPath;
     this.stopBlink();
     this.headerText.setText(this.buildHeader());
     if (this.expanded) {
@@ -172,7 +179,11 @@ export class CompactionComponent extends Container {
         this.summary !== undefined && this.summary.length > 0
           ? currentTheme.dim(` (Ctrl-O to ${this.expanded ? 'hide' : 'show'} compaction summary)`)
           : '';
-      return `${bullet}${label}${detail}${shortcutHint}`;
+      const handoffLine =
+        this.handoffPath !== undefined
+          ? `\n${currentTheme.dim(`Handoff saved: ${this.handoffPath}`)}`
+          : '';
+      return `${bullet}${label}${detail}${shortcutHint}${handoffLine}`;
     }
     if (this.canceled) {
       const bullet = currentTheme.fg('warning', STATUS_BULLET);

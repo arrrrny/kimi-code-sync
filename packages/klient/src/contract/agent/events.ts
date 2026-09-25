@@ -169,6 +169,7 @@ export const compactionCompletedEventSchema = z.object({
     keptUserMessageCount: z.number().optional(),
     keptHeadUserMessageCount: z.number().optional(),
     droppedCount: z.number().optional(),
+    handoffPath: z.string().optional(),
   }),
 });
 
