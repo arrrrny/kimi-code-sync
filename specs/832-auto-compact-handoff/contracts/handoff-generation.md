@@ -77,9 +77,14 @@ successful path). No cleanup pass exists in v1.
 
 ## Determinism for tests
 
-- The sequence counter and `lastHandoffPath` reset with the service instance — a fresh agent
-  scope starts at `-001.md` with no resume pointer.
-- The clock is an injected port; tests pin it to make the name exact.
+- The sequence counter resets with the service instance — a fresh agent scope starts at
+  `-001.md`; timestamps keep names unique across restarts, so nothing is overwritten.
+- `lastHandoffPath` resets with the service instance but is re-seeded on first use from the
+  newest `handoff/*.md` blob under the agent scope, so a resumed process resumes the chain a
+  previous process wrote instead of pointing nowhere.
+- The clock enters as the `record(document, timestampMs)` argument: unit tests pin the
+  timestamp and assert the exact name; the compaction round passes `Date.now()`, and
+  round-level tests match the generated name by pattern.
 - The blob store is the real `FileStorageService` over a temp home in the existing harness;
   tests assert on the file's existence and content through the store/path, not by mocking
   the write.

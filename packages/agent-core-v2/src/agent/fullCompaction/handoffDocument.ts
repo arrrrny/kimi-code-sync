@@ -21,11 +21,6 @@ export function handoffStoragePath(sessionDir: string, agentId: string, fileName
   return join(sessionDir, 'agents', agentId, HANDOFF_STORAGE_DIR, fileName);
 }
 
-export interface HandoffDocumentRecord {
-  readonly path: string;
-  readonly fileName: string;
-}
-
 export class AgentHandoffDocumentService extends Service {
   declare readonly _serviceBrand: undefined;
 
@@ -44,6 +39,13 @@ export class AgentHandoffDocumentService extends Service {
     return this.lastPath;
   }
 
+  async resumePointer(): Promise<string | undefined> {
+    if (this.lastPath === undefined) {
+      this.lastPath = await this.newestStoredHandoffPath();
+    }
+    return this.lastPath;
+  }
+
   async record(document: string, timestampMs: number): Promise<string> {
     this.sequence += 1;
     const fileName = handoffFileName(timestampMs, this.sequence);
@@ -51,6 +53,19 @@ export class AgentHandoffDocumentService extends Service {
     await this.blobs.put(this.agent.scope(), `${HANDOFF_STORAGE_DIR}/${fileName}`, bytes);
     this.lastPath = handoffStoragePath(this.sessionCtx.sessionDir, this.agent.agentId, fileName);
     return this.lastPath;
+  }
+
+  private async newestStoredHandoffPath(): Promise<string | undefined> {
+    let names: readonly string[];
+    try {
+      names = await this.blobs.list(`${this.agent.scope()}/${HANDOFF_STORAGE_DIR}`);
+    } catch {
+      return undefined;
+    }
+    const newest = names.filter((name) => name.endsWith('.md')).toSorted().at(-1);
+    return newest === undefined
+      ? undefined
+      : handoffStoragePath(this.sessionCtx.sessionDir, this.agent.agentId, newest);
   }
 }
 

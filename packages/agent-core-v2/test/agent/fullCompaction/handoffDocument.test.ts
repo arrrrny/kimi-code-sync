@@ -37,8 +37,10 @@ describe('handoff file naming', () => {
 describe('AgentHandoffDocumentService', () => {
   const homeDirs: string[] = [];
 
-  function makeService(): { service: AgentHandoffDocumentService; sessionDir: string; homeDir: string } {
-    const homeDir = mkdtempSync(join(tmpdir(), 'kimi-handoff-home-'));
+  function makeService(
+    existingHomeDir?: string,
+  ): { service: AgentHandoffDocumentService; sessionDir: string; homeDir: string } {
+    const homeDir = existingHomeDir ?? mkdtempSync(join(tmpdir(), 'kimi-handoff-home-'));
     homeDirs.push(homeDir);
     const sessionDir = join(homeDir, 'sessions', 'ws1', 's1');
     const agentScope = 'sessions/ws1/s1/agents/agent-1';
@@ -88,8 +90,23 @@ describe('AgentHandoffDocumentService', () => {
   it('starts a fresh agent scope at sequence one with no resume pointer', async () => {
     const { service } = makeService();
     expect(service.previousHandoffPath).toBeUndefined();
+    await expect(service.resumePointer()).resolves.toBeUndefined();
     const path = await service.record('fresh scope\n', Date.UTC(2026, 8, 25, 10, 0, 0, 0));
     expect(NAME_PATTERN.exec(basename(path))?.[1]).toBe('001');
+  });
+
+  it('seeds the resume pointer from the newest stored document in a revived process', async () => {
+    const first = makeService();
+    await first.service.record('first handoff\n', Date.UTC(2026, 8, 25, 10, 0, 0, 0));
+    const secondPath = await first.service.record(
+      'second handoff\n',
+      Date.UTC(2026, 8, 25, 10, 0, 5, 0),
+    );
+
+    const revived = makeService(first.homeDir);
+    expect(revived.service.previousHandoffPath).toBeUndefined();
+    await expect(revived.service.resumePointer()).resolves.toBe(secondPath);
+    expect(revived.service.previousHandoffPath).toBe(secondPath);
   });
 });
 

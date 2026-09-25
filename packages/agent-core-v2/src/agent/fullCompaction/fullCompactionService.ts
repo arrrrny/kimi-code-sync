@@ -949,6 +949,17 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
         effectiveMaxOutputSize,
         signal,
       );
+      if (
+        data.source === 'auto' &&
+        this.flags.enabled(COMPACTION_HANDOFF_FLAG_ID) &&
+        !historySafeToCompact(this.context.get(), originalHistory)
+      ) {
+        const active = this._compacting;
+        if (active !== null) {
+          this.cancelActive(active);
+        }
+        throw compactionCancelledReason(active);
+      }
       const recoveryFooter = this.renderRecoveryFooter(wireLines);
       const summaryText = buildCompactionSummaryText(summary);
       const contextSummary = [summaryText, handoff?.footer, recoveryFooter]
@@ -965,8 +976,8 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
             : attempt.usage.output +
               (recoveryFooter === undefined
                 ? 0
-                : this.tokenCounting.estimateText(recoveryFooter) +
-                  (handoff === undefined ? 0 : this.tokenCounting.estimateText(handoff.footer))),
+                : this.tokenCounting.estimateText(recoveryFooter)) +
+              (handoff === undefined ? 0 : this.tokenCounting.estimateText(handoff.footer)),
         requestOverheadTokens: this.requestTokens([]),
         droppedCount: droppedCount === 0 ? undefined : droppedCount,
         wireLines,
@@ -1030,7 +1041,7 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
     }
     try {
       const handoffInstruction = renderHandoffInstruction({
-        previousHandoffPath: this.handoffDocuments.previousHandoffPath,
+        previousHandoffPath: await this.handoffDocuments.resumePointer(),
         customInstruction: data.instruction,
       });
       const runRequest = async () => {
