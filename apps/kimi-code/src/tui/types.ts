@@ -85,6 +85,9 @@ export interface AppState {
   /** Footer status line customization from tui.toml; absent means the default layout. */
   statusLine?: StatusLineConfig;
   markdown?: MarkdownConfig;
+  /** Favorite model aliases (tui.toml favorite_models, add-order); absent means
+   * none. Drives the /model Favorites tab, star markers, and Alt+M rotation. */
+  favoriteModels?: readonly string[];
   availableModels: Record<string, ModelAlias>;
   availableProviders: Record<string, ProviderConfig>;
   sessionTitle: string | null;
@@ -182,6 +185,7 @@ export interface CompactionTranscriptData {
   readonly tokensBefore?: number;
   readonly tokensAfter?: number;
   readonly instruction?: string;
+  readonly model?: string;
 }
 
 export interface CronTranscriptData {

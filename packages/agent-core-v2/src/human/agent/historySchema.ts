@@ -1,6 +1,5 @@
 import { z } from 'zod';
 
-import type { PromptOrigin } from './origin';
 import type { HistoryMessage } from './turn';
 
 const textPartSchema = z.object({ type: z.literal('text'), text: z.string() });
@@ -90,7 +89,9 @@ const entryMetaSchema = z.object({ source: z.string().optional(), key: z.string(
 
 export const userMetaSchema = entryMetaSchema.extend({
   promptId: z.string().optional(),
-  origin: z.custom<PromptOrigin>().optional(),
+  origin: z
+    .object({ kind: z.string(), skillActivations: z.array(z.unknown()).optional() })
+    .optional(),
   tracked: z.boolean().optional(),
   createdAt: z.string().optional(),
   userMessageId: z.string().optional(),

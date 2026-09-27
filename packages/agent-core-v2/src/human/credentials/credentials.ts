@@ -47,6 +47,7 @@ export function applyCredential(
   return {
     ...model,
     apiKey: credential.apiKey ?? model.apiKey,
+    proxyUrl: credential.proxyUrl ?? model.proxyUrl,
     defaultHeaders: mergeRequestHeaders(model.defaultHeaders, credential.headers),
   };
 }

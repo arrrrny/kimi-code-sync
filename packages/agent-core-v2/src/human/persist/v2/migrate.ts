@@ -53,7 +53,7 @@ async function listV2AgentIds(dir: string): Promise<string[]> {
     return [];
   }
   const ids: string[] = [];
-  for (const name of names.sort()) {
+  for (const name of names.toSorted()) {
     if (await pathIsFile(join(agentsDir, name, 'wire.jsonl'))) ids.push(name);
   }
   return ids;
