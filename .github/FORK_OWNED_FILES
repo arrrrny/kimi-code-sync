@@ -121,3 +121,16 @@ apps/kimi-code/src/tui/components/dialogs/provider-manager.ts          :: onTogg
 apps/kimi-code/src/tui/components/dialogs/api-key-input-dialog.ts      :: allowEmpty
 packages/agent-core-v2/test/llm-adapter/provider/apiKeyRotation.test.ts       :: createKeyedCredentialProvider
 packages/agent-core-v2/src/human/test/credentials/keyRotationRecovery.test.ts :: keyRotationRecovery
+
+# --- auto-compact handoff document (spec 832) ---
+packages/agent-core-v2/src/agent/fullCompaction/flag.ts                                :: compaction-handoff
+packages/agent-core-v2/src/agent/fullCompaction/fullCompactionService.ts               :: full_compaction_handoff
+packages/agent-core-v2/src/agent/fullCompaction/handoffDocument.ts                     :: AgentHandoffDocumentService
+packages/agent-core-v2/src/agent/fullCompaction/handoffInstruction.ts                  :: resume_from_block
+packages/agent-core-v2/src/agent/fullCompaction/handoff-instruction.md                 :: Files and Artifacts Touched
+packages/agent-core-v2/src/app/telemetry/events.ts                                     :: handoff_generated
+packages/agent-core-v2/src/agent/contextMemory/contextEvents.ts                        :: handoffPath
+packages/agent-core-v2/test/agent/fullCompaction/handoffDocument.test.ts               :: AgentHandoffDocumentService
+packages/kap-server/src/protocol/events-zod.ts                                         :: handoffPath
+packages/klient/src/contract/agent/events.ts                                           :: handoffPath
+apps/kimi-code/src/tui/components/dialogs/compaction.ts                                :: Handoff saved:
