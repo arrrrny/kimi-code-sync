@@ -217,11 +217,7 @@ export class AgentToolDedupeService extends Service implements IAgentToolDedupeS
       this.beginStep(ctx.turnId, ctx.step);
       await next();
     });
-    loop.hooks.onDidFinishStep.register('toolDedupe', async (ctx, next) => {
-      this.endStep();
-      this.settleHandoff(ctx.turnId);
-      await next();
-    });
+    this.registerAfterStep(loop);
     toolExecutor.onBeforeExecuteTool((event) => {
       if (this.handoffPhase === 'active') {
         this.handoffVetoedCallIds.add(event.toolCall.id);
@@ -342,6 +338,22 @@ export class AgentToolDedupeService extends Service implements IAgentToolDedupeS
   private clearTurnRecords(): void {
     this.turnCallRecords.clear();
     this.turnRepeatCount = 0;
+  }
+
+  private registerAfterStep(loop: IAgentLoopService): void {
+    const handler: Parameters<IAgentLoopService['hooks']['onDidFinishStep']['register']>[1] = async (
+      ctx,
+      next,
+    ) => {
+      this.endStep();
+      this.settleHandoff(ctx.turnId);
+      await next();
+    };
+    try {
+      loop.hooks.onDidFinishStep.register('toolDedupe', handler, { before: 'full-compaction' });
+    } catch {
+      loop.hooks.onDidFinishStep.register('toolDedupe', handler);
+    }
   }
 
   private beginStep(turnId?: number, step?: number): void {

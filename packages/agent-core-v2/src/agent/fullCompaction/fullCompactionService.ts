@@ -480,7 +480,7 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
     void this.dispatcher.dispatch(new FullCompactionCancel({ agentId: this.agent.agentId }));
     this._compacting = null;
     if (!active.abortController.signal.aborted) {
-      active.abortController.abort();
+      active.abortController.abort(compactionCancelledReason(active));
     }
     void this.dispatcher.dispatch(new CompactionCancelled({ agentId: this.agent.agentId }));
     return true;
@@ -1155,9 +1155,7 @@ function usageTelemetry(usage: TokenUsage | null): CompactionTelemetryProperties
 function compactionCancelledReason(active: ActiveCompaction | null): Error {
   const reason = active?.abortController.signal.reason;
   if (reason instanceof Error) return reason;
-  const error = new Error('Compaction cancelled.');
-  error.name = 'AbortError';
-  return error;
+  return new Error2(ErrorCodes.COMPACTION_CANCELLED, 'Compaction cancelled.');
 }
 
 registerScopedService(
