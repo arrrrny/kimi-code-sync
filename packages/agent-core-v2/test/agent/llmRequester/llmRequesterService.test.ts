@@ -1484,7 +1484,9 @@ describe('turn machine stream state across service-internal retries', () => {
 describe('AgentLLMRequesterService request kind records', () => {
   it('records a full_compaction_handoff operation request as kind compaction', async () => {
     const calls = { value: 0 };
-    const { service, dispatcher, records } = createService(createRequester(calls));
+    const { service, dispatcher, records } = createService(createRequester(calls), {
+      project: (messages: readonly ContextMessage[]) => messages,
+    });
 
     await service.request({ source: { type: 'operation', requestKind: 'full_compaction_handoff' } });
     await dispatcher.flush();
@@ -1496,7 +1498,9 @@ describe('AgentLLMRequesterService request kind records', () => {
 
   it('still records a plain operation request as kind loop', async () => {
     const calls = { value: 0 };
-    const { service, dispatcher, records } = createService(createRequester(calls));
+    const { service, dispatcher, records } = createService(createRequester(calls), {
+      project: (messages: readonly ContextMessage[]) => messages,
+    });
 
     await service.request({ source: { type: 'operation', requestKind: 'something_else' } });
     await dispatcher.flush();

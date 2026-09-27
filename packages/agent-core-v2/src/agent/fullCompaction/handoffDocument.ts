@@ -1,7 +1,7 @@
 import { join } from 'pathe';
 
 import { Service } from '#/_base/di/service';
-import { createDecorator } from '#/_base/di/instantiation';
+import { createDecorator, type ServiceIdentifier } from '#/_base/di/instantiation';
 import { IAgentScopeContext } from '#/agent/scopeContext/scopeContext';
 import { IBlobStore } from '#/persistence/interface/blobStore';
 import { ISessionContext } from '#/session/sessionContext/sessionContext';
@@ -21,7 +21,7 @@ export function handoffStoragePath(sessionDir: string, agentId: string, fileName
   return join(sessionDir, 'agents', agentId, HANDOFF_STORAGE_DIR, fileName);
 }
 
-export class AgentHandoffDocumentService extends Service {
+export class AgentHandoffDocumentService extends Service implements IAgentHandoffDocumentService {
   declare readonly _serviceBrand: undefined;
 
   private sequence = 0;
@@ -69,5 +69,12 @@ export class AgentHandoffDocumentService extends Service {
   }
 }
 
-export const IAgentHandoffDocumentService =
-  createDecorator<AgentHandoffDocumentService>('agentHandoffDocumentService');
+export interface IAgentHandoffDocumentService {
+  readonly _serviceBrand: undefined;
+  readonly previousHandoffPath: string | undefined;
+  resumePointer(): Promise<string | undefined>;
+  record(document: string, timestampMs: number): Promise<string>;
+}
+
+export const IAgentHandoffDocumentService: ServiceIdentifier<IAgentHandoffDocumentService> =
+  createDecorator<IAgentHandoffDocumentService>('agentHandoffDocumentService');

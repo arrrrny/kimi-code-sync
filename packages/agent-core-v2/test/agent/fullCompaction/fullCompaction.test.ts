@@ -1927,7 +1927,9 @@ describe('FullCompaction', () => {
     await ctx.wire.flush();
 
     expect(ctx.llmCalls).toHaveLength(1);
-    const applyRecord = ctx.newEvents().find((entry) => entry.event === 'context.apply_compaction');
+    const applyRecord = (
+      ctx.newEvents() as readonly { event?: string; args?: unknown }[]
+    ).find((entry) => entry.event === 'context.apply_compaction');
     expect(applyRecord).toBeDefined();
     expect('handoffPath' in (applyRecord!.args as Record<string, unknown>)).toBe(false);
     expect(
@@ -1955,7 +1957,7 @@ describe('FullCompaction', () => {
       await completed;
       await ctx.wire.flush();
 
-      const events = ctx.newEvents();
+      const events = ctx.newEvents() as readonly { event?: string; args?: unknown }[];
       const applyRecord = events.find((entry) => entry.event === 'context.apply_compaction');
       expect(applyRecord).toBeDefined();
       const args = applyRecord!.args as Record<string, unknown>;
@@ -2005,7 +2007,7 @@ describe('FullCompaction', () => {
 
       expect(ctx.llmCalls).toHaveLength(2);
       expect(findHandoffDir(homeDir)).toBeUndefined();
-      const events = ctx.newEvents();
+      const events = ctx.newEvents() as readonly { event?: string; args?: unknown }[];
       const applyRecord = events.find((entry) => entry.event === 'context.apply_compaction');
       expect('handoffPath' in (applyRecord!.args as Record<string, unknown>)).toBe(false);
       const contextSummary = applyRecord!.args as Record<string, unknown>;
@@ -2043,7 +2045,9 @@ describe('FullCompaction', () => {
     await ctx.wire.flush();
 
     expect(ctx.llmCalls).toHaveLength(1);
-    const applyRecord = ctx.newEvents().find((entry) => entry.event === 'context.apply_compaction');
+    const applyRecord = (
+      ctx.newEvents() as readonly { event?: string; args?: unknown }[]
+    ).find((entry) => entry.event === 'context.apply_compaction');
     expect(applyRecord).toBeDefined();
     expect('handoffPath' in (applyRecord!.args as Record<string, unknown>)).toBe(false);
     await ctx.expectResumeMatches();

@@ -23,6 +23,22 @@ import {
 import { contextMemoryKey } from './contextOps';
 import type { LoopRecordedEvent } from './loopEventFold';
 import type { ContextMessage } from './types';
+import type { WireLineRange } from '#/wire/record';
+
+type ApplyCompactionDispatchPayload = {
+  agentId: string;
+  summary: string;
+  contextSummary: string;
+  compactedCount: number;
+  tokensBefore: number;
+  tokensAfter: number;
+  summaryOutputTokens: number | undefined;
+  keptUserMessageCount: number;
+  keptHeadUserMessageCount: number | undefined;
+  droppedCount: number | undefined;
+  wireLines: WireLineRange | undefined;
+  handoffPath?: string;
+};
 
 export class AgentContextMemoryService extends Disposable implements IAgentContextMemoryService {
   declare readonly _serviceBrand: undefined;
@@ -96,7 +112,7 @@ export class AgentContextMemoryService extends Disposable implements IAgentConte
   applyCompaction(input: ContextCompactionInput): ContextCompactionResult {
     const history = this.get();
     const result = buildContextCompactionShape(history, input, this.tokenEstimateFns);
-    const payload = {
+    const payload: ApplyCompactionDispatchPayload = {
       agentId: this.scopeContext.agentId,
       summary: result.summary,
       contextSummary: result.contextSummary,
@@ -126,10 +142,11 @@ export class AgentContextMemoryService extends Disposable implements IAgentConte
     });
     const { messages: _messages, ...publicResult } = result;
     void _messages;
+    const output: ContextCompactionResult = publicResult;
     if (input.handoffPath !== undefined) {
-      publicResult.handoffPath = input.handoffPath;
+      output.handoffPath = input.handoffPath;
     }
-    return publicResult;
+    return output;
   }
 
   private publishSplice(input: Omit<ContextSplicedPayload, 'agentId'>): void {

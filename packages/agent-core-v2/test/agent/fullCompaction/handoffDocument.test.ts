@@ -12,7 +12,7 @@ import { renderHandoffInstruction } from '#/agent/fullCompaction/handoffInstruct
 import { BlobStoreService } from '#/persistence/backends/node-fs/blobStoreService';
 import { FileStorageService } from '#/persistence/backends/node-fs/fileStorageService';
 import type { ISessionContext } from '#/session/sessionContext/sessionContext';
-import type { IAgentScopeContext } from '#/agent/agentContext/agentContext';
+import type { IAgentScopeContext } from '#/agent/scopeContext/scopeContext';
 
 const NAME_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}-(\d{3})\.md$/;
 
@@ -119,12 +119,6 @@ describe('renderHandoffInstruction', () => {
     'Files and Artifacts Touched',
     'Open Questions',
   ];
-
-  function headingPositions(rendered: string, heading: string): number {
-    return rendered.toLowerCase().split(heading.toLowerCase()).slice(0, -1).map(
-      (_, index, parts) => parts.slice(0, index + 1).join(heading.toLowerCase()).length,
-    );
-  }
 
   it('requests the fixed section headings in order', () => {
     const rendered = renderHandoffInstruction({});
