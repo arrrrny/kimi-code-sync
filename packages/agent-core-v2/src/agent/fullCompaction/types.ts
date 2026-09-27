@@ -7,6 +7,7 @@ export interface CompactionResult {
   keptUserMessageCount?: number;
   keptHeadUserMessageCount?: number;
   droppedCount?: number;
+  handoffPath?: string;
 }
 
 export type CompactionSource = 'manual' | 'auto';

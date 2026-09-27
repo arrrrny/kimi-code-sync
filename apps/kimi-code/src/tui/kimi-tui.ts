@@ -2815,7 +2815,7 @@ export class KimiTUI {
       if (data.result === 'cancelled') {
         block.markCanceled();
       } else {
-        block.markDone(data.tokensBefore, data.tokensAfter, data.summary);
+        block.markDone(data.tokensBefore, data.tokensAfter, data.summary, data.handoffPath);
         if (this.state.toolOutputExpanded) {
           block.setExpanded(true);
         }

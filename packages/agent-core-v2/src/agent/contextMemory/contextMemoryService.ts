@@ -23,6 +23,22 @@ import {
 import { contextMemoryKey } from './contextOps';
 import type { LoopRecordedEvent } from './loopEventFold';
 import type { ContextMessage } from './types';
+import type { WireLineRange } from '#/wire/record';
+
+type ApplyCompactionDispatchPayload = {
+  agentId: string;
+  summary: string;
+  contextSummary: string;
+  compactedCount: number;
+  tokensBefore: number;
+  tokensAfter: number;
+  summaryOutputTokens: number | undefined;
+  keptUserMessageCount: number;
+  keptHeadUserMessageCount: number | undefined;
+  droppedCount: number | undefined;
+  wireLines: WireLineRange | undefined;
+  handoffPath?: string;
+};
 
 export class AgentContextMemoryService extends Disposable implements IAgentContextMemoryService {
   declare readonly _serviceBrand: undefined;
@@ -96,21 +112,23 @@ export class AgentContextMemoryService extends Disposable implements IAgentConte
   applyCompaction(input: ContextCompactionInput): ContextCompactionResult {
     const history = this.get();
     const result = buildContextCompactionShape(history, input, this.tokenEstimateFns);
-    void this.dispatcher.dispatch(
-      new ContextApplyCompaction({
-        agentId: this.scopeContext.agentId,
-        summary: result.summary,
-        contextSummary: result.contextSummary,
-        compactedCount: result.compactedCount,
-        tokensBefore: result.tokensBefore,
-        tokensAfter: result.tokensAfter,
-        summaryOutputTokens: input.summaryOutputTokens,
-        keptUserMessageCount: result.keptUserMessageCount,
-        keptHeadUserMessageCount: result.keptHeadUserMessageCount,
-        droppedCount: result.droppedCount,
-        wireLines: input.wireLines,
-      }),
-    );
+    const payload: ApplyCompactionDispatchPayload = {
+      agentId: this.scopeContext.agentId,
+      summary: result.summary,
+      contextSummary: result.contextSummary,
+      compactedCount: result.compactedCount,
+      tokensBefore: result.tokensBefore,
+      tokensAfter: result.tokensAfter,
+      summaryOutputTokens: input.summaryOutputTokens,
+      keptUserMessageCount: result.keptUserMessageCount,
+      keptHeadUserMessageCount: result.keptHeadUserMessageCount,
+      droppedCount: result.droppedCount,
+      wireLines: input.wireLines,
+    };
+    if (input.handoffPath !== undefined) {
+      payload['handoffPath'] = input.handoffPath;
+    }
+    void this.dispatcher.dispatch(new ContextApplyCompaction(payload));
     this.tokenCounting.rebase(this.scopeContext.agentContext, {
       length: result.messages.length,
       tokens: result.tokensAfter,
@@ -124,7 +142,11 @@ export class AgentContextMemoryService extends Disposable implements IAgentConte
     });
     const { messages: _messages, ...publicResult } = result;
     void _messages;
-    return publicResult;
+    const output: ContextCompactionResult = publicResult;
+    if (input.handoffPath !== undefined) {
+      output.handoffPath = input.handoffPath;
+    }
+    return output;
   }
 
   private publishSplice(input: Omit<ContextSplicedPayload, 'agentId'>): void {

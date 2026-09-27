@@ -255,6 +255,7 @@ export interface CompactionFinishedEvent {
   ahead_todo_calls_count?: number;
   model?: string;
   model_display?: string;
+  handoff_generated: boolean;
 }
 
 export interface ContextBudgetReminderEvent {
@@ -926,6 +927,7 @@ export const telemetryEventDefinitions = {
       ahead_todo_calls_count: 'Todo tool calls made after the compaction-ahead reminder',
       model: 'Model alias that produced the compaction summary (dedicated compaction model when configured, otherwise the active conversation model)',
       model_display: 'User-facing model alias for the compaction summary producer',
+      handoff_generated: 'Whether the compaction produced and persisted a handoff document',
     },
   }),
   context_budget_reminder: defineAgentTelemetryEvent<ContextBudgetReminderEvent>({

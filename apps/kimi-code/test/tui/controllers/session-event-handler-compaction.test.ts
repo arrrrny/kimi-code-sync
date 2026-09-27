@@ -75,6 +75,19 @@ const compactionCompleted = {
   result: { summary: 'summary', tokensBefore: 100, tokensAfter: 10, compactedCount: 1 },
 } as const;
 
+const compactionCompletedWithHandoff = {
+  type: 'compaction.completed',
+  sessionId: 's1',
+  agentId: 'main',
+  result: {
+    summary: 'summary',
+    tokensBefore: 100,
+    tokensAfter: 10,
+    compactedCount: 1,
+    handoffPath: '/home/s/w/agents/a/handoff/x.md',
+  },
+} as const;
+
 const compactionCancelled = {
   type: 'compaction.cancelled',
   sessionId: 's1',
@@ -88,6 +101,18 @@ describe('SessionEventHandler compaction cache bookkeeping', () => {
     handler.handleEvent(compactionCompleted, vi.fn());
     expect(host.recordSessionActivity).toHaveBeenCalledOnce();
     expect(host.noteCompactionFinished).toHaveBeenCalledOnce();
+  });
+
+  it('passes the handoff path through to the streaming UI when the event carries one', () => {
+    const { host } = makeHost();
+    const handler = new SessionEventHandler(host);
+    handler.handleEvent(compactionCompletedWithHandoff, vi.fn());
+    expect(host.streamingUI.endCompaction).toHaveBeenCalledWith(
+      100,
+      10,
+      'summary',
+      '/home/s/w/agents/a/handoff/x.md',
+    );
   });
 
   it('keeps both baselines after a cancelled compaction (context was not cut)', () => {
