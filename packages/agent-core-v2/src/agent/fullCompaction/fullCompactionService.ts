@@ -58,6 +58,7 @@ import { IEventDispatcher } from '#/state/eventDispatcher';
 import { renderCompactionInstruction } from './compactionInstruction';
 import { renderContextRecoveryPointer } from './contextRecovery';
 import {
+  FULL_COMPACTION_STEP_HOOK_ID,
   IAgentFullCompactionService,
   type FullCompactionInput,
   type FullCompactionTask,
@@ -186,10 +187,13 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
       (message) => this.tokenCounting.estimateMessage(message),
     );
     this._register(
-      this.dispatcher.hooks.onDidRestore.register('full-compaction', async (_ctx, next) => {
-        this.normalizeAfterReplay();
-        await next();
-      }),
+      this.dispatcher.hooks.onDidRestore.register(
+        FULL_COMPACTION_STEP_HOOK_ID,
+        async (_ctx, next) => {
+          this.normalizeAfterReplay();
+          await next();
+        },
+      ),
     );
     this._register(
       this.eventBus.subscribe(TurnStarted, () => this.resetForTurn()),
@@ -205,20 +209,26 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
       }),
     );
     this._register(
-      this.loopService.hooks.onWillBeginStep.register('full-compaction', async (ctx, next) => {
-        await this.beforeStep(ctx.signal, ctx.turnId);
-        await next();
-      }),
+      this.loopService.hooks.onWillBeginStep.register(
+        FULL_COMPACTION_STEP_HOOK_ID,
+        async (ctx, next) => {
+          await this.beforeStep(ctx.signal, ctx.turnId);
+          await next();
+        },
+      ),
     );
     this._register(
-      this.loopService.hooks.onDidFinishStep.register('full-compaction', async (ctx, next) => {
-        await this.afterStep(ctx.signal, ctx.turnId);
-        await next();
-      }),
+      this.loopService.hooks.onDidFinishStep.register(
+        FULL_COMPACTION_STEP_HOOK_ID,
+        async (ctx, next) => {
+          await this.afterStep(ctx.signal, ctx.turnId);
+          await next();
+        },
+      ),
     );
     this._register(
       this.loopService.registerLoopErrorHandler({
-        id: 'full-compaction',
+        id: FULL_COMPACTION_STEP_HOOK_ID,
         match: (context) => this.shouldRecoverFromContextOverflow(context.error),
         handle: (context) => this.recoverFromContextOverflow(context),
       }),
@@ -971,7 +981,12 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
       this.telemetry.track2('compaction_finished', properties);
       return result;
     } catch (error) {
-      if (isAbortError(error)) throw error;
+      if (
+        isAbortError(error) ||
+        (isError2(error) && error.code === ErrorCodes.COMPACTION_CANCELLED)
+      ) {
+        throw error;
+      }
       const properties: CompactionFailedEvent = {
         turn_id: active.originTurnId,
         source: data.source,

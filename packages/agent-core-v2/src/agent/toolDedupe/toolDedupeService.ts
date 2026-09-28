@@ -17,6 +17,7 @@ import { parseBooleanEnv } from '#/_base/utils/env';
 import { parseToolCallArguments } from '#/tool/tool-args-parse';
 import { IBootstrapService } from '#/app/bootstrap/bootstrap';
 import { IAgentLoopService } from '#/agent/loop/loop';
+import { FULL_COMPACTION_STEP_HOOK_ID } from '#/agent/fullCompaction/fullCompaction';
 import { IAgentStateService } from '#/agent/state/agentState';
 import { IEventBus } from '#/app/event/eventBus';
 import { TurnEnded } from '#/agent/loop/turnOps';
@@ -350,7 +351,9 @@ export class AgentToolDedupeService extends Service implements IAgentToolDedupeS
       await next();
     };
     try {
-      loop.hooks.onDidFinishStep.register('toolDedupe', handler, { before: 'full-compaction' });
+      loop.hooks.onDidFinishStep.register('toolDedupe', handler, {
+        before: FULL_COMPACTION_STEP_HOOK_ID,
+      });
     } catch {
       loop.hooks.onDidFinishStep.register('toolDedupe', handler);
     }
