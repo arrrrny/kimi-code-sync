@@ -21,8 +21,10 @@ import {
 } from '#/agent/fullCompaction/strategy';
 import {
   buildCompactionContinuationText,
+  COMPACTION_CONTINUATION_VARIANT,
   COMPACTION_SUMMARY_PREFIX,
 } from '#/agent/contextMemory/compactionHandoff';
+import type { ContextMessage } from '#/agent/contextMemory/types';
 import { makeHookRunner } from '../../features/externalHooks/runner-stub';
 import type { IExternalHooksRunnerService } from '#/features/externalHooks/app/externalHooksRunner';
 import { MASTER_ENV } from '#/app/flag/flagService';
@@ -1984,6 +1986,72 @@ describe('FullCompaction', () => {
     } finally {
       rmSync(homeDir, { recursive: true, force: true });
     }
+  });
+
+  it('mandates reading the handoff document in the post-compaction context', async () => {
+    vi.stubEnv('KIMI_CODE_EXPERIMENTAL_COMPACTION_HANDOFF', '1');
+    const homeDir = mkdtempSync(join(tmpdir(), 'kimi-handoff-mandate-home-'));
+    try {
+      const ctx = testAgent(homeDirServices(homeDir));
+      ctx.configure({
+        provider: CATALOGUED_PROVIDER,
+        modelCapabilities: CATALOGUED_MODEL_CAPABILITIES,
+      });
+      ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
+      const completed = ctx.once('compaction.completed');
+      ctx.mockNextResponse({ type: 'text', text: 'Auto summary.' });
+      ctx.mockNextResponse({ type: 'text', text: '# Handoff\n\n## Session Gist\n\ngist.' });
+
+      ctx.get(IAgentFullCompactionService).begin({ source: 'auto', instruction: undefined });
+      await completed;
+      await ctx.wire.flush();
+
+      const events = ctx.newEvents() as readonly { event?: string; args?: unknown }[];
+      const applyRecord = events.find((entry) => entry.event === 'context.apply_compaction');
+      const path = (applyRecord!.args as Record<string, unknown>)['handoffPath'] as string;
+      expect(path).toMatch(/handoff\/.+\.md$/);
+
+      const history = ctx.contextData().history;
+      const summaryText = messageText(history.find((m) => m.origin?.kind === 'compaction_summary'));
+      expect(summaryText).toContain(path);
+      expect(summaryText).toContain('Your first action');
+      expect(summaryText).toContain('not starting a new one');
+
+      const continuation = history.find(
+        (m) => m.origin?.kind === 'injection' && m.origin.variant === COMPACTION_CONTINUATION_VARIANT,
+      );
+      expect(continuation).toBeDefined();
+      expect(continuation).toBe(history.at(-1));
+      const continuationText = messageText(continuation);
+      expect(continuationText).toContain(path);
+      expect(continuationText).toContain('Read it end to end now');
+      expect(continuationText).toContain('before any other tool call');
+      await ctx.expectResumeMatches();
+    } finally {
+      rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps the plain continuation when no handoff document was written', async () => {
+    const ctx = testAgent();
+    ctx.configure({
+      provider: CATALOGUED_PROVIDER,
+      modelCapabilities: CATALOGUED_MODEL_CAPABILITIES,
+    });
+    ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
+    const completed = ctx.once('compaction.completed');
+    ctx.mockNextResponse({ type: 'text', text: 'Auto summary.' });
+
+    ctx.get(IAgentFullCompactionService).begin({ source: 'auto', instruction: undefined });
+    await completed;
+
+    const continuationText = messageText(
+      ctx.contextData().history.find(
+        (m) => m.origin?.kind === 'injection' && m.origin.variant === COMPACTION_CONTINUATION_VARIANT,
+      ),
+    );
+    expect(continuationText).toBe(buildCompactionContinuationText());
+    expect(continuationText).not.toContain('Read it end to end now');
   });
 
   it('completes the compaction when the handoff request fails', async () => {
