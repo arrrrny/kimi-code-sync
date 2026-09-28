@@ -843,10 +843,11 @@ describe('FullCompaction', () => {
     ctx.appendExchange(2, 'recent user two', 'recent assistant two', 80);
     const compacted = ctx.once('full_compaction.complete');
     const completed = ctx.once('compaction.completed');
+    const isCompacted = settledFlag(compacted);
 
     await ctx.rpc.beginCompaction({});
     await firstEmptySummary.promise;
-    await vi.advanceTimersByTimeAsync(10_000);
+    await advanceUntilSettled(isCompacted);
     await compacted;
     await completed;
 
@@ -895,10 +896,11 @@ describe('FullCompaction', () => {
     ctx.appendExchange(2, 'recent user two', 'recent assistant two', 80);
     const compacted = ctx.once('full_compaction.complete');
     const completed = ctx.once('compaction.completed');
+    const isCompacted = settledFlag(compacted);
 
     await ctx.rpc.beginCompaction({});
     await firstThinkOnly.promise;
-    await vi.advanceTimersByTimeAsync(10_000);
+    await advanceUntilSettled(isCompacted);
     await compacted;
     await completed;
 
@@ -940,10 +942,11 @@ describe('FullCompaction', () => {
     ctx.appendExchange(2, 'recent user two', 'recent assistant two', 80);
     const compacted = ctx.once('full_compaction.complete');
     const completed = ctx.once('compaction.completed');
+    const isCompacted = settledFlag(compacted);
 
     await ctx.rpc.beginCompaction({});
     await firstAttemptFailed.promise;
-    await vi.advanceTimersByTimeAsync(10_000);
+    await advanceUntilSettled(isCompacted);
     await compacted;
     await completed;
 
@@ -978,10 +981,11 @@ describe('FullCompaction', () => {
     ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
     ctx.appendExchange(2, 'recent user two', 'recent assistant two', 80);
     const failed = ctx.once('error');
+    const isFailed = settledFlag(failed);
 
     await ctx.rpc.beginCompaction({});
     await firstResponse.promise;
-    await vi.advanceTimersByTimeAsync(60_000);
+    await advanceUntilSettled(isFailed);
     await failed;
 
     expect(inputs).toHaveLength(5);
@@ -1082,6 +1086,7 @@ describe('FullCompaction', () => {
     ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
     ctx.appendExchange(2, 'recent user two', 'recent assistant two', 80);
     const compacted = ctx.once('full_compaction.complete');
+    const isCompacted = settledFlag(compacted);
 
     await ctx.rpc.beginCompaction({});
     await firstAttemptFailed.promise;
@@ -1089,7 +1094,7 @@ describe('FullCompaction', () => {
 
     expect(attempts).toBe(1);
 
-    await vi.advanceTimersByTimeAsync(10_000);
+    await advanceUntilSettled(isCompacted);
     await compacted;
 
     expect(attempts).toBe(2);
@@ -1397,10 +1402,11 @@ describe('FullCompaction', () => {
     ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
     ctx.appendExchange(2, 'recent user two', 'recent assistant two', 80);
     const failed = ctx.once('error');
+    const isFailed = settledFlag(failed);
 
     await ctx.rpc.beginCompaction({});
     await firstAttemptFinished.promise;
-    await vi.advanceTimersByTimeAsync(60_000);
+    await advanceUntilSettled(isFailed);
     await failed;
 
     expect(attempts).toBe(4);
@@ -1439,10 +1445,11 @@ describe('FullCompaction', () => {
     ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
     ctx.appendExchange(2, 'recent user two', 'recent assistant two', 80);
     const failed = ctx.once('error');
+    const isFailed = settledFlag(failed);
 
     await ctx.rpc.beginCompaction({});
     await firstAttemptFailed.promise;
-    await vi.advanceTimersByTimeAsync(60_000);
+    await advanceUntilSettled(isFailed);
     await failed;
 
     expect(attempts).toBe(5);
@@ -1487,10 +1494,11 @@ describe('FullCompaction', () => {
     ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
     ctx.appendExchange(2, 'recent user two', 'recent assistant two', 80);
     const failed = ctx.once('error');
+    const isFailed = settledFlag(failed);
 
     await ctx.rpc.beginCompaction({});
     await firstAttemptFailed.promise;
-    await vi.advanceTimersByTimeAsync(60_000);
+    await advanceUntilSettled(isFailed);
     await failed;
 
     expect(attempts).toBe(2);
@@ -1577,10 +1585,11 @@ describe('FullCompaction', () => {
     ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
     ctx.appendExchange(2, 'recent user two', 'recent assistant two', 80);
     const failed = ctx.once('error');
+    const isFailed = settledFlag(failed);
 
     await ctx.rpc.beginCompaction({});
     await firstAttemptFailed.promise;
-    await vi.advanceTimersByTimeAsync(60_000);
+    await advanceUntilSettled(isFailed);
     await failed;
 
     expect(attempts).toBe(2);
@@ -4376,6 +4385,25 @@ function bashCall(): ToolCall {
 
 function messageText(message: Message | undefined): string {
   return message?.content.map((part) => (part.type === 'text' ? part.text : '')).join('') ?? '';
+}
+
+function settledFlag(outcome: Promise<unknown>): () => boolean {
+  let settled = false;
+  const mark = (): void => {
+    settled = true;
+  };
+  void outcome.then(mark, mark);
+  return () => settled;
+}
+
+async function advanceUntilSettled(
+  isSettled: () => boolean,
+  stepMs = 250,
+  rounds = 400,
+): Promise<void> {
+  for (let round = 0; round < rounds && !isSettled(); round += 1) {
+    await vi.advanceTimersByTimeAsync(stepMs);
+  }
 }
 
 function hookPayloadLoggerCommand(logPath: string): string {
