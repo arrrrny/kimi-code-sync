@@ -9,9 +9,15 @@ export interface HandoffInstructionInput {
 
 export function renderHandoffPointerFooter(path: string): string {
   return [
-    'A full handoff document for this session was saved before this compaction:',
+    'A structured handoff document for this session was written to disk before this compaction:',
     path,
-    'Read it first when resuming: it records the session gist, current state, open threads with their next actions, gotchas, files and artifacts touched, and open questions.',
+    '',
+    'You are resuming this same task, not starting a new one, and nothing above this note records it in full.',
+    'Your first action — before any other tool call, and before answering the user — is to read that file end to end.',
+    'It holds the session gist, the current state, every open thread with its concrete next action, the gotchas already paid for, the files and artifacts touched, and the open questions.',
+    'Then work its threads in the order it gives them, and re-check its gotchas before anything destructive.',
+    'If it names a process, server, branch, or checkout, confirm that is still live before you touch it.',
+    'Do not begin the in-flight work until you have read it.',
   ].join('\n');
 }
 
