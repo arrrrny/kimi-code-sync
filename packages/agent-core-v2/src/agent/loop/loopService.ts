@@ -1103,7 +1103,8 @@ export class AgentLoopService extends Disposable implements IAgentLoopService {
       message: { role: 'user', content: [...seededMessage.content] },
       meta: { promptId: waiter.id, origin: seededMessage.origin, tracked: false },
     };
-    this.beginActiveTurn(waiter, entry, pending.id);
+    const seededTurn = this.beginActiveTurn(waiter, entry, pending.id);
+    this.settlePromptLaunched(waiter, seededTurn);
     return true;
   }
 
