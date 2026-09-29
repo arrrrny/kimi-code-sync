@@ -198,7 +198,7 @@ function agentLoopServiceView(agent: IAgentScopeHandle): Record<string, unknown>
           trace_id: snapshot.activeTraceId,
         });
       }
-      loop.cancel(turnId === undefined ? undefined : { turnId });
+      loop.cancelFromUser(turnId);
     },
   };
 }

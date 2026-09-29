@@ -39,7 +39,9 @@ export function submitPromptTurn(
       get state() {
         return backing?.state ?? (settledCancelled ? 'cancelled' : 'queued');
       },
-      signal: controller.signal,
+      get signal() {
+        return backing?.signal ?? controller.signal;
+      },
       ready: handle.launched.then(async (turn) => {
         await turn?.ready;
       }),
@@ -197,6 +199,7 @@ export function stubLoopWithHooks(options: StubLoopOptions = {}): StubLoop {
     },
     promptHandle: (id) => handles.get(id),
     cancel(target, reason) { cancels.push({ turnId: target?.turnId, reason }); if (target?.promptId !== undefined) return true; if (active === undefined || (target?.turnId !== undefined && active.id !== target.turnId)) return false; active.cancel(reason); return true; },
+    cancelFromUser(turnId) { stub.cancel(turnId === undefined ? undefined : { turnId }); },
     tryAcquireQuiescence: () => toDisposable(() => {}),
     buildAttachBundle: () => stubAttachBundle(),
     attachEngine: () => stubAttachEngine(),

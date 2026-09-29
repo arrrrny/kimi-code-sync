@@ -24,7 +24,7 @@
 // cross-reducers), blobs (the folding states whose blob codec offloads inline
 // media to blob storage), owner (the source file declaring the class).
 
-// Index (64 record types)
+// Index (65 record types)
 //   config.update                      profile                                               src/agent/profile/profileOps.ts
 //   context.append_loop_event          contextMemory, turn                                   src/agent/contextMemory/contextEvents.ts
 //   context.append_message             contextMemory, plan, task.notificationDelivery        src/agent/contextMemory/contextEvents.ts
@@ -61,6 +61,7 @@
 //   prompt.completed                   (none)                                                src/agent/prompt/promptEvents.ts
 //   prompt.steered                     (none)                                                src/agent/prompt/promptEvents.ts
 //   runtime.set_binding                runtimeBinding                                        src/agent/runtimeBinding/runtimeBindingOps.ts
+//   squeeze_model.decided              (none)                                                src/agent/fullCompaction/squeezeForkOps.ts
 //   subagent.cancelled                 (none)                                                src/session/subagent/mirrorAgentRun.ts
 //   subagent.completed                 (none)                                                src/session/subagent/mirrorAgentRun.ts
 //   subagent.failed                    (none)                                                src/session/subagent/mirrorAgentRun.ts
@@ -158,7 +159,7 @@ interface ContextAppendMessagePayload {
  * owner: src/agent/contextMemory/contextEvents.ts
  * shared base: ...contextCompactionBaseShape
  */
-type ContextApplyCompactionPayload = { _name: 'context.apply_compaction'; } & ({ summary: string, compactedCount: number, contextSummary?: string } | { contextSummary: string, compactedCount: number, summary?: string } | { summary: ContextMessage, count: number, compactedCount?: number });
+type ContextApplyCompactionPayload = { _name: 'context.apply_compaction'; } & ({ summary: string, compactedCount: number, contextSummary?: string, handoffPath?: string } | { contextSummary: string, compactedCount: number, summary?: string } | { summary: ContextMessage, count: number, compactedCount?: number });
 
 /**
  * states: contextMemory, plan, task.notificationDelivery, turn · blobs: contextMemory
@@ -265,6 +266,8 @@ interface FullCompactionBeginPayload {
   instruction?: string;
   /** CompactionSource */
   source: 'manual' | 'auto';
+  model?: string;
+  modelDisplay?: string;
 }
 
 /**
@@ -579,6 +582,17 @@ interface RuntimeSetBindingPayload {
   agentId: string;
   workspaceId: string;
   runtimeId: string;
+}
+
+/**
+ * states: (none)
+ * owner: src/agent/fullCompaction/squeezeForkOps.ts
+ */
+interface SqueezeModelDecidedPayload {
+  _name: 'squeeze_model.decided';
+  agentId: string;
+  model: string;
+  modelDisplay?: string;
 }
 
 /**
@@ -996,6 +1010,7 @@ interface WirePayloadMap {
   "prompt.completed": PromptCompletedPayload;
   "prompt.steered": PromptSteeredPayload;
   "runtime.set_binding": RuntimeSetBindingPayload;
+  "squeeze_model.decided": SqueezeModelDecidedPayload;
   "subagent.cancelled": SubagentCancelledPayload;
   "subagent.completed": SubagentCompletedPayload;
   "subagent.failed": SubagentFailedPayload;

@@ -4826,6 +4826,23 @@ describe('WireRecordCache', () => {
     }
   });
 
+  it('reads appends that span more than one read chunk', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'wire-cache-chunks-'));
+    try {
+      const wirePath = join(home, 'wire.jsonl');
+      const cache = new WireRecordCache();
+      const big = userMessage('x'.repeat(1_500_000), 1);
+      await writeFile(wirePath, wireText([big]));
+      expect(await cache.read(wirePath)).toEqual([big]);
+
+      const second = userMessage('y'.repeat(1_200_000), 2);
+      await writeFile(wirePath, wireText([big, second]));
+      expect(await cache.read(wirePath)).toEqual([big, second]);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
   it('readColdSnapshot matches a fresh full read across appended turns and undo', async () => {
     const home = await mkdtemp(join(tmpdir(), 'wire-cache-heals-'));
     try {
