@@ -120,6 +120,21 @@ describe('applyCredential', () => {
     const applied = applyCredential(MODEL, { headers: { 'x-auth': 't' } });
     expect(applied.apiKey).toBe('base-key');
   });
+
+  it('overrides the model proxy with the credential proxy', () => {
+    const model = { ...MODEL, proxyUrl: 'http://127.0.0.1:8080' };
+    const applied = applyCredential(model, { apiKey: 'fresh', proxyUrl: 'http://127.0.0.1:8081' });
+    expect(applied.proxyUrl).toBe('http://127.0.0.1:8081');
+  });
+
+  it('keeps the model proxy when the credential carries none', () => {
+    const model = { ...MODEL, proxyUrl: 'http://127.0.0.1:8080' };
+    expect(applyCredential(model, { apiKey: 'fresh' }).proxyUrl).toBe('http://127.0.0.1:8080');
+  });
+
+  it('leaves the attempt without a proxy when neither declares one', () => {
+    expect(applyCredential(MODEL, { apiKey: 'fresh' }).proxyUrl).toBeUndefined();
+  });
 });
 
 function recoveryContext(
@@ -127,7 +142,14 @@ function recoveryContext(
   appliedRecoveries: readonly LlmRecoveryRecord[] = [],
   credentialProvider?: LlmCredentialProvider,
 ): LlmRecoveryContext {
-  return { error: error as LlmRecoveryContext['error'], messages: [], appliedRecoveries, credentialProvider };
+  return {
+    error: error as LlmRecoveryContext['error'],
+    messages: [],
+    appliedRecoveries,
+    attempt: 1,
+    maxAttempts: 10,
+    credentialProvider,
+  };
 }
 
 const unauthorized = Object.assign(new Error('unauthorized'), { status: 401 });
@@ -143,7 +165,7 @@ describe('credentialsRecovery', () => {
     });
   });
 
-  it('invalidates the credentials before the next attempt', () => {
+  it('invalidates the credentials before the next attempt', async () => {
     let invalidations = 0;
     const provider: LlmCredentialProvider = {
       resolve: () => ({ apiKey: 'tok' }),
@@ -153,7 +175,7 @@ describe('credentialsRecovery', () => {
       },
     };
     const proposal = credentialsRecovery.propose(recoveryContext(unauthorized, [], provider));
-    proposal?.beforeNextAttempt?.();
+    await proposal?.beforeNextAttempt?.();
     expect(invalidations).toBe(1);
   });
 

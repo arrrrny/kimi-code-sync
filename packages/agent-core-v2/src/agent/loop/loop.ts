@@ -211,6 +211,8 @@ export interface IAgentLoopService {
 
   cancel(target?: LoopCancelTarget, reason?: unknown): boolean;
 
+  cancelFromUser(turnId?: number): void;
+
   snapshot(): LoopSnapshot;
 
   settled(): Promise<void>;

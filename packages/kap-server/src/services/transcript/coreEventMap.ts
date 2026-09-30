@@ -236,6 +236,7 @@ export class AgentTranscriptProjector {
     promptIds: readonly string[] | undefined;
     origin: TranscriptUserOrigin;
   }[] = [];
+  private unpairedSteerPromptIds: string[][] = [];
   private readonly stepOrdinals = new Map<string, number>();
   private frameOrdinal = 0;
   private attachmentOrdinal = 0;
@@ -1500,6 +1501,7 @@ export class AgentTranscriptProjector {
       steeredAt: event.steeredAt,
     }));
     ops.push({ op: 'prompt.upsert', prompt: active });
+    this.unpairedSteerPromptIds.push([...event.promptIds]);
     for (const promptId of event.promptIds) {
       const steered = this.upsertPrompt(promptId, (prev) => ({
         promptId,
@@ -1528,7 +1530,10 @@ export class AgentTranscriptProjector {
       origin.kind === 'user' ? (origin.skillActivations ?? []) : [],
     ).filter((part) => !isSkillActivationPart(part) && !isUserPromptSubmitHookPart(part));
     const files = origin.attachments ?? [];
-    const promptIds = origin.kind === 'user' ? event.promptIds : undefined;
+    const promptIds =
+      origin.kind === 'user'
+        ? (event.promptIds ?? this.unpairedSteerPromptIds.shift())
+        : undefined;
     const step = this.currentStep;
     if (step !== undefined && step.state === 'running') {
       const ops: TranscriptOperation[] = [];

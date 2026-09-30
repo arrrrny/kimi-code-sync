@@ -10,7 +10,9 @@ import { describe, expect, it } from 'vitest';
 
 import { pluginManifestSchema } from '../src/contract/global/plugins.js';
 import { mcpServerAuthFlowHandleSchema } from '../src/contract/global/mcpManagement.js';
+import { providerConfigSchema } from '../src/contract/global/providers.js';
 import { createSessionOptionsSchema } from '../src/contract/session/lifecycle.js';
+import { compactionCompletedEventSchema } from '../src/contract/agent/events.js';
 import { promptPayloadSchema } from '../src/contract/agent/schemas.js';
 
 type McpTimeoutField = 'startupTimeoutMs' | 'toolTimeoutMs';
@@ -30,6 +32,30 @@ const timeoutCases = [
   { surface, field: 'startupTimeoutMs' as const, parse },
   { surface, field: 'toolTimeoutMs' as const, parse },
 ]);
+
+describe('provider config contract validation', () => {
+  it('keeps rotateKeys and a key entry proxyUrl through a client round-trip', () => {
+    const parsed = providerConfigSchema.parse({
+      type: 'openai',
+      activeApiKeyId: 'key2',
+      rotateKeys: true,
+      apiKeys: {
+        key1: { key: 'sk-alpha', name: 'work', proxyUrl: 'http://127.0.0.1:8081' },
+        key2: { key: 'sk-beta', name: 'personal' },
+      },
+    });
+
+    expect(parsed).toEqual({
+      type: 'openai',
+      activeApiKeyId: 'key2',
+      rotateKeys: true,
+      apiKeys: {
+        key1: { key: 'sk-alpha', name: 'work', proxyUrl: 'http://127.0.0.1:8081' },
+        key2: { key: 'sk-beta', name: 'personal' },
+      },
+    });
+  });
+});
 
 describe('MCP timeout contract validation', () => {
   it.each(timeoutCases)('accepts the maximum $field for $surface', ({ field, parse }) => {
@@ -112,5 +138,47 @@ describe('prompt contract validation', () => {
 
   it('accepts a non-empty caller-chosen promptId', () => {
     expect(promptPayloadSchema.safeParse({ input: [], promptId: 'submission-1' }).success).toBe(true);
+  });
+});
+
+describe('compaction completed contract validation', () => {
+  const result = {
+    summary: 'Compacted.',
+    compactedCount: 4,
+    tokensBefore: 900,
+    tokensAfter: 120,
+  };
+
+  it('keeps an optional handoffPath on the result', () => {
+    const parsed = compactionCompletedEventSchema.safeParse({
+      type: 'compaction.completed',
+      result: { ...result, handoffPath: '/home/sessions/w/s/agents/a/handoff/2026-09-25T10-00-00-000-001.md' },
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.result.handoffPath).toBe(
+        '/home/sessions/w/s/agents/a/handoff/2026-09-25T10-00-00-000-001.md',
+      );
+    }
+  });
+
+  it('parses the result unchanged without a handoffPath', () => {
+    const parsed = compactionCompletedEventSchema.safeParse({
+      type: 'compaction.completed',
+      result: { ...result },
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect('handoffPath' in parsed.data.result).toBe(false);
+    }
+  });
+
+  it('rejects a non-string handoffPath', () => {
+    expect(
+      compactionCompletedEventSchema.safeParse({
+        type: 'compaction.completed',
+        result: { ...result, handoffPath: 42 },
+      }).success,
+    ).toBe(false);
   });
 });

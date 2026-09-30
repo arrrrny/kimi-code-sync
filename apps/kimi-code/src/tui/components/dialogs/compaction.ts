@@ -3,7 +3,8 @@
  *
  * Lifecycle:
  *   - constructed on `compaction.started` → blinking white bullet +
- *     "Compacting context..." and optional custom instruction
+ *     "Compacting context using <model>..." (or without the model) and
+ *     optional custom instruction
  *   - `markDone()` on `compaction.completed` → solid green bullet +
  *     "Compaction complete (X → Y tokens)"
  *   - `markCanceled()` on `compaction.cancelled` → solid warning bullet +
@@ -27,6 +28,7 @@ export class CompactionComponent extends Container {
   private instructionText: Text | undefined;
   private readonly instruction: string | undefined;
   private readonly tip: string | undefined;
+  private readonly model: string | undefined;
   private blinkOn = true;
   private blinkTimer: ReturnType<typeof setInterval> | null = null;
   private done = false;
@@ -34,14 +36,16 @@ export class CompactionComponent extends Container {
   private tokensBefore: number | undefined;
   private tokensAfter: number | undefined;
   private summary: string | undefined;
+  private handoffPath: string | undefined;
   private summaryText: Text | undefined;
   private expanded = false;
 
-  constructor(ui?: TUI, instruction?: string | undefined, tip?: string) {
+  constructor(ui?: TUI, instruction?: string | undefined, tip?: string, model?: string) {
     super();
     this.ui = ui;
     this.instruction = instruction;
     this.tip = tip;
+    this.model = model;
 
     // Top margin so the block isn't glued to the previous transcript
     // entry (status line, tool result, etc.).
@@ -86,12 +90,18 @@ export class CompactionComponent extends Container {
     super.invalidate();
   }
 
-  markDone(tokensBefore?: number, tokensAfter?: number, summary?: string): void {
+  markDone(
+    tokensBefore?: number,
+    tokensAfter?: number,
+    summary?: string,
+    handoffPath?: string,
+  ): void {
     if (this.done || this.canceled) return;
     this.done = true;
     this.tokensBefore = tokensBefore;
     this.tokensAfter = tokensAfter;
     this.summary = summary;
+    this.handoffPath = handoffPath;
     this.stopBlink();
     this.headerText.setText(this.buildHeader());
     if (this.expanded) {
@@ -169,7 +179,11 @@ export class CompactionComponent extends Container {
         this.summary !== undefined && this.summary.length > 0
           ? currentTheme.dim(` (Ctrl-O to ${this.expanded ? 'hide' : 'show'} compaction summary)`)
           : '';
-      return `${bullet}${label}${detail}${shortcutHint}`;
+      const handoffLine =
+        this.handoffPath !== undefined
+          ? `\n${currentTheme.dim(`Handoff saved: ${this.handoffPath}`)}`
+          : '';
+      return `${bullet}${label}${detail}${shortcutHint}${handoffLine}`;
     }
     if (this.canceled) {
       const bullet = currentTheme.fg('warning', STATUS_BULLET);
@@ -177,7 +191,9 @@ export class CompactionComponent extends Container {
       return `${bullet}${label}`;
     }
     const bullet = this.blinkOn ? currentTheme.fg('text', STATUS_BULLET) : '  ';
-    const label = currentTheme.boldFg('primary', 'Compacting context…');
+    const label = this.model
+      ? currentTheme.boldFg('primary', `Compacting context using ${this.model}…`)
+      : currentTheme.boldFg('primary', 'Compacting context…');
     const tip = this.tip ? currentTheme.fg('textDim', ` · Tip: ${this.tip}`) : '';
     return `${bullet}${label}${tip}`;
   }

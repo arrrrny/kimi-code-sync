@@ -15,13 +15,16 @@
  *
  * Rendering is turn-granular (turn → step → frame) and typed entirely by the
  * transcript data model. Cancels go through the `IAgentLoopService` channel
- * over the debug RPC surface (`/api/v1/debug`); interaction answers
+ * and prompts through the `agentPromptService` channel, both over the debug
+ * RPC surface (`/api/v1/debug`); interaction answers
  * (approve/reject, answer/dismiss) go through the public REST endpoints
  * (`src/interactions/api.ts`); the running indicator
  * derives from transcript state (`meta.activity` / running turns).
  */
 
+import { createDecorator } from '@moonshot-ai/agent-core-v2/_base/di/instantiation';
 import { IAgentLoopService } from '@moonshot-ai/agent-core-v2/agent/loop/loop';
+import type { IAgentPromptChannel as PromptChannelContract } from '@moonshot-ai/agent-core-v2/agent/loop/promptChannel';
 import {
   type QuestionItem,
   type QuestionRequest,
@@ -83,6 +86,17 @@ import { ActionButton, Badge, ErrorLine, JsonView, relTime } from '../ui';
 import { ChatSearchBar } from './ChatSearchBar';
 
 const noopSubscribe = () => () => {};
+
+/**
+ * The engine's `agentPromptService` token lives in `agent/loop/promptChannel`,
+ * a module that also holds the channel implementation. Its runtime imports
+ * (agent lifecycle, session context, the media layer's `node:path`) are
+ * server-only, so importing the token from there drags them into this browser
+ * bundle and breaks the build. Declare the token here instead: `createDecorator`
+ * is idempotent by name and `String(id)` — the wire channel name the debug RPC
+ * routes on — stays `agentPromptService`.
+ */
+const IAgentPromptChannel = createDecorator<PromptChannelContract>('agentPromptService');
 
 /** Active session id for deeply nested interaction views (approve/answer buttons). */
 const SessionContext = createContext<string>('');
@@ -371,6 +385,8 @@ export function ChatView({
 }) {
   const { klient, baseUrl, config } = useConnection();
   const [sendError, setSendError] = useState<unknown>(null);
+  const [draft, setDraft] = useState('');
+  const [sending, setSending] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [olderError, setOlderError] = useState<unknown>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -572,6 +588,27 @@ export function ChatView({
     }
   };
 
+  const send = async () => {
+    if (sessionId === null) return;
+    const text = draft.trim();
+    if (text === '') return;
+    setSending(true);
+    setSendError(null);
+    try {
+      await klient
+        .session(sessionId)
+        .agent(agentId)
+        .service(IAgentPromptChannel)
+        .submit({ input: [{ type: 'text', text }] });
+      setDraft('');
+      trail?.recordEvent('prompt', text, state);
+    } catch (error) {
+      setSendError(error);
+    } finally {
+      setSending(false);
+    }
+  };
+
   if (sessionId === null) {
     return (
       <div className="flex flex-1 items-center justify-center text-sm text-neutral-600">
@@ -694,6 +731,24 @@ export function ChatView({
               <ErrorLine error={sendError} />
             </div>
           ) : null}
+          <div className="mb-2 flex items-end gap-2">
+            <textarea
+              className="h-16 min-h-0 flex-1 resize-y rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-[12px] text-neutral-100 outline-none focus:border-sky-600 disabled:opacity-40"
+              placeholder="Send a prompt to this agent… (Enter to send, Shift+Enter for a newline)"
+              value={draft}
+              disabled={sending}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault();
+                  void send();
+                }
+              }}
+            />
+            <ActionButton onClick={() => void send()} disabled={sending || draft.trim() === ''}>
+              Send
+            </ActionButton>
+          </div>
           <div className="flex justify-end">
             <ActionButton onClick={() => void cancel()} danger disabled={!running}>
               Cancel

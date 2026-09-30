@@ -36,6 +36,7 @@ function makeHost() {
       flushThinkingToTranscript: vi.fn(),
       appendAssistantDelta: vi.fn(),
       scheduleFlush: vi.fn(),
+      finalizeLiveTextBuffers: vi.fn(),
       beginCompaction: vi.fn(),
       endCompaction: vi.fn(),
       cancelCompaction: vi.fn(),
@@ -74,6 +75,19 @@ const compactionCompleted = {
   result: { summary: 'summary', tokensBefore: 100, tokensAfter: 10, compactedCount: 1 },
 } as const;
 
+const compactionCompletedWithHandoff = {
+  type: 'compaction.completed',
+  sessionId: 's1',
+  agentId: 'main',
+  result: {
+    summary: 'summary',
+    tokensBefore: 100,
+    tokensAfter: 10,
+    compactedCount: 1,
+    handoffPath: '/home/s/w/agents/a/handoff/x.md',
+  },
+} as const;
+
 const compactionCancelled = {
   type: 'compaction.cancelled',
   sessionId: 's1',
@@ -89,11 +103,75 @@ describe('SessionEventHandler compaction cache bookkeeping', () => {
     expect(host.noteCompactionFinished).toHaveBeenCalledOnce();
   });
 
+  it('passes the handoff path through to the streaming UI when the event carries one', () => {
+    const { host } = makeHost();
+    const handler = new SessionEventHandler(host);
+    handler.handleEvent(compactionCompletedWithHandoff, vi.fn());
+    expect(host.streamingUI.endCompaction).toHaveBeenCalledWith(
+      100,
+      10,
+      'summary',
+      '/home/s/w/agents/a/handoff/x.md',
+    );
+  });
+
   it('keeps both baselines after a cancelled compaction (context was not cut)', () => {
     const { host } = makeHost();
     const handler = new SessionEventHandler(host);
     handler.handleEvent(compactionCancelled, vi.fn());
     expect(host.noteCompactionFinished).not.toHaveBeenCalled();
     expect(host.recordSessionActivity).not.toHaveBeenCalled();
+  });
+});
+
+describe('SessionEventHandler compaction started indicator', () => {
+  it('threads the resolved model into the live compaction indicator', () => {
+    const { host } = makeHost();
+    const handler = new SessionEventHandler(host);
+    handler.handleEvent(
+      {
+        type: 'compaction.started',
+        sessionId: 's1',
+        agentId: 'main',
+        trigger: 'manual',
+        instruction: 'keep the recent files',
+        model: 'kimi-k2',
+        model_display: 'Kimi K2',
+      } as any,
+      vi.fn(),
+    );
+    // The indicator prefers the user-facing display name and falls back to the raw alias.
+    expect(host.streamingUI.beginCompaction).toHaveBeenCalledWith('keep the recent files', 'Kimi K2');
+  });
+
+  it('falls back to the raw model alias when no display name is provided', () => {
+    const { host } = makeHost();
+    const handler = new SessionEventHandler(host);
+    handler.handleEvent(
+      {
+        type: 'compaction.started',
+        sessionId: 's1',
+        agentId: 'main',
+        trigger: 'manual',
+        model: 'kimi-k2',
+      } as any,
+      vi.fn(),
+    );
+    expect(host.streamingUI.beginCompaction).toHaveBeenCalledWith(undefined, 'kimi-k2');
+  });
+
+  it('passes undefined model when the started event omits it', () => {
+    const { host } = makeHost();
+    const handler = new SessionEventHandler(host);
+    handler.handleEvent(
+      {
+        type: 'compaction.started',
+        sessionId: 's1',
+        agentId: 'main',
+        trigger: 'auto',
+      } as any,
+      vi.fn(),
+    );
+    expect(host.streamingUI.beginCompaction).toHaveBeenCalledWith(undefined, undefined);
   });
 });
