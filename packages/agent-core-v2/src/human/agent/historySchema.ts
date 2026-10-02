@@ -2,7 +2,11 @@ import { z } from 'zod';
 
 import type { HistoryMessage } from './turn';
 
-const textPartSchema = z.object({ type: z.literal('text'), text: z.string() });
+const textPartSchema = z.object({
+  type: z.literal('text'),
+  text: z.string(),
+  meta: z.record(z.string(), z.unknown()).optional(),
+});
 const thinkPartSchema = z.object({
   type: z.literal('think'),
   think: z.string(),

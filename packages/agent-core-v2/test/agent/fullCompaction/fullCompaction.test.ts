@@ -3648,7 +3648,7 @@ describe('FullCompaction', () => {
       await ctx.untilTurnEnd();
 
       expect(callCount).toBe(3);
-      expect(compactionMaxCompletionTokens).toEqual([undefined]);
+      expect(compactionMaxCompletionTokens).toEqual([Number(maxCompletionTokens)]);
     },
   );
 
