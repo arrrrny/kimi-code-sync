@@ -2,6 +2,7 @@ installed:
 - bug
 - git
 - gym
+- spec-stats
 settings:
   auto_execute_hooks: true
 hooks:
