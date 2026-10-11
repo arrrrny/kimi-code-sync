@@ -4,8 +4,8 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { configToTomlData, parseConfigString } from '#/config/index';
 import { createKimiConfigRpc } from '#/index';
-import { parseConfigString } from '#/config/index';
 
 const toPosix = (p: string): string => p.replaceAll('\\', '/');
 
@@ -68,5 +68,44 @@ api_key_env = "ACME_API_KEY"
 
     await expect(rpc.validateConfigToml({ text })).resolves.toBeUndefined();
     expect(parseConfigString(text).providers['acme']?.apiKeyEnv).toBe('ACME_API_KEY');
+  });
+
+  it('carries provider rotate_keys and a key proxy_url through a read/write cycle', () => {
+    const config = parseConfigString(`
+[providers.kilo]
+type = "openai"
+active_api_key_id = "key2"
+rotate_keys = true
+
+[providers.kilo.api_keys.key1]
+key = "sk-alpha"
+name = "work"
+proxy_url = "http://127.0.0.1:8081"
+
+[providers.kilo.api_keys.key2]
+key = "sk-beta"
+name = "personal"
+`);
+
+    expect(config.providers['kilo']).toMatchObject({
+      rotateKeys: true,
+      activeApiKeyId: 'key2',
+      apiKeys: {
+        key1: { key: 'sk-alpha', name: 'work', proxyUrl: 'http://127.0.0.1:8081' },
+        key2: { key: 'sk-beta', name: 'personal' },
+      },
+    });
+
+    const written = configToTomlData(config) as {
+      providers: Record<string, Record<string, unknown>>;
+    };
+    expect(written.providers['kilo']).toMatchObject({
+      rotate_keys: true,
+      active_api_key_id: 'key2',
+    });
+    expect(written.providers['kilo']?.['api_keys']).toEqual({
+      key1: { key: 'sk-alpha', name: 'work', proxy_url: 'http://127.0.0.1:8081' },
+      key2: { key: 'sk-beta', name: 'personal' },
+    });
   });
 });

@@ -461,6 +461,7 @@ export const compactionResultSchema = z.object({
   keptUserMessageCount: z.number().optional(),
   keptHeadUserMessageCount: z.number().optional(),
   droppedCount: z.number().optional(),
+  handoffPath: z.string().optional(),
 }) satisfies z.ZodType<CompactionResult>;
 
 export const toolUpdateSchema = z.object({
@@ -941,6 +942,8 @@ export const compactionStartedEventSchema = z.object({
   agentId: z.string(),
   trigger: z.enum(['manual', 'auto']),
   instruction: z.string().optional(),
+  model: z.string().optional(),
+  model_display: z.string().optional(),
 }) satisfies z.ZodType<CompactionStartedPayload>;
 
 export const compactionBlockedEventSchema = z.object({

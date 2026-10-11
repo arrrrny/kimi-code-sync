@@ -17,7 +17,7 @@ The `type` field in the `providers` table determines which protocol implementati
 
 All providers communicate with models in streaming mode by default. Capabilities such as thinking, vision, and tool use are matched automatically by model name prefix, so you typically do not need to declare them manually.
 
-**Credential priority**: `api_key` or `api_key_env` (mutually exclusive alternatives — set exactly one) > `[providers.<name>.env]` sub-table key (only when neither is present) > if all are absent, startup fails with an error. Except for the explicitly declared `api_key_env`, the CLI does not fall back to shell environment variables for credentials. See [Config overrides: provider credentials](./overrides.md#provider-credentials).
+**Credential priority**: the key selected by `active_api_key_id` in `api_keys` > `api_key` or `api_key_env` (mutually exclusive alternatives — set exactly one) > `[providers.<name>.env]` sub-table key (only when none of the above is present) > if all are absent, startup fails with an error. Except for the explicitly declared `api_key_env`, the CLI does not fall back to shell environment variables for credentials. See [Config overrides: provider credentials](./overrides.md#provider-credentials).
 
 ## `/provider` — interactive provider management
 
@@ -28,7 +28,9 @@ Prefer not to edit TOML by hand? Type `/provider` in the TUI to open the **provi
 The manager displays providers as a list of entries grouped by source. Navigation:
 
 - ↑/↓ to move the cursor, ←/→ to page
-- `d` to delete the current provider (with `[y/N]` confirmation)
+- `a` to add a key to the selected provider — the add flow also asks for the key's optional proxy — and `s` to make the selected key the active one
+- `d` to delete the selected provider or key (with `[y/N]` confirmation)
+- `p` to set the provider's proxy, `r` to turn [automatic key rotation](#multiple-api-keys-and-automatic-rotation) on or off (turning it on needs at least two keys)
 - Press Enter on the `[ Add New Platform ]` row to add a new provider
 
 Two paths when adding:
@@ -41,6 +43,38 @@ Kimi Code OAuth managed accounts logged in via `/login` do not appear in `/provi
 :::
 
 The same operations are also available in non-interactive environments via the shell command: [`kimi provider`](../reference/kimi-command.md#kimi-provider).
+
+## Multiple API keys and automatic rotation
+
+A provider can hold several API keys at once. Each key is a named entry in the `api_keys` sub-table, and one of them is active: requests carry only the active key's credential. Turning on `rotate_keys` makes the CLI advance to the next key when the active one stops being accepted, which keeps a session alive when a shared key runs out of quota or hits its rate limit.
+
+```toml
+[providers.openai]
+type = "openai"
+active_api_key_id = "team"
+rotate_keys = true
+
+[providers.openai.api_keys.team]
+key = "sk-xxxxx"
+name = "Team"
+
+[providers.openai.api_keys.backup]
+key = "sk-yyyyy"
+name = "Backup"
+proxy_url = "http://127.0.0.1:1080"
+```
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `api_keys` | `table<string, table>` | — | Named key table; each entry has `key`, `name`, and an optional `proxy_url` |
+| `active_api_key_id` | `string` | — | ID of the key in use; when unset the provider falls back to the single `api_key` field |
+| `rotate_keys` | `boolean` | `false` | Advance to the next key when the active one is rejected |
+
+Rotation is opt-in per provider and needs at least two keys; a provider with a single key behaves exactly as before. Once it is on, the CLI advances to the next key in config-file order and wraps around at the end, and surfaces the switch (provider and key name) as a warning in the session. The trigger is narrow: an HTTP `403` Forbidden, or a rate-limit error that survives the retry budget of the current step. Other failures — `401`, network errors, `5xx` — keep their normal handling. Providers using an `oauth` credential (the `/login` managed account) never rotate.
+
+The switch outlives the session: a rotation writes the new `active_api_key_id` back to `config.toml`, so the next startup keeps using the key the CLI settled on.
+
+Each key may also carry its own `proxy_url` when it has to leave through a different gateway. The proxy resolves per request, key first: the active key's `proxy_url` wins over the provider-level [`proxy_url`](./config-files.md#providers); a key without one inherits the provider value; with neither set, requests go out directly.
 
 ## `kimi`
 
