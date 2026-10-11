@@ -229,7 +229,6 @@ function scan(cfg) {
 // ---------------------------------------------------------------------------
 
 function boxTable(headers, rows) {
-  const cols = headers.length;
   const widths = headers.map((h, i) => {
     let w = h.length;
     for (const r of rows) w = Math.max(w, String(r[i] ?? '').length);
@@ -255,7 +254,7 @@ function boxTable(headers, rows) {
 // Render (markdown)
 // ---------------------------------------------------------------------------
 
-function renderMarkdown(data, cfg) {
+function renderMarkdown(data, _cfg) {
   const lines = [];
   lines.push(`# Spec Stats Dashboard: ${data.repoName}`);
   lines.push('');
@@ -270,7 +269,7 @@ function renderMarkdown(data, cfg) {
   const stageOrder = ['specified', 'planned', 'tasked', 'test-listed', 'implementing', 'complete', 'absent'];
   const stages = new Set([...stageOrder, ...Object.keys(data.summary.byStage)]);
   for (const st of stages) {
-    if (data.summary.byStage[st] != null) {
+    if (data.summary.byStage[st] !== undefined) {
       lines.push(`| ${st} | ${data.summary.byStage[st]} |`);
     }
   }
@@ -342,7 +341,7 @@ function openView(data, cfg) {
     const days = lu !== 'unknown'
       ? Math.floor((Date.now() - new Date(lu).getTime()) / 86400000)
       : null;
-    const stale = days != null && days > cfg.stale_after_days;
+    const stale = days !== null && days > cfg.stale_after_days;
     lines.push(`- **${s.id}** — stage \`${s.stage}\`${stale ? ` ⚠️ stale (${days}d)` : ''}`);
     lines.push(`  - progress: ${s.progress.total ? `${s.progress.checked}/${s.progress.total}` : 'n/a'} | last updated: ${lu}`);
   }
@@ -353,12 +352,11 @@ function openView(data, cfg) {
 // Not-green view
 // ---------------------------------------------------------------------------
 
-function notGreenView(data, cfg) {
+function notGreenView(data, _cfg) {
   const lines = ['# Spec Stats — Not Green', ''];
   let any = false;
   for (const s of data.specs) {
     if (!s.tdd || !s.tdd.present) continue;
-    const tl = path.join(s.id, 'tdd', 'test-list.md');
     const anyDone = s.tdd.doneCount > 0;
     if (anyDone) continue;
     any = true;
