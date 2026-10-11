@@ -6,7 +6,7 @@ import type { SessionModelOverrides } from '@moonshot-ai/agent-core-v2/agent/pro
 import type { Kaos } from '@moonshot-ai/kaos';
 
 import type { AgentContextData } from '#/context';
-import { ErrorCodes, makeErrorPayload } from '#/errors';
+import { ErrorCodes, KimiError, makeErrorPayload } from '#/errors';
 import type {
   ApprovalHandler,
   Event,
@@ -424,6 +424,13 @@ abstract setThinking(input: SetSessionThinkingRpcInput): Promise<void>;
   abstract swarm(input: SessionPromptRpcInput): Promise<void>;
 
   abstract setTowerMode(input: SetSessionTowerModeRpcInput): Promise<void>;
+
+  async getTowerStatus(_input: SessionIdRpcInput): Promise<string> {
+    throw new KimiError(
+      ErrorCodes.NOT_IMPLEMENTED,
+      'Tower status is not implemented for this engine',
+    );
+  }
 
   abstract getPlan(input: SessionIdRpcInput): Promise<SessionPlan>;
 

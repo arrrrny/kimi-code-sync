@@ -87,6 +87,7 @@ export interface EditorKeyboardHost {
 export class EditorKeyboardController {
   private pendingExit: PendingExit | null = null;
   private pendingUndoEsc: { readonly timer: ReturnType<typeof setTimeout> } | null = null;
+  private disposed = false;
 
   constructor(
     private readonly host: EditorKeyboardHost,
@@ -102,7 +103,11 @@ export class EditorKeyboardController {
       host.handleUserInput(text);
     };
 
+    // After dispose (shutdown), consume every key here so no shortcut can fire
+    // while the UI is being torn down — Ctrl+C is handled earlier, at the UI
+    // input-listener level.
     editor.onPreInput = (data: string) => {
+      if (this.disposed) return true;
       if (matchesKey(data, Key.escape)) this.clearPendingExit();
       const consumed = host.surveyController.handlePreInput(data);
       if (consumed) this.clearPendingUndoEsc();
@@ -507,6 +512,7 @@ export class EditorKeyboardController {
   }
 
   dispose(): void {
+    this.disposed = true;
     this.clearPendingExit();
     this.clearPendingUndoEsc();
   }
