@@ -129,6 +129,38 @@ rationale-rich message, push, and open a PR into `master` titled
 - `state-manifest.d.ts` regenerated content must keep the fork keys and the upstream
   `tower.base` removal; a stale manifest would fail `stateManifest.test.ts`.
 
+## Accepted behavior change (PR #106 review follow-up)
+
+`packages/agent-core-v2/src/agent/tools/agent/agentTool.ts:210` /
+`packages/agent-core-v2/src/agent/profile/profileService.ts:290-311` —
+delegation extras (`rootDelegationExtras`, which merges discovered agent
+profiles into the subagent allowlist) are now computed by `bindSubagents` at
+profile bind/restore time instead of on every Agent-tool execution.
+
+- The relocation is upstream-authored (`f0bc988bb`, #4152) and ships with its
+  own changeset (`.changeset/fork-subagent-inherit-agent-types.md`). The
+  removed tool-time `delegationExtras()` helper was itself upstream code
+  (introduced by #3012), not fork-owned — so taking upstream's version is the
+  correct sync semantics.
+- At session start both shapes produce the same allowlist. The only
+  behavioral difference: an agent profile that appears in the catalog
+  mid-session extends the main session's delegation allowlist at the next
+  bind/restore instead of at the next Agent-tool call. Subagent sessions are
+  unaffected (`bindSubagents` keeps the early return for
+  `agentId !== MAIN_AGENT_ID`).
+- No fork-owned feature depends on live agent-profile discovery: the fork's
+  `/refresh-catalog` refreshes the provider/model catalog (TUI auth flow), and
+  the fork-owned model features (squeeze-model, secondary cascade,
+  fallback-model, substitute-model, compaction-model display, favorites,
+  subscription-disable, free-models-only, key rotation) are model-alias
+  scoped, not agent-profile scoped.
+- Decision: accept the bind-time semantics. Re-adding the extras computation
+  to `SubagentTool.effectiveAllowlist` would resurrect upstream-removed code
+  as a permanent fork divergence hunk to re-resolve on every sync.
+- Verified with the binding and forkParity suites on the merged head:
+  `packages/agent-core-v2/test/agent/profile/binding.test.ts`,
+  `packages/agent-core-v2/test/session/subagent/forkParity.test.ts`.
+
 ## Open Questions
 
 None.
