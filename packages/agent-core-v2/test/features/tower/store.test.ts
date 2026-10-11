@@ -3207,12 +3207,12 @@ describe('concurrent state writes', () => {
     for (;;) {
       try {
         heldContent = await readFile(lockPath, 'utf8');
-        break;
+        if (heldContent.length > 0) break;
       } catch {
-        await new Promise<void>((resolve) => {
-          setTimeout(resolve, 10);
-        });
       }
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 10);
+      });
     }
     expect(heldContent).toMatch(/pid=\d+ since=\S+ token=[0-9a-f-]+/);
 
