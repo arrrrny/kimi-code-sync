@@ -1893,9 +1893,9 @@ describe('KimiTUI startup', () => {
     const showStatus = vi.spyOn(driver as any, "showStatus").mockImplementation(() => {});
     vi.spyOn((driver as any).authFlow, "refreshProviderModels").mockResolvedValue({
       changed: [
-        { provider_id: "new-models", provider_name: "New Models", added: 2, removed: 0 },
-        { provider_id: "removed-models", provider_name: "Removed Models", added: 0, removed: 3 },
-        { provider_id: "metadata-only", provider_name: "Metadata Only", added: 0, removed: 0 },
+        { providerId: "new-models", providerName: "New Models", added: 2, removed: 0 },
+        { providerId: "removed-models", providerName: "Removed Models", added: 0, removed: 3 },
+        { providerId: "metadata-only", providerName: "Metadata Only", added: 0, removed: 0 },
       ],
       unchanged: [],
       failed: [],
@@ -2442,7 +2442,7 @@ describe('KimiTUI startup', () => {
   });
 
   describe('when a refresh finds the default model dropped by its registry', () => {
-    const retiredDefault = { from: 'acme/current', to: 'acme/next', from_display_name: 'Current' };
+    const retiredDefault = { from: 'acme/current', to: 'acme/next', fromModel: { displayName: 'Current' } };
 
     async function refreshDroppingDefault(options: {
       readonly withSession: boolean;
@@ -2476,7 +2476,7 @@ describe('KimiTUI startup', () => {
       };
       vi.spyOn(startup.authFlow, 'refreshProviderModels').mockImplementation(async () => {
         driver.state.appState.availableModels = remaining;
-        return { changed: [], unchanged: [], failed: [], retired_default: retiredDefault };
+        return { changed: [], unchanged: [], failed: [], retiredDefault };
       });
       driver.state.activeDialog = 'session-picker';
       driver.state.editor.setText('draft');
