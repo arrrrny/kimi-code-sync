@@ -647,6 +647,8 @@ describe('server-v2 /api/v1/sessions', () => {
         'storage = "file"',
         'key = "kimi-code"',
         '',
+        '[subscription]',
+        'auto_session_title = true',
       ].join('\n'),
       'utf-8',
     );

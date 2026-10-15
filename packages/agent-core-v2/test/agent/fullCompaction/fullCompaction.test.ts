@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'pathe';
 
@@ -21,15 +21,17 @@ import {
 } from '#/agent/fullCompaction/strategy';
 import {
   buildCompactionContinuationText,
+  COMPACTION_CONTINUATION_VARIANT,
   COMPACTION_SUMMARY_PREFIX,
 } from '#/agent/contextMemory/compactionHandoff';
+import type { ContextMessage } from '#/agent/contextMemory/types';
 import { makeHookRunner } from '../../features/externalHooks/runner-stub';
 import type { IExternalHooksRunnerService } from '#/features/externalHooks/app/externalHooksRunner';
 import { MASTER_ENV } from '#/app/flag/flagService';
 import { estimateTokensForMessages } from '#/llm-adapter/contract/tokens';
 import { recordingTelemetry, type TelemetryRecord } from '../../app/telemetry/stubs';
 import type { TestAgentContext, TestAgentOptions, TestAgentServiceOverride } from '../../harness';
-import { agentService, appService, appServices, createCommandRunner, execEnvServices, hostEnvironmentServices, requesterFromGenerateFn, sessionServices, testAgent as createTestAgent, type LegacyGenerateResult } from '../../harness';
+import { agentService, appService, appServices, createCommandRunner, execEnvServices, homeDirServices, hostEnvironmentServices, requesterFromGenerateFn, sessionServices, testAgent as createTestAgent, type LegacyGenerateResult } from '../../harness';
 import { IFileSystemStorageService } from '#/persistence/interface/storage';
 import { InMemoryStorageService } from '#/persistence/backends/memory/inMemoryStorageService';
 import { ISessionTokenCountingService } from '#/session/tokenCounting/sessionTokenCounting';
@@ -54,6 +56,20 @@ import { IAgentGoalService } from '#/features/goal/goalService';
 import { HostFileSystem } from '#/os/backends/node-local/hostFsService';
 
 type GenerateFn = NonNullable<TestAgentOptions['generate']>;
+
+function findHandoffDir(root: string): string | undefined {
+  const stack = [root];
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    for (const entry of readdirSync(current, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const child = join(current, entry.name);
+      if (entry.name === 'handoff') return child;
+      stack.push(child);
+    }
+  }
+  return undefined;
+}
 
 function testAgent(
   ...inputs: readonly (TestAgentServiceOverride | TestAgentOptions)[]
@@ -829,10 +845,11 @@ describe('FullCompaction', () => {
     ctx.appendExchange(2, 'recent user two', 'recent assistant two', 80);
     const compacted = ctx.once('full_compaction.complete');
     const completed = ctx.once('compaction.completed');
+    const isCompacted = settledFlag(compacted);
 
     await ctx.rpc.beginCompaction({});
     await firstEmptySummary.promise;
-    await vi.advanceTimersByTimeAsync(10_000);
+    await advanceUntilSettled(isCompacted);
     await compacted;
     await completed;
 
@@ -881,10 +898,11 @@ describe('FullCompaction', () => {
     ctx.appendExchange(2, 'recent user two', 'recent assistant two', 80);
     const compacted = ctx.once('full_compaction.complete');
     const completed = ctx.once('compaction.completed');
+    const isCompacted = settledFlag(compacted);
 
     await ctx.rpc.beginCompaction({});
     await firstThinkOnly.promise;
-    await vi.advanceTimersByTimeAsync(10_000);
+    await advanceUntilSettled(isCompacted);
     await compacted;
     await completed;
 
@@ -926,10 +944,11 @@ describe('FullCompaction', () => {
     ctx.appendExchange(2, 'recent user two', 'recent assistant two', 80);
     const compacted = ctx.once('full_compaction.complete');
     const completed = ctx.once('compaction.completed');
+    const isCompacted = settledFlag(compacted);
 
     await ctx.rpc.beginCompaction({});
     await firstAttemptFailed.promise;
-    await vi.advanceTimersByTimeAsync(10_000);
+    await advanceUntilSettled(isCompacted);
     await compacted;
     await completed;
 
@@ -964,10 +983,11 @@ describe('FullCompaction', () => {
     ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
     ctx.appendExchange(2, 'recent user two', 'recent assistant two', 80);
     const failed = ctx.once('error');
+    const isFailed = settledFlag(failed);
 
     await ctx.rpc.beginCompaction({});
     await firstResponse.promise;
-    await vi.advanceTimersByTimeAsync(60_000);
+    await advanceUntilSettled(isFailed);
     await failed;
 
     expect(inputs).toHaveLength(5);
@@ -1068,6 +1088,7 @@ describe('FullCompaction', () => {
     ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
     ctx.appendExchange(2, 'recent user two', 'recent assistant two', 80);
     const compacted = ctx.once('full_compaction.complete');
+    const isCompacted = settledFlag(compacted);
 
     await ctx.rpc.beginCompaction({});
     await firstAttemptFailed.promise;
@@ -1075,7 +1096,7 @@ describe('FullCompaction', () => {
 
     expect(attempts).toBe(1);
 
-    await vi.advanceTimersByTimeAsync(10_000);
+    await advanceUntilSettled(isCompacted);
     await compacted;
 
     expect(attempts).toBe(2);
@@ -1383,10 +1404,11 @@ describe('FullCompaction', () => {
     ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
     ctx.appendExchange(2, 'recent user two', 'recent assistant two', 80);
     const failed = ctx.once('error');
+    const isFailed = settledFlag(failed);
 
     await ctx.rpc.beginCompaction({});
     await firstAttemptFinished.promise;
-    await vi.advanceTimersByTimeAsync(60_000);
+    await advanceUntilSettled(isFailed);
     await failed;
 
     expect(attempts).toBe(4);
@@ -1425,10 +1447,11 @@ describe('FullCompaction', () => {
     ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
     ctx.appendExchange(2, 'recent user two', 'recent assistant two', 80);
     const failed = ctx.once('error');
+    const isFailed = settledFlag(failed);
 
     await ctx.rpc.beginCompaction({});
     await firstAttemptFailed.promise;
-    await vi.advanceTimersByTimeAsync(60_000);
+    await advanceUntilSettled(isFailed);
     await failed;
 
     expect(attempts).toBe(5);
@@ -1473,10 +1496,11 @@ describe('FullCompaction', () => {
     ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
     ctx.appendExchange(2, 'recent user two', 'recent assistant two', 80);
     const failed = ctx.once('error');
+    const isFailed = settledFlag(failed);
 
     await ctx.rpc.beginCompaction({});
     await firstAttemptFailed.promise;
-    await vi.advanceTimersByTimeAsync(60_000);
+    await advanceUntilSettled(isFailed);
     await failed;
 
     expect(attempts).toBe(2);
@@ -1563,10 +1587,11 @@ describe('FullCompaction', () => {
     ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
     ctx.appendExchange(2, 'recent user two', 'recent assistant two', 80);
     const failed = ctx.once('error');
+    const isFailed = settledFlag(failed);
 
     await ctx.rpc.beginCompaction({});
     await firstAttemptFailed.promise;
-    await vi.advanceTimersByTimeAsync(60_000);
+    await advanceUntilSettled(isFailed);
     await failed;
 
     expect(attempts).toBe(2);
@@ -1810,6 +1835,392 @@ describe('FullCompaction', () => {
     await ctx.expectResumeMatches();
   });
 
+  it('produces a handoff document before an auto compaction replaces the history', async () => {
+    vi.stubEnv('KIMI_CODE_EXPERIMENTAL_COMPACTION_HANDOFF', '1');
+    const homeDir = mkdtempSync(join(tmpdir(), 'kimi-handoff-auto-home-'));
+    try {
+      const ctx = testAgent(homeDirServices(homeDir));
+      ctx.configure({
+        provider: CATALOGUED_PROVIDER,
+        tools: SNAPSHOT_VISIBLE_TOOLS,
+        modelCapabilities: {
+          ...CATALOGUED_MODEL_CAPABILITIES,
+          max_context_tokens: 22_000,
+        },
+      });
+      for (let i = 1; i <= 22; i++) {
+        ctx.appendAssistantTextWithUsage(
+          i,
+          `history chunk ${String(i)} ${'x'.repeat(7_200)}`,
+          i * 1_850,
+        );
+      }
+      const completed = ctx.once('compaction.completed');
+      ctx.mockNextResponse({ type: 'text', text: 'Auto summary.' });
+      ctx.mockNextResponse({
+        type: 'text',
+        text: [
+          '# Handoff',
+          '',
+          '## Session Gist',
+          '',
+          'Long task gist.',
+          '',
+          '## Current State',
+          '',
+          'Mid task.',
+          '',
+          '## The Threads',
+          '',
+          'Next: finish task.',
+          '',
+          '## Gotchas',
+          '',
+          'Beware x.',
+          '',
+          '## Files and Artifacts Touched',
+          '',
+          'a.ts edited.',
+          '',
+          '## Open Questions',
+          '',
+          'None.',
+          '',
+        ].join('\n'),
+      });
+
+      ctx.get(IAgentFullCompactionService).begin({ source: 'auto', instruction: undefined });
+      await completed;
+      await ctx.wire.flush();
+
+      const handoffDir = findHandoffDir(homeDir);
+      expect(handoffDir).toBeDefined();
+      const files = readdirSync(handoffDir!);
+      expect(files).toHaveLength(1);
+      const document = readFileSync(join(handoffDir!, files[0]!), 'utf-8');
+      for (const heading of [
+        'Session Gist',
+        'Current State',
+        'The Threads',
+        'Gotchas',
+        'Files and Artifacts Touched',
+        'Open Questions',
+      ]) {
+        expect(document).toContain(heading);
+      }
+      expect(document).toContain('Long task gist.');
+      expect(ctx.llmCalls).toHaveLength(2);
+      const handoffCallTexts = ctx.llmCalls[1]!.history.map(messageText);
+      expect(handoffCallTexts.some((text) => text.includes('history chunk 22'))).toBe(true);
+      await ctx.expectResumeMatches();
+    } finally {
+      rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves no handoff trace when the compaction-handoff flag is off', async () => {
+    const records: TelemetryRecord[] = [];
+    const ctx = testAgent({ telemetry: recordingTelemetry(records) });
+    ctx.configure({
+      provider: CATALOGUED_PROVIDER,
+      tools: SNAPSHOT_VISIBLE_TOOLS,
+      modelCapabilities: {
+        ...CATALOGUED_MODEL_CAPABILITIES,
+        max_context_tokens: 22_000,
+      },
+    });
+    ctx.appendExchange(1, 'old user one', 'old assistant one', 1_000);
+    const completed = ctx.once('compaction.completed');
+    ctx.mockNextResponse({ type: 'text', text: 'Auto summary.' });
+
+    ctx.get(IAgentFullCompactionService).begin({ source: 'auto', instruction: undefined });
+    await completed;
+    await ctx.wire.flush();
+
+    expect(ctx.llmCalls).toHaveLength(1);
+    const applyRecord = (
+      ctx.newEvents() as readonly { event?: string; args?: unknown }[]
+    ).find((entry) => entry.event === 'context.apply_compaction');
+    expect(applyRecord).toBeDefined();
+    expect('handoffPath' in (applyRecord!.args as Record<string, unknown>)).toBe(false);
+    expect(
+      records.find((record) => record.event === 'compaction_finished')?.properties,
+    ).toMatchObject({ handoff_generated: false });
+    await ctx.expectResumeMatches();
+  });
+
+  it('anchors the post-compaction summary, event, and telemetry at the handoff document', async () => {
+    vi.stubEnv('KIMI_CODE_EXPERIMENTAL_COMPACTION_HANDOFF', '1');
+    const homeDir = mkdtempSync(join(tmpdir(), 'kimi-handoff-anchor-home-'));
+    try {
+      const records: TelemetryRecord[] = [];
+      const ctx = testAgent(homeDirServices(homeDir), { telemetry: recordingTelemetry(records) });
+      ctx.configure({
+        provider: CATALOGUED_PROVIDER,
+        modelCapabilities: CATALOGUED_MODEL_CAPABILITIES,
+      });
+      ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
+      const completed = ctx.once('compaction.completed');
+      ctx.mockNextResponse({ type: 'text', text: 'Auto summary.' });
+      ctx.mockNextResponse({ type: 'text', text: '# Handoff\n\n## Session Gist\n\ngist.' });
+
+      ctx.get(IAgentFullCompactionService).begin({ source: 'auto', instruction: undefined });
+      await completed;
+      await ctx.wire.flush();
+
+      const events = ctx.newEvents() as readonly { event?: string; args?: unknown }[];
+      const applyRecord = events.find((entry) => entry.event === 'context.apply_compaction');
+      expect(applyRecord).toBeDefined();
+      const args = applyRecord!.args as Record<string, unknown>;
+      const path = args['handoffPath'] as string;
+      expect(path).toMatch(/handoff\/.+\.md$/);
+      const contextSummary = args['contextSummary'] as string;
+      expect(contextSummary).toContain('Auto summary.');
+      expect(contextSummary).toContain(path);
+      expect(contextSummary.indexOf(path)).toBeGreaterThan(contextSummary.indexOf('Auto summary.'));
+      expect(existsSync(path)).toBe(true);
+
+      const completedRecord = events.find((entry) => entry.event === 'compaction.completed');
+      expect(completedRecord).toBeDefined();
+      const result = (completedRecord!.args as Record<string, unknown>)['result'] as Record<
+        string,
+        unknown
+      >;
+      expect(result['handoffPath']).toBe(path);
+      expect('contextSummary' in result).toBe(false);
+      expect(
+        records.find((record) => record.event === 'compaction_finished')?.properties,
+      ).toMatchObject({ handoff_generated: true });
+      await ctx.expectResumeMatches();
+    } finally {
+      rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it('mandates reading the handoff document in the post-compaction context', async () => {
+    vi.stubEnv('KIMI_CODE_EXPERIMENTAL_COMPACTION_HANDOFF', '1');
+    const homeDir = mkdtempSync(join(tmpdir(), 'kimi-handoff-mandate-home-'));
+    try {
+      const ctx = testAgent(homeDirServices(homeDir));
+      ctx.configure({
+        provider: CATALOGUED_PROVIDER,
+        modelCapabilities: CATALOGUED_MODEL_CAPABILITIES,
+      });
+      ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
+      const completed = ctx.once('compaction.completed');
+      ctx.mockNextResponse({ type: 'text', text: 'Auto summary.' });
+      ctx.mockNextResponse({ type: 'text', text: '# Handoff\n\n## Session Gist\n\ngist.' });
+
+      ctx.get(IAgentFullCompactionService).begin({ source: 'auto', instruction: undefined });
+      await completed;
+      await ctx.wire.flush();
+
+      const events = ctx.newEvents() as readonly { event?: string; args?: unknown }[];
+      const applyRecord = events.find((entry) => entry.event === 'context.apply_compaction');
+      const path = (applyRecord!.args as Record<string, unknown>)['handoffPath'] as string;
+      expect(path).toMatch(/handoff\/.+\.md$/);
+
+      const history = ctx.contextData().history;
+      const summaryText = messageText(history.find((m) => m.origin?.kind === 'compaction_summary'));
+      expect(summaryText).toContain(path);
+      expect(summaryText).toContain('Your first action');
+      expect(summaryText).toContain('not starting a new one');
+
+      const continuation = history.find(
+        (m) => m.origin?.kind === 'injection' && m.origin.variant === COMPACTION_CONTINUATION_VARIANT,
+      );
+      expect(continuation).toBeDefined();
+      expect(continuation).toBe(history.at(-1));
+      const continuationText = messageText(continuation);
+      expect(continuationText).toContain(path);
+      expect(continuationText).toContain('Read it end to end now');
+      expect(continuationText).toContain('before any other tool call');
+      await ctx.expectResumeMatches();
+    } finally {
+      rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps the plain continuation when no handoff document was written', async () => {
+    const ctx = testAgent();
+    ctx.configure({
+      provider: CATALOGUED_PROVIDER,
+      modelCapabilities: CATALOGUED_MODEL_CAPABILITIES,
+    });
+    ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
+    const completed = ctx.once('compaction.completed');
+    ctx.mockNextResponse({ type: 'text', text: 'Auto summary.' });
+
+    ctx.get(IAgentFullCompactionService).begin({ source: 'auto', instruction: undefined });
+    await completed;
+
+    const continuationText = messageText(
+      ctx.contextData().history.find(
+        (m) => m.origin?.kind === 'injection' && m.origin.variant === COMPACTION_CONTINUATION_VARIANT,
+      ),
+    );
+    expect(continuationText).toBe(buildCompactionContinuationText());
+    expect(continuationText).not.toContain('Read it end to end now');
+  });
+
+  it('completes the compaction when the handoff request fails', async () => {
+    vi.stubEnv('KIMI_CODE_EXPERIMENTAL_COMPACTION_HANDOFF', '1');
+    const homeDir = mkdtempSync(join(tmpdir(), 'kimi-handoff-fail-home-'));
+    try {
+      const records: TelemetryRecord[] = [];
+      const ctx = testAgent(homeDirServices(homeDir), { telemetry: recordingTelemetry(records) });
+      ctx.configure({
+        provider: CATALOGUED_PROVIDER,
+        modelCapabilities: CATALOGUED_MODEL_CAPABILITIES,
+      });
+      ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
+      const completed = ctx.once('compaction.completed');
+      ctx.mockNextResponse({ type: 'text', text: 'Summary before failed handoff.' });
+      ctx.mockNextProviderResponse({ error: new Error('handoff backend down') });
+
+      ctx.get(IAgentFullCompactionService).begin({ source: 'auto', instruction: undefined });
+      await completed;
+      await ctx.wire.flush();
+
+      expect(ctx.llmCalls).toHaveLength(2);
+      expect(findHandoffDir(homeDir)).toBeUndefined();
+      const events = ctx.newEvents() as readonly { event?: string; args?: unknown }[];
+      const applyRecord = events.find((entry) => entry.event === 'context.apply_compaction');
+      expect('handoffPath' in (applyRecord!.args as Record<string, unknown>)).toBe(false);
+      const contextSummary = applyRecord!.args as Record<string, unknown>;
+      expect(contextSummary['contextSummary']).toContain('Summary before failed handoff.');
+      expect(contextSummary['contextSummary']).not.toContain('handoff document');
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          event: 'warning',
+          args: expect.objectContaining({ code: 'compaction-handoff-failed' }),
+        }),
+      );
+      expect(
+        records.find((record) => record.event === 'compaction_finished')?.properties,
+      ).toMatchObject({ handoff_generated: false });
+      expect(records.find((record) => record.event === 'compaction_failed')).toBeUndefined();
+      await ctx.expectResumeMatches();
+    } finally {
+      rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it('never generates a handoff for a manual compaction', async () => {
+    vi.stubEnv('KIMI_CODE_EXPERIMENTAL_COMPACTION_HANDOFF', '1');
+    const ctx = testAgent();
+    ctx.configure({
+      provider: CATALOGUED_PROVIDER,
+      modelCapabilities: CATALOGUED_MODEL_CAPABILITIES,
+    });
+    ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
+    const completed = ctx.once('compaction.completed');
+    ctx.mockNextResponse({ type: 'text', text: 'Manual summary.' });
+
+    await ctx.rpc.beginCompaction({});
+    await completed;
+    await ctx.wire.flush();
+
+    expect(ctx.llmCalls).toHaveLength(1);
+    const applyRecord = (
+      ctx.newEvents() as readonly { event?: string; args?: unknown }[]
+    ).find((entry) => entry.event === 'context.apply_compaction');
+    expect(applyRecord).toBeDefined();
+    expect('handoffPath' in (applyRecord!.args as Record<string, unknown>)).toBe(false);
+    await ctx.expectResumeMatches();
+  });
+
+  it('names a second handoff distinctly and points at the first', async () => {
+    vi.stubEnv('KIMI_CODE_EXPERIMENTAL_COMPACTION_HANDOFF', '1');
+    const homeDir = mkdtempSync(join(tmpdir(), 'kimi-handoff-second-home-'));
+    try {
+      const ctx = testAgent(homeDirServices(homeDir));
+      ctx.configure({
+        provider: CATALOGUED_PROVIDER,
+        modelCapabilities: CATALOGUED_MODEL_CAPABILITIES,
+      });
+      ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
+      const firstCompleted = ctx.once('compaction.completed');
+      ctx.mockNextResponse({ type: 'text', text: 'First summary.' });
+      ctx.mockNextResponse({
+        type: 'text',
+        text: '# Handoff\n\n## Session Gist\n\nFirst handoff gist.',
+      });
+      ctx.get(IAgentFullCompactionService).begin({ source: 'auto', instruction: undefined });
+      await firstCompleted;
+
+      const secondCompleted = ctx.once('compaction.completed');
+      ctx.mockNextResponse({ type: 'text', text: 'Second summary.' });
+      ctx.mockNextResponse({
+        type: 'text',
+        text: '# Handoff\n\n## Session Gist\n\nSecond handoff gist.',
+      });
+      ctx.get(IAgentFullCompactionService).begin({ source: 'auto', instruction: undefined });
+      await secondCompleted;
+      await ctx.wire.flush();
+
+      const dir = findHandoffDir(homeDir);
+      expect(dir).toBeDefined();
+      const files = readdirSync(dir!).toSorted();
+      expect(files).toHaveLength(2);
+      const firstPath = join(dir!, files[0]!);
+      expect(readFileSync(firstPath, 'utf-8')).toContain('First handoff gist.');
+      expect(readFileSync(join(dir!, files[1]!), 'utf-8')).toContain('Second handoff gist.');
+      const secondHandoffCall = ctx.llmCalls[3]!;
+      expect(secondHandoffCall.history.map(messageText).join('\n')).toContain(firstPath);
+      await ctx.expectResumeMatches();
+    } finally {
+      rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it('produces a handoff document from the overflow recovery path', async () => {
+    vi.stubEnv('KIMI_CODE_EXPERIMENTAL_COMPACTION_HANDOFF', '1');
+    const homeDir = mkdtempSync(join(tmpdir(), 'kimi-handoff-overflow-home-'));
+    try {
+      let callCount = 0;
+      let handoffHistoryTexts: string[] = [];
+      const generate: GenerateFn = requesterFromGenerateFn(
+        async (_provider, _system, _tools, history, callbacks) => {
+          callCount += 1;
+          if (callCount === 1) {
+            throw new APIContextOverflowError(400, 'Context length exceeded', 'req-handoff-ovf');
+          }
+          if (callCount === 2) {
+            return textResult('Overflow compacted summary.');
+          }
+          if (callCount === 3) {
+            handoffHistoryTexts = history.map(messageText);
+            return textResult('# Handoff\n\n## Session Gist\n\nOverflow gist.');
+          }
+          await callbacks?.onMessagePart?.({ type: 'text', text: 'Recovered after overflow.' });
+          return textResult('Recovered after overflow.');
+        },
+      );
+      const ctx = testAgent(homeDirServices(homeDir), { generate });
+      ctx.configure({
+        provider: CATALOGUED_PROVIDER,
+        modelCapabilities: CATALOGUED_MODEL_CAPABILITIES,
+      });
+      ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
+      ctx.appendExchange(2, 'recent user two', 'recent assistant two', 20);
+
+      await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Retry after overflow' }] });
+      await ctx.untilTurnEnd();
+      await ctx.wire.flush();
+
+      expect(callCount).toBe(4);
+      const dir = findHandoffDir(homeDir);
+      expect(dir).toBeDefined();
+      const files = readdirSync(dir!);
+      expect(files).toHaveLength(1);
+      expect(readFileSync(join(dir!, files[0]!), 'utf-8')).toContain('Overflow gist.');
+      expect(handoffHistoryTexts.some((text) => text.includes('old user one'))).toBe(true);
+    } finally {
+      rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
   it('cancels when the compacted prefix changes before completion', async () => {
     const ctx = testAgent();
     ctx.configure({
@@ -1956,6 +2367,78 @@ describe('FullCompaction', () => {
         retry_count: 0,
       }),
     });
+    await ctx.expectResumeMatches();
+  });
+
+  it('completes auto compaction when the blocked turn is cancelled', async () => {
+    const compactionRequested = deferred<void>();
+    const releaseCompaction = deferred<void>();
+    let llmCallCount = 0;
+    const generate: GenerateFn = requesterFromGenerateFn(async () => {
+      llmCallCount += 1;
+      if (llmCallCount === 1) {
+        compactionRequested.resolve();
+        await releaseCompaction.promise;
+        return textResult('Auto compacted summary.');
+      }
+      throw new Error(`Unexpected generate call ${String(llmCallCount)}`);
+    });
+    const ctx = testAgent({ generate });
+    ctx.configure({
+      provider: CATALOGUED_PROVIDER,
+      modelCapabilities: CATALOGUED_MODEL_CAPABILITIES,
+      tools: SNAPSHOT_VISIBLE_TOOLS,
+    });
+    ctx.appendExchange(1, 'old user one', 'old assistant one', 100);
+    ctx.appendExchange(2, 'old user two', 'old assistant two', 200);
+    ctx.appendExchange(3, 'recent user three', 'recent assistant three', 950_000);
+
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Answer after compacting' }] });
+    await compactionRequested.promise;
+    const compactionCompleted = ctx.once('full_compaction.complete');
+    void ctx.rpc.cancel({});
+    releaseCompaction.resolve();
+
+    const events = await ctx.untilTurnEnd();
+    expect(countEvents(events, 'compaction.cancelled')).toBe(0);
+    expect(eventIndex(events, 'full_compaction.begin')).toBeGreaterThanOrEqual(0);
+
+    await compactionCompleted;
+    const afterTurnEnd = ctx.newEvents();
+    expect(countEvents(afterTurnEnd, 'compaction.cancelled')).toBe(0);
+    expect(countEvents(afterTurnEnd, 'full_compaction.complete')).toBe(1);
+    await ctx.expectResumeMatches();
+  });
+
+  it('freezes the turn while a low-threshold auto compaction runs after a step', async () => {
+    const ctx = testAgent();
+    ctx.configure({
+      provider: CATALOGUED_PROVIDER,
+      modelCapabilities: {
+        ...CATALOGUED_MODEL_CAPABILITIES,
+        max_context_tokens: 1_000_000,
+      },
+    });
+    ctx.appendExchange(1, 'old user one', 'old assistant one', 30_000);
+
+    await ctx.rpc.setCompactionTriggerRatio({ ratio: 0.05 });
+
+    ctx.mockNextResponse({ type: 'text', text: `big answer ${'y'.repeat(220_000)}` });
+    ctx.mockNextResponse({ type: 'text', text: 'Low threshold compacted summary.' });
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'grow the context' }] });
+    const events = await ctx.untilTurnEnd();
+
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        event: 'compaction.started',
+        args: expect.objectContaining({ trigger: 'auto' }),
+      }),
+    );
+    expect(countEvents(events, 'compaction.cancelled')).toBe(0);
+    expect(countEvents(events, 'full_compaction.complete')).toBe(1);
+    expect(eventIndex(events, 'full_compaction.complete')).toBeLessThan(
+      eventIndex(events, 'turn.ended'),
+    );
     await ctx.expectResumeMatches();
   });
 
@@ -2411,6 +2894,63 @@ describe('FullCompaction', () => {
     ).toBe(true);
 
     await ctx.expectResumeMatches();
+  });
+
+  it('auto-compacts at a session override threshold instead of the built-in default', async () => {
+    const ctx = testAgent();
+    ctx.configure({
+      provider: CATALOGUED_PROVIDER,
+      modelCapabilities: {
+        ...CATALOGUED_MODEL_CAPABILITIES,
+        max_context_tokens: 1_000_000,
+      },
+    });
+    ctx.appendExchange(1, 'old user one', 'old assistant one', 300_000);
+    const pendingPrompt = `override-pending-verbatim:${'x'.repeat(120_000)}`;
+
+    await ctx.rpc.setCompactionTriggerRatio({ ratio: 0.3 });
+
+    ctx.mockNextResponse({ type: 'text', text: 'Override compacted summary.' });
+    ctx.mockNextResponse({ type: 'text', text: 'I can answer the override pending prompt.' });
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: pendingPrompt }] });
+    const events = await ctx.untilTurnEnd();
+
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        event: 'compaction.started',
+        args: expect.objectContaining({ trigger: 'auto' }),
+      }),
+    );
+    expect(ctx.llmCalls).toHaveLength(2);
+    const [compactionCall, answerCall] = ctx.llmCalls;
+    expect(
+      compactionCall?.history.map(messageText).some((text) => text.includes('override-pending-verbatim')),
+    ).toBe(true);
+    expect(
+      answerCall?.history.map(messageText).some((text) => text.includes('override-pending-verbatim')),
+    ).toBe(true);
+  });
+
+  it('does not auto-compact at that context size without the session override (control)', async () => {
+    const ctx = testAgent();
+    ctx.configure({
+      provider: CATALOGUED_PROVIDER,
+      modelCapabilities: {
+        ...CATALOGUED_MODEL_CAPABILITIES,
+        max_context_tokens: 1_000_000,
+      },
+    });
+    ctx.appendExchange(1, 'old user one', 'old assistant one', 300_000);
+    const pendingPrompt = `control-pending-verbatim:${'x'.repeat(120_000)}`;
+
+    ctx.mockNextResponse({ type: 'text', text: 'I can answer the control pending prompt.' });
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: pendingPrompt }] });
+    const events = await ctx.untilTurnEnd();
+
+    expect(ctx.llmCalls).toHaveLength(1);
+    expect(events).not.toContainEqual(
+      expect.objectContaining({ event: 'compaction.started' }),
+    );
   });
 
   it('compacts and retries when the provider reports context overflow', async () => {
@@ -3015,7 +3555,7 @@ describe('FullCompaction', () => {
     const events = await ctx.untilTurnEnd();
 
     expect(callCount).toBe(3);
-    expect(compactionMaxCompletionTokens).toEqual([undefined]);
+    expect(compactionMaxCompletionTokens).toEqual([128 * 1024]);
     expect(events).toContainEqual(
       expect.objectContaining({
         event: 'compaction.started',
@@ -3913,6 +4453,25 @@ function bashCall(): ToolCall {
 
 function messageText(message: Message | undefined): string {
   return message?.content.map((part) => (part.type === 'text' ? part.text : '')).join('') ?? '';
+}
+
+function settledFlag(outcome: Promise<unknown>): () => boolean {
+  let settled = false;
+  const mark = (): void => {
+    settled = true;
+  };
+  void outcome.then(mark, mark);
+  return () => settled;
+}
+
+async function advanceUntilSettled(
+  isSettled: () => boolean,
+  stepMs = 250,
+  rounds = 400,
+): Promise<void> {
+  for (let round = 0; round < rounds && !isSettled(); round += 1) {
+    await vi.advanceTimersByTimeAsync(stepMs);
+  }
 }
 
 function hookPayloadLoggerCommand(logPath: string): string {

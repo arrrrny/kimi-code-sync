@@ -228,6 +228,10 @@ class FakeLoopService implements IAgentLoopService {
     throw new Error('unused in this suite');
   }
 
+  cancelFromUser(): never {
+    throw new Error('unused in this suite');
+  }
+
   snapshot(): LoopSnapshot {
     return {
       state: 'idle',

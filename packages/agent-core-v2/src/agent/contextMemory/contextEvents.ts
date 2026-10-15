@@ -74,6 +74,7 @@ const contextApplyCompactionSchema = z.union([
     summary: z.string(),
     compactedCount: z.number(),
     contextSummary: z.string().optional(),
+    handoffPath: z.string().optional(),
   }),
   z.object({
     ...contextCompactionBaseShape,

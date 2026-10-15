@@ -274,10 +274,6 @@ export class SurveyController {
     if (toolName === 'AgentSwarm') this.swarmRunCount += 1;
   }
 
-  notifyToolCallEnded(toolCallId: string): void {
-    this.toolCallFamilies.delete(toolCallId);
-  }
-
   notifySubagentSpawned(event: {
     readonly parentToolCallId?: string;
     readonly swarmIndex?: number;

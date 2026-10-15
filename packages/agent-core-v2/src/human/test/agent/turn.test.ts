@@ -9,7 +9,12 @@ import { createMediaDegradeRecovery } from '#/llm/media/degrade';
 import type { LlmModel } from '#/llm/model';
 import { createRequestActor, type LlmEvent } from '#/llm/requester/actor';
 import type { LlmRecovery } from '#/llm/requester/recovery';
-import type { LlmCredentialProvider, LlmRequester } from '#/llm/requester/requester';
+import type {
+  LlmCredentialProvider,
+  LlmKeyRotationController,
+  LlmRequester,
+} from '#/llm/requester/requester';
+import { keyRotationRecovery } from '#/credentials/keyRotationRecovery';
 import type { LlmRetryOptions } from '#/llm/requester/retry';
 import {
   createTurnMachine,
@@ -20,6 +25,10 @@ import {
   type TurnLlmEvent,
   type TurnOutput,
 } from '#/agent/turn';
+
+import { createKeyedCredentialProvider } from '../../../llm-adapter/provider/apiKeyRotation';
+import type { ProviderConfig } from '../../../llm-adapter/provider/provider';
+import { ProviderService } from '../../../llm-adapter/provider/provider-service';
 
 const model: LlmModel = { provider: 'test', model: 'test-model', capability: UNKNOWN_CAPABILITY };
 
@@ -758,5 +767,327 @@ describe('turn machine credential recovery', () => {
     await drain();
 
     expect(failed).toHaveLength(0);
+  });
+});
+
+
+async function advanceTurn(): Promise<void> {
+  for (let index = 0; index < 20; index += 1) {
+    await vi.advanceTimersByTimeAsync(60_000);
+    await flush();
+  }
+}
+
+function rateLimited(): LlmErrorMessage<'rate_limit'> {
+  return {
+    kind: 'rate_limit',
+    statusCode: 429,
+    message: 'rate limited',
+    requestId: null,
+    retryAfterMs: null,
+    headers: null,
+  };
+}
+
+function keyedProvider(args: {
+  readonly keyCount: number;
+  readonly rotate?: () => Promise<void>;
+  readonly onResolve?: (applied: boolean) => void;
+}): { provider: LlmCredentialProvider; applied: () => boolean } {
+  let applied = false;
+  const controller: LlmKeyRotationController = {
+    providerName: 'kilo',
+    keyCount: args.keyCount,
+    plan: () => ({ keyId: 'key2', name: 'personal' }),
+    rotate: () => {
+      applied = true;
+      return args.rotate?.() ?? Promise.resolve();
+    },
+  };
+  return {
+    provider: {
+      resolve: () => {
+        args.onResolve?.(applied);
+        return { apiKey: 'sk-1' };
+      },
+      rotation: () => controller,
+    },
+    applied: () => applied,
+  };
+}
+
+const ROTATION_RECOVERY: LlmRecovery = { propose: (ctx) => keyRotationRecovery.propose(ctx) };
+
+function turnInputWithRequest(provider: LlmCredentialProvider): Partial<TurnInput> {
+  return { request: { model, credentialProvider: provider } };
+}
+
+describe('turn machine api key rotation', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('retries a rate-limited key on the same key while the attempt budget lasts', async () => {
+    const rotate = vi.fn(() => Promise.resolve());
+    const { requester } = createStubRequester([rateLimited(), rateLimited(), 'ok']);
+    const { recovering } = startTurnActor(
+      requester,
+      { retry: { maxAttemptsPerStep: 3 }, recovery: ROTATION_RECOVERY },
+      turnInputWithRequest(keyedProvider({ keyCount: 3, rotate }).provider),
+    );
+
+    await advanceTurn();
+
+    expect(rotate).not.toHaveBeenCalled();
+    expect(recovering).toHaveLength(0);
+  });
+
+  it('gives the next key a full attempt budget after an applied rotation', async () => {
+    const rotate = vi.fn(() => Promise.resolve());
+    const { requester, calls } = createStubRequester([
+      rateLimited(),
+      rateLimited(),
+      rateLimited(),
+      rateLimited(),
+      rateLimited(),
+      rateLimited(),
+      'ok',
+    ]);
+    const { recovering } = startTurnActor(
+      requester,
+      { retry: { maxAttemptsPerStep: 3 }, recovery: ROTATION_RECOVERY },
+      turnInputWithRequest(keyedProvider({ keyCount: 2, rotate }).provider),
+    );
+
+    await advanceTurn();
+
+    expect(rotate).toHaveBeenCalledTimes(1);
+    expect(recovering).toHaveLength(1);
+    expect(recovering[0]?.strategy).toBe('api_key_rotation');
+    expect(calls()).toBe(6);
+  });
+
+  it('hands the recovery chain the real attempt and maxAttempts', async () => {
+    const seen: Array<[number, number]> = [];
+    const capture: LlmRecovery = {
+      propose: (ctx) => {
+        seen.push([ctx.attempt, ctx.maxAttempts]);
+        return undefined;
+      },
+    };
+    const { requester } = createStubRequester([rateLimited(), rateLimited(), rateLimited()]);
+    startTurnActor(requester, { retry: { maxAttemptsPerStep: 3 }, recovery: capture });
+
+    await advanceTurn();
+
+    expect(seen).toEqual([
+      [1, 3],
+      [2, 3],
+      [3, 3],
+    ]);
+  });
+
+  it('awaits an accepted proposal before the next request is built', async () => {
+    let released: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      released = resolve;
+    });
+    const resolves: boolean[] = [];
+    const keyed = keyedProvider({
+      keyCount: 3,
+      rotate: () => gate,
+      onResolve: (applied) => resolves.push(applied),
+    });
+    const { requester } = createStubRequester([rateLimited(), rateLimited(), rateLimited(), 'ok']);
+    startTurnActor(
+      requester,
+      { retry: { maxAttemptsPerStep: 3 }, recovery: ROTATION_RECOVERY },
+      turnInputWithRequest(keyed.provider),
+    );
+
+    await advanceTurn();
+    expect(resolves).toEqual([false, false, false]);
+
+    released?.();
+    await advanceTurn();
+
+    expect(resolves).toEqual([false, false, false, true]);
+    expect(keyed.applied()).toBe(true);
+  });
+
+  it('records no rotation when only one key is configured', async () => {
+    const rotate = vi.fn(() => Promise.resolve());
+    const { requester } = createStubRequester([rateLimited(), rateLimited(), rateLimited()]);
+    const { recovering } = startTurnActor(
+      requester,
+      { retry: { maxAttemptsPerStep: 3 }, recovery: ROTATION_RECOVERY },
+      turnInputWithRequest(keyedProvider({ keyCount: 1, rotate }).provider),
+    );
+
+    await advanceTurn();
+
+    expect(rotate).not.toHaveBeenCalled();
+    expect(recovering).toHaveLength(0);
+  });
+});
+
+describe('turn machine api key rotation against the real rotation controller', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const THREE_KEYS: ProviderConfig = {
+    type: 'openai',
+    apiKeys: {
+      k1: { key: 'sk-alpha', name: 'work' },
+      k2: { key: 'sk-beta', name: 'personal' },
+      k3: { key: 'sk-gamma', name: 'backup' },
+    },
+    activeApiKeyId: 'k1',
+    rotateKeys: true,
+  };
+
+  function providersWith(config: ProviderConfig): ProviderService {
+    const providers = new ProviderService();
+    providers.loadAll({ kilo: config }, undefined);
+    return providers;
+  }
+
+  function keyedProvider(
+    providers: ProviderService,
+    resolved: (string | undefined)[],
+  ): LlmCredentialProvider {
+    const keyed = createKeyedCredentialProvider({ providers, providerName: 'kilo' });
+    return {
+      resolve: () => {
+        const credential = keyed.resolve();
+        resolved.push(credential?.apiKey);
+        return credential;
+      },
+      rotation: () => keyed.rotation?.(),
+    };
+  }
+
+  it('persists the rotated key on the provider config and resolves it for the next attempt', async () => {
+    const providers = providersWith(THREE_KEYS);
+    const resolved: (string | undefined)[] = [];
+    const { requester } = createStubRequester([rateLimited(), rateLimited(), rateLimited(), 'ok']);
+    startTurnActor(
+      requester,
+      { retry: { maxAttemptsPerStep: 3 }, recovery: ROTATION_RECOVERY },
+      turnInputWithRequest(keyedProvider(providers, resolved)),
+    );
+
+    await advanceTurn();
+
+    expect(providers.get('kilo')?.activeApiKeyId).toBe('k2');
+    expect(resolved.at(-1)).toBe('sk-beta');
+  });
+
+  it('wraps around to the first key once the last key is the active one', async () => {
+    const providers = providersWith({ ...THREE_KEYS, activeApiKeyId: 'k3' });
+    const resolved: (string | undefined)[] = [];
+    const { requester } = createStubRequester([rateLimited(), rateLimited(), rateLimited(), 'ok']);
+    startTurnActor(
+      requester,
+      { retry: { maxAttemptsPerStep: 3 }, recovery: ROTATION_RECOVERY },
+      turnInputWithRequest(keyedProvider(providers, resolved)),
+    );
+
+    await advanceTurn();
+
+    expect(providers.get('kilo')?.activeApiKeyId).toBe('k1');
+    expect(resolved.at(-1)).toBe('sk-alpha');
+  });
+});
+
+function recordingRequester(
+  seen: (string | undefined)[],
+  plan: readonly (LlmErrorMessage | 'ok')[],
+): LlmRequester {
+  let calls = 0;
+  return {
+    generate: (config, _content, { onEvent }) => {
+      seen.push(config.model.proxyUrl);
+      const step = plan[Math.min(calls, plan.length - 1)];
+      calls += 1;
+      if (step === 'ok') {
+        onEvent?.({ type: 'llm.streaming.part', part: { type: 'text', text: 'done' } });
+        onEvent?.({ type: 'llm.done' });
+        return Promise.resolve();
+      }
+      onEvent?.({ type: 'llm.failed.remote', error: step });
+      return Promise.resolve();
+    },
+  };
+}
+
+const PROVIDER_PROXY_MODEL: LlmModel = {
+  ...model,
+  proxyUrl: 'http://provider.example.test:8080',
+};
+
+describe('turn machine per-key proxy', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('applies the active key proxy to every attempt of the step', async () => {
+    const seen: (string | undefined)[] = [];
+    let resolved = 0;
+    const proxies = ['http://key1.example.test:8081', 'http://key2.example.test:8082'];
+    startTurnActor(
+      recordingRequester(seen, [rateLimited(), 'ok']),
+      { retry: { maxAttemptsPerStep: 3 } },
+      {
+        request: {
+          model: PROVIDER_PROXY_MODEL,
+          credentialProvider: {
+            resolve: () => {
+              const proxyUrl = proxies[Math.min(resolved, proxies.length - 1)];
+              resolved += 1;
+              return { apiKey: `sk-${String(resolved)}`, proxyUrl };
+            },
+          },
+        },
+      },
+    );
+
+    await advanceTurn();
+
+    expect(seen).toEqual(['http://key1.example.test:8081', 'http://key2.example.test:8082']);
+  });
+
+  it('keeps the provider proxy for a key that declares none', async () => {
+    const seen: (string | undefined)[] = [];
+    startTurnActor(
+      recordingRequester(seen, [rateLimited(), 'ok']),
+      { retry: { maxAttemptsPerStep: 3 } },
+      {
+        request: {
+          model: PROVIDER_PROXY_MODEL,
+          credentialProvider: { resolve: () => ({ apiKey: 'sk-1' }) },
+        },
+      },
+    );
+
+    await advanceTurn();
+
+    expect(seen).toEqual([
+      'http://provider.example.test:8080',
+      'http://provider.example.test:8080',
+    ]);
   });
 });

@@ -49,6 +49,7 @@ export type LlmEvent =
       type: 'llm.recovering';
       strategy: string;
       action: string;
+      detail?: string;
       errorName: string;
       errorMessage: string;
       statusCode?: number;
