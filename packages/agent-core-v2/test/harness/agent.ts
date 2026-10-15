@@ -112,7 +112,6 @@ import { ProtocolAdapterRegistry } from '#/llm-adapter/protocol/protocolAdapterR
 import { summarizeSkill, type SkillCatalog } from '#/features/skill/catalog/types';
 import { type ModelCapability } from '#/llm-adapter/contract/capability';
 import { isToolCall, isToolCallPart, type ContentPart, type Message as KosongMessage, type StreamedMessagePart } from '#/llm-adapter/contract/message';
-import { type ThinkingEffort } from '#human/llm/thinking';
 import { type Tool as KosongTool } from '#/llm-adapter/contract/message';
 import { type TokenUsage } from '#human/llm/usage';
 import type { AgentLLMRequestSource } from '#/agent/llmRequester/llmRequester';
