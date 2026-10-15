@@ -22,6 +22,10 @@ import {
   type LlmRequestEvent,
   type ToolCallIdPolicy,
 } from '#/llm/requester/requester';
+import {
+  getLlmHeadersTimeoutDispatcher,
+  resolveLlmHeadersTimeoutMs,
+} from '#/llm/requester/timeout';
 
 import {
   normalizeToolCallIdsForProvider,
@@ -84,20 +88,24 @@ function buildDefaultHeaders(
   return defaultHeaders;
 }
 
-function buildProxyDispatcher(proxyUrl: string | undefined): Dispatcher | undefined {
-  if (proxyUrl === undefined || proxyUrl.length === 0) return undefined;
-  return new ProxyAgent(proxyUrl);
+function buildProxyDispatcher(model: LlmModel): Dispatcher | undefined {
+  const headersTimeoutMs = resolveLlmHeadersTimeoutMs();
+  if (model.proxyUrl === undefined || model.proxyUrl.length === 0) {
+    return headersTimeoutMs === undefined ? undefined : getLlmHeadersTimeoutDispatcher(headersTimeoutMs);
+  }
+  if (headersTimeoutMs === undefined) return new ProxyAgent(model.proxyUrl);
+  return new ProxyAgent({ uri: model.proxyUrl, headersTimeout: headersTimeoutMs });
 }
 
 function createClient(model: LlmModel, headers: Record<string, string> | undefined): Anthropic {
-  const dispatcher = buildProxyDispatcher(model.proxyUrl);
+  const dispatcher = buildProxyDispatcher(model);
   return new Anthropic({
     apiKey: model.apiKey ?? 'unused',
     authToken: null,
     baseURL: model.baseUrl ?? null,
     defaultHeaders: buildDefaultHeaders(headers),
     maxRetries: 0,
-    ...(dispatcher !== undefined ? { fetchOptions: { dispatcher: dispatcher as never } } : {}),
+    fetchOptions: dispatcher === undefined ? undefined : { dispatcher },
   });
 }
 

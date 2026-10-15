@@ -28,8 +28,10 @@ import { ISessionInstructionsProvider } from '#/session/sessionInstructions/inst
 import { ISessionToolPolicy } from '#/session/sessionToolPolicy/sessionToolPolicy';
 import { ISessionWorkspaceContext } from '#/session/workspaceContext/workspaceContext';
 import { IEventDispatcher } from '#/state/eventDispatcher';
+import { IProviderDiscoveryService } from '#/app/kosongConfig/discovery';
 
 import { registerTestAgentWire, registerTestEventDispatcher, testWireScope } from '../../wire/stubs';
+import { stubProviderDiscovery, type StubProviderDiscovery } from '../../stubs';
 
 const SCOPE = 'wire';
 const KEY = 'profile-compact-threshold-test';
@@ -155,6 +157,7 @@ function createSessionContextStub(): ISessionContext {
 let disposables: DisposableStore;
 let svc: IAgentProfileService;
 let configValues: Record<string, unknown>;
+let discovery: StubProviderDiscovery;
 
 function buildHost(key: string): IAgentProfileService {
   const host = disposables.add(new TestInstantiationService());
@@ -198,6 +201,7 @@ function buildHost(key: string): IAgentProfileService {
     _serviceBrand: undefined,
     seedInjected: () => {},
   });
+  host.stub(IProviderDiscoveryService, discovery);
   host.stub(ISessionToolPolicy, {
     _serviceBrand: undefined,
     ready: Promise.resolve(),
@@ -217,6 +221,7 @@ function buildHost(key: string): IAgentProfileService {
 beforeEach(() => {
   disposables = new DisposableStore();
   configValues = {};
+  discovery = stubProviderDiscovery();
   svc = buildHost(KEY);
 });
 
@@ -403,6 +408,7 @@ describe('AgentProfileService.setCompactionTokenBudget telemetry (U11)', () => {
       disabledTools: () => [],
       setDisabledTools: () => Promise.resolve(),
     });
+    host.stub(IProviderDiscoveryService, discovery);
     host.set(IAgentStateService, new AgentStateService());
     host.set(IAgentProfileService, new SyncDescriptor(AgentProfileService));
     registerTestAgentWire(host, testWireScope(SCOPE, key), {

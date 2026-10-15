@@ -63,6 +63,7 @@ import {
   type AgentLLMRequestPartHandler,
   type AgentLLMRequestSource,
   type AgentLLMRequestTask,
+  type AgentLLMTurnRequestSnapshot,
   type PreparedTurnRequestConfig,
 } from './llmRequester';
 import type { LLMRequestTrace } from '#/llm-adapter/contract/request-trace';
@@ -110,6 +111,7 @@ interface ResolvedLLMRequest {
   readonly systemPrompt: string;
   readonly tools: readonly Tool[];
   readonly messages: Message[];
+  readonly contextRevision: number;
   readonly source: AgentLLMRequestSource | undefined;
   readonly logFields: AgentLLMRequestLogFields;
 }
@@ -153,6 +155,10 @@ export const llmRequesterEmittedThinkingEffortWarningsKey = defineState<Set<stri
   'llmRequester.emittedThinkingEffortWarnings',
   () => new Set(),
 );
+export const llmRequesterLastTurnRequestKey = defineState<AgentLLMTurnRequestSnapshot | undefined>(
+  'llmRequester.lastTurnRequest',
+  () => undefined as AgentLLMTurnRequestSnapshot | undefined,
+);
 
 export class AgentLLMRequesterService implements IAgentLLMRequesterService {
   declare readonly _serviceBrand: undefined;
@@ -185,6 +191,7 @@ export class AgentLLMRequesterService implements IAgentLLMRequesterService {
     this.states.contributeState(llmRequesterMediaDegradedTurnsKey);
     this.states.contributeState(llmRequesterMediaStrippedTurnsKey);
     this.states.contributeState(llmRequesterEmittedThinkingEffortWarningsKey);
+    this.states.contributeState(llmRequesterLastTurnRequestKey);
     this.states.contributeState(fallbackModelActiveKey);
   }
 
@@ -227,6 +234,10 @@ export class AgentLLMRequesterService implements IAgentLLMRequesterService {
     if (!this.profile.hasProvider()) return undefined;
     const resolved = this.turnConfigs.get(turnId)?.resolved ?? this.profile.resolveModelContext();
     return this.modelCatalog.get(resolved.modelAlias).credentialProvider;
+  }
+
+  lastTurnRequest(): AgentLLMTurnRequestSnapshot | undefined {
+    return this.states.get(llmRequesterLastTurnRequestKey);
   }
 
   async request(
@@ -415,7 +426,8 @@ export class AgentLLMRequesterService implements IAgentLLMRequesterService {
         fields,
       };
       this.logRequest(logInput);
-      this.recordRequest(logInput);
+      const recorded = this.recordRequest(logInput);
+      const startedAt = Date.now();
 
       let message: Message | undefined;
       let usage: TokenUsage | undefined;
@@ -476,6 +488,17 @@ export class AgentLLMRequesterService implements IAgentLLMRequesterService {
         throw error;
       }
 
+      if (request.source?.type === 'turn') {
+        this.states.set(llmRequesterLastTurnRequestKey, {
+          modelAlias: request.modelAlias,
+          contextRevision: request.contextRevision,
+          toolsHash: recorded.toolsHash,
+          systemPromptHash: recorded.systemPromptHash,
+          inputTokens: usage === undefined ? undefined : inputTotal(usage),
+          startedAt,
+          finishedAt: Date.now(),
+        });
+      }
       void this.usage.record(
         this.scopeContext.agentContext,
         request.modelAlias,
@@ -749,6 +772,7 @@ export class AgentLLMRequesterService implements IAgentLLMRequesterService {
       systemPrompt: overrides.systemPrompt ?? turnConfig?.systemPrompt ?? this.profile.getSystemPrompt(),
       tools: [...(overrides.tools ?? this.defaultTools())],
       messages: [...messages],
+      contextRevision: this.context.prefixRevision(),
       source: overrides.source,
       logFields: logFieldsForSource(overrides.source),
     };
@@ -881,7 +905,7 @@ export class AgentLLMRequesterService implements IAgentLLMRequesterService {
     this.log.info('llm request', requestFields);
   }
 
-  private recordRequest(input: LLMRequestLogInput): void {
+  private recordRequest(input: LLMRequestLogInput): LlmRequestPayload {
     const fields = input.fields ?? {};
     const wireTools = providerVisibleTools(input.tools);
     const tools = toolSignature(wireTools);
@@ -927,6 +951,7 @@ export class AgentLLMRequesterService implements IAgentLLMRequesterService {
       droppedCount: numberField(fields, 'droppedCount'),
     };
     void this.dispatcher.dispatch(new LlmRequest(payload));
+    return payload;
   }
 
   private logResponse(

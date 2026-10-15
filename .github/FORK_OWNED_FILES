@@ -134,3 +134,15 @@ packages/agent-core-v2/test/agent/fullCompaction/handoffDocument.test.ts        
 packages/kap-server/src/protocol/events-zod.ts                                         :: handoffPath
 packages/klient/src/contract/agent/events.ts                                           :: handoffPath
 apps/kimi-code/src/tui/components/dialogs/compaction.ts                                :: Handoff saved:
+
+# --- atomic config section replace (node-sdk + auth-flow refresh host) ---
+# These carry the fork's atomic `replaceConfigSections` RPC and the refresh-host
+# scaffolding that `apps/kimi-code` builds on top of it. Upstream deletes the
+# methods in clean merges because it has no caller for them, so the markers below
+# are the only signal that a sync dropped the fork's API.
+packages/node-sdk/src/rpc.ts                       :: supportsAtomicSectionReplace
+packages/node-sdk/src/kimi-harness.ts              :: replaceConfigSections
+packages/node-sdk/src/sdk-rpc-client-v2.ts         :: supportsAtomicSectionReplace
+packages/node-sdk/src/index.ts                     :: removeProviderFromConfig
+apps/kimi-code/src/tui/controllers/auth-flow.ts    :: refreshCatalogProviderModels
+apps/kimi-code/src/tui/kimi-tui.ts                 :: rotateToNextFavoriteModel

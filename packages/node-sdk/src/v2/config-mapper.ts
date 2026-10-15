@@ -158,7 +158,6 @@ export function planProviderRemoval(input: {
     clearDefaultProvider: input.defaultProvider === input.providerId,
   };
 }
-
 /**
  * Apply the v1 remove-provider cascade to a whole `KimiConfig` in memory (no
  * persistence): drop the provider entry, every model pointing at it, and the
