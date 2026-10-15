@@ -6,7 +6,6 @@ import {
   type PermissionMode,
   type Session,
   type SessionSummary,
-  type ThinkingEffort,
 } from '@moonshot-ai/kimi-code-sdk';
 import type { SessionModelOverrideKind } from '@moonshot-ai/agent-core-v2/agent/profile/profile';
 
