@@ -157,4 +157,22 @@ name = "personal"
       key2: { key: 'sk-beta', name: 'personal' },
     });
   });
+
+  it('accepts a compaction trigger ratio the engine allows and writes it back', async () => {
+    const rpc = createKimiConfigRpc();
+    const text = `
+[loop_control]
+compaction_trigger_ratio = 0.1
+`;
+
+    await expect(rpc.validateConfigToml({ text })).resolves.toBeUndefined();
+
+    const config = parseConfigString(text);
+    expect(config.loopControl?.compactionTriggerRatio).toBe(0.1);
+
+    const written = configToTomlData(config) as {
+      loop_control: Record<string, unknown>;
+    };
+    expect(written.loop_control['compaction_trigger_ratio']).toBe(0.1);
+  });
 });

@@ -191,7 +191,6 @@ export class EventDispatcherService extends Service implements IEventDispatcher 
 
   restorePhase: RestorePhase = 'new';
   private dispatching = false;
-  private lateAttachmentTail: Promise<void> | undefined;
   private dispatchingSince: number | undefined;
   private queueStuckWarned = false;
   private disposed = false;
@@ -294,16 +293,7 @@ export class EventDispatcherService extends Service implements IEventDispatcher 
         `Agent runtime participant '${participant.id}' late-attached while the event dispatcher is in phase '${this.restorePhase}'; late attach requires a restored dispatcher`,
       );
     }
-    const previous = this.lateAttachmentTail;
-    const pending = previous === undefined
-      ? this.attachLateNow(participant)
-      : previous.then(() => this.attachLateNow(participant));
-    const settled = pending.then(() => {}, () => {});
-    this.lateAttachmentTail = settled;
-    void settled.then(() => {
-      if (this.lateAttachmentTail === settled) this.lateAttachmentTail = undefined;
-    });
-    return pending;
+    return this.attachLateNow(participant);
   }
 
   private attachLateNow(participant: DurableAgentRuntimeParticipant): Promise<IDisposable> {
@@ -766,7 +756,7 @@ export class EventDispatcherService extends Service implements IEventDispatcher 
       this.dispatchingSince = Date.now();
     }
     try {
-      if (this.lateAttachmentTail !== undefined) await this.lateAttachmentTail;
+      await this.lateAttachTail;
       if (rerun) {
         await this.wire.flush();
         this.resetReplayState();

@@ -1,4 +1,8 @@
 import { parsePattern } from '@moonshot-ai/agent-core-v2/agent/permissionRules/matchesRule';
+import {
+  COMPACTION_TRIGGER_RATIO_MAX,
+  COMPACTION_TRIGGER_RATIO_MIN,
+} from '@moonshot-ai/agent-core-v2/agent/profile/profile';
 import { z } from 'zod';
 
 import { ErrorCodes, KimiError } from '#/errors';
@@ -193,7 +197,7 @@ export const LoopControlSchema = z.object({
   maxRetriesPerStep: z.number().int().min(0).optional(),
   maxRalphIterations: z.number().int().min(-1).optional(),
   reservedContextSize: z.number().int().min(0).optional(),
-  compactionTriggerRatio: z.number().min(0.25).max(0.99).optional(),
+  compactionTriggerRatio: z.number().min(COMPACTION_TRIGGER_RATIO_MIN).max(COMPACTION_TRIGGER_RATIO_MAX).optional(),
   compactionMaxAttempts: z.number().int().min(1).optional(),
 });
 
@@ -379,6 +383,8 @@ const BackgroundConfigPatchSchema = BackgroundConfigSchema.partial();
 const SubagentConfigPatchSchema = SubagentConfigSchema.partial();
 const SecondaryModelConfigPatchSchema = SecondaryModelConfigSchema.partial();
 const SubstituteModelConfigPatchSchema = SubstituteModelConfigSchema.partial();
+const VisualModelConfigPatchSchema = VisualModelConfigSchema.partial();
+const CompactionModelConfigPatchSchema = CompactionModelConfigSchema.partial();
 const FallbackModelConfigPatchSchema = FallbackModelConfigSchema.partial();
 const McpConfigPatchSchema = McpConfigSchema.partial();
 const ImageConfigPatchSchema = ImageConfigSchema.partial();
@@ -413,8 +419,8 @@ export const KimiConfigPatchSchema = z
     subagent: SubagentConfigPatchSchema.optional(),
     secondaryModel: SecondaryModelConfigPatchSchema.optional(),
     substituteModel: SubstituteModelConfigPatchSchema.optional(),
-    visualModel: VisualModelConfigSchema.optional(),
-    compactionModel: CompactionModelConfigSchema.optional(),
+    visualModel: VisualModelConfigPatchSchema.optional(),
+    compactionModel: CompactionModelConfigPatchSchema.optional(),
     fallbackModel: FallbackModelConfigPatchSchema.optional(),
     mcp: McpConfigPatchSchema.optional(),
     image: ImageConfigPatchSchema.optional(),
