@@ -842,6 +842,8 @@ auto_session_title = true
 
       const resumed = await harness.resumeSession({ id: session.id });
       expect((await resumed.getStatus()).model).toBe('a/m2');
+      // The bulk loop reads the alias of a cold resumed session the same way.
+      expect(await resumed.getModelAlias()).toBe('a/m2');
       await resumed.close();
     } finally {
       await harness.close();
