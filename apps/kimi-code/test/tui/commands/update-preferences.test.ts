@@ -45,7 +45,7 @@ describe('update preference commands', () => {
       disablePasteBurst: false,
       renderLatex: true,
       cacheExpiryHint: true,
-      disableFeedbackSurvey: false,
+      autoSessionTitle: true,
       favoriteModels: [],
       notifications: { enabled: true, condition: 'unfocused' },
       upgrade: { autoInstall: false },
@@ -57,7 +57,7 @@ describe('update preference commands', () => {
     expect(showStatus).toHaveBeenCalledWith('Automatic updates disabled.');
   });
 
-  it('preserves a render_latex opt-out when saving an unrelated preference', async () => {
+  it('preserves rendering and automatic title opt-outs when saving another preference', async () => {
     mocks.saveTuiConfig.mockClear();
     const host = {
       state: {
@@ -65,6 +65,7 @@ describe('update preference commands', () => {
           theme: 'auto' as const,
           editorCommand: null,
           renderLatex: false,
+          autoSessionTitle: false,
           notifications: { enabled: true, condition: 'unfocused' as const },
           upgrade: { autoInstall: true },
         },
@@ -78,7 +79,7 @@ describe('update preference commands', () => {
     await applyUpdatePreferenceChoice(host, false);
 
     expect(mocks.saveTuiConfig).toHaveBeenCalledWith(
-      expect.objectContaining({ renderLatex: false }),
+      expect.objectContaining({ renderLatex: false, autoSessionTitle: false }),
     );
   });
 });

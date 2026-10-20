@@ -51,6 +51,7 @@ import {
 } from './stateContribution';
 
 const MAX_DRAIN = 100;
+const DISPATCH_STUCK_WARN_MS = 30_000;
 
 const replayImmer = new Immer({ autoFreeze: false });
 
@@ -190,6 +191,8 @@ export class EventDispatcherService extends Service implements IEventDispatcher 
 
   restorePhase: RestorePhase = 'new';
   private dispatching = false;
+  private dispatchingSince: number | undefined;
+  private queueStuckWarned = false;
   private disposed = false;
   private queue: QueuedEvent[] = [];
   private drainDepth = 0;
@@ -199,7 +202,7 @@ export class EventDispatcherService extends Service implements IEventDispatcher 
     readonly resolve: (disposable: IDisposable) => void;
     readonly reject: (error: unknown) => void;
   }> = [];
-  private lateAttachTail: Promise<unknown> = Promise.resolve();
+  private lateAttachTail: Promise<unknown> | undefined;
 
   constructor(
     @IWireService private readonly wire: IWireService,
@@ -294,11 +297,18 @@ export class EventDispatcherService extends Service implements IEventDispatcher 
   }
 
   private attachLateNow(participant: DurableAgentRuntimeParticipant): Promise<IDisposable> {
-    const run = this.lateAttachTail.then(() => this.runLateAttach(participant));
-    this.lateAttachTail = run.then(
+    const previous = this.lateAttachTail;
+    const run = previous === undefined
+      ? this.runLateAttach(participant)
+      : previous.then(() => this.runLateAttach(participant));
+    const settled = run.then(
       () => undefined,
       () => undefined,
     );
+    this.lateAttachTail = settled;
+    void settled.then(() => {
+      if (this.lateAttachTail === settled) this.lateAttachTail = undefined;
+    });
     return run;
   }
 
@@ -308,6 +318,8 @@ export class EventDispatcherService extends Service implements IEventDispatcher 
     }
     const attachment = this.buildParticipantAttachment(participant);
     this.dispatching = true;
+    this.dispatchingSince = Date.now();
+    let replayFailure: { error: unknown } | undefined;
     try {
       await this.wire.flush();
       const stream = participant.undoable
@@ -342,15 +354,24 @@ export class EventDispatcherService extends Service implements IEventDispatcher 
         this.commitParticipant(attachment, ctx, next);
       }
       this.attachParticipant(attachment);
-      this.drainQueue();
+    } catch (error) {
+      replayFailure = { error };
+    }
+    try {
+      if (this.restorePhase !== 'restoring') this.drainQueue();
     } catch (error) {
       for (const entry of this.queue.splice(0)) entry.reject(error);
       throw error;
     } finally {
-      this.queue.length = 0;
-      this.dispatching = false;
-      this.drainDepth = 0;
+      if (this.restorePhase !== 'restoring') {
+        this.queue.length = 0;
+        this.dispatching = false;
+        this.dispatchingSince = undefined;
+        this.queueStuckWarned = false;
+        this.drainDepth = 0;
+      }
     }
+    if (replayFailure !== undefined) throw replayFailure.error;
     return toDisposable(() => { this.detachParticipant(attachment); });
   }
 
@@ -519,11 +540,24 @@ export class EventDispatcherService extends Service implements IEventDispatcher 
       );
     }
     if (this.dispatching) {
+      if (
+        !this.queueStuckWarned &&
+        this.dispatchingSince !== undefined &&
+        Date.now() - this.dispatchingSince > DISPATCH_STUCK_WARN_MS
+      ) {
+        this.queueStuckWarned = true;
+        this.logger.warn('event dispatch is stuck; queueing event behind it', {
+          agentId: this.agentScope?.agentId,
+          event: event.type,
+          waitingMs: Date.now() - this.dispatchingSince,
+        });
+      }
       return new Promise<void>((resolve, reject) => {
         this.queue.push({ event, resolve, reject });
       });
     }
     this.dispatching = true;
+    this.dispatchingSince = Date.now();
     try {
       this.runDispatch(event);
       this.drainQueue();
@@ -536,6 +570,8 @@ export class EventDispatcherService extends Service implements IEventDispatcher 
     } finally {
       this.queue.length = 0;
       this.dispatching = false;
+      this.dispatchingSince = undefined;
+      this.queueStuckWarned = false;
       this.drainDepth = 0;
     }
   }
@@ -722,8 +758,12 @@ export class EventDispatcherService extends Service implements IEventDispatcher 
     }
     const rerun = this.restorePhase !== 'new';
     this.restorePhase = 'restoring';
-    if (rerun) this.dispatching = true;
+    if (rerun) {
+      this.dispatching = true;
+      this.dispatchingSince = Date.now();
+    }
     try {
+      if (this.lateAttachTail !== undefined) await this.lateAttachTail;
       if (rerun) {
         await this.wire.flush();
         this.resetReplayState();
@@ -751,6 +791,8 @@ export class EventDispatcherService extends Service implements IEventDispatcher 
       if (rerun) {
         this.queue.length = 0;
         this.dispatching = false;
+        this.dispatchingSince = undefined;
+        this.queueStuckWarned = false;
         this.drainDepth = 0;
       }
     }
@@ -759,7 +801,7 @@ export class EventDispatcherService extends Service implements IEventDispatcher 
   private async drainLateAttachments(): Promise<void> {
     for (const pending of this.lateAttachments.splice(0)) {
       try {
-        pending.resolve(await this.attachLateNow(pending.participant));
+        pending.resolve(await this.attachLate(pending.participant));
       } catch (error) {
         pending.reject(error);
       }

@@ -49,6 +49,7 @@ const KIMI_CONFIG_DOMAINS = [
   'modelCatalog',
   'experimental',
   'telemetry',
+  'disableFeedbackSurvey',
 ] as const;
 
 /** Sections whose all-optional v2 schema materializes an empty `{}` default; see {@link resolvedConfigToKimiConfig}. */

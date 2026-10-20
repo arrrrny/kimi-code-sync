@@ -8,7 +8,7 @@
 # commented "# field: type" lines describe the remaining schema fields.
 # Values resolve as: default -> config.toml -> env overlay -> memory.
 
-# Index (34 sections · 4 overlay(s))
+# Index (35 sections · 4 overlay(s))
 #   background               src/agent/task/configSection.ts
 #   builtinProductSkills     src/features/skill/catalog/configSection.ts
 #   compactionModel          src/app/kosongConfig/configSection.ts
@@ -16,6 +16,7 @@
 #   database                 src/persistence/configSection.ts
 #   defaultPermissionMode    src/agent/permissionMode/configSection.ts
 #   defaultPlanMode          src/features/plan/configSection.ts
+#   defaultWorkspace         src/app/defaultWorkspace/configSection.ts
 #   experimental             src/app/flag/flag.ts
 #   extraAgentDirs           src/workspace/workspaceAgentProfileLoader/configSection.ts
 #   extraSkillDirs           src/features/skill/catalog/configSection.ts
@@ -164,6 +165,15 @@ manual_tick = false
 # ##########################################################################
 
 default_plan_mode = false
+
+# ##########################################################################
+# defaultWorkspace (config.toml: default_workspace)
+#   owner: src/app/defaultWorkspace/configSection.ts
+#   scope: core
+# ##########################################################################
+
+[default_workspace]
+# path: string
 
 # ##########################################################################
 # experimental

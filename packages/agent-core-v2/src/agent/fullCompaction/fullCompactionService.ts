@@ -55,6 +55,7 @@ import { ITelemetryService } from '#/app/telemetry/telemetry';
 import { ErrorCodes, Error2, isCodedError, isError2, toKimiErrorPayload, unwrapErrorCause } from "#/errors";
 import { AgentErrorEvent } from '#/agent/mcp/mcpEvents';
 import { IEventDispatcher } from '#/state/eventDispatcher';
+import { ISessionRunGate } from '#/session/sessionActivity/sessionRunGate';
 import { renderCompactionInstruction } from './compactionInstruction';
 import { COMPACTION_HANDOFF_FLAG_ID } from './flag';
 import {
@@ -175,6 +176,7 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
     @IAgentLoopService private readonly loopService: IAgentLoopService,
     @IAgentStateService private readonly states: IAgentStateService,
     @IWireService private readonly wire: IWireService,
+    @ISessionRunGate private readonly runGate: ISessionRunGate,
     @IConfigService private readonly configService: IConfigService,
     @IFlagService private readonly flags: IFlagService,
     @ILogService private readonly log: ILogService,
@@ -371,6 +373,9 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
   begin(input: FullCompactionInput): boolean {
     if (this._compacting) return false;
     const data: CompactionBeginData = { source: input.source, instruction: input.instruction };
+    if (data.source === 'manual') {
+      this.runGate.begin();
+    }
     const profileData = this.profile.data();
     const currentModelAlias = profileData.modelAlias;
     if (!this.reserveCompactionSlot(data.source)) return false;
