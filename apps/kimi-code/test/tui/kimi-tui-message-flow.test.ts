@@ -237,6 +237,8 @@ function makeSession(overrides: Record<string, unknown> = {}) {
     setPermission: vi.fn(async () => {}),
     setPlanMode: vi.fn(async () => {}),
     setSwarmMode: vi.fn(async () => {}),
+    setCompactionTriggerRatio: vi.fn(async () => {}),
+    setCompactionTokenBudget: vi.fn(async () => {}),
     onEvent: vi.fn(() => vi.fn()),
     listMcpServers: vi.fn(async () => []),
     listSkills: vi.fn(async () => []),
@@ -1604,6 +1606,32 @@ describe('KimiTUI message flow', () => {
     });
     expect(harness.createSession).toHaveBeenCalledTimes(1);
     expect(driver.getCurrentSessionId()).toBe('ses-lazy');
+  });
+
+  it('applies /compact-threshold-k while a turn is streaming', async () => {
+    const session = makeSession({ id: 'ses-lazy' });
+    const { driver } = await makeDriver(session);
+    driver.state.appState.streamingPhase = 'waiting';
+
+    driver.handleUserInput('/compact-threshold-k 120');
+
+    await vi.waitFor(() => {
+      expect(session.setCompactionTokenBudget).toHaveBeenCalledWith(120);
+    });
+    expect(stripSgr(renderTranscript(driver))).not.toContain('while streaming');
+  });
+
+  it('applies /compact-threshold while a turn is streaming', async () => {
+    const session = makeSession({ id: 'ses-lazy' });
+    const { driver } = await makeDriver(session);
+    driver.state.appState.streamingPhase = 'waiting';
+
+    driver.handleUserInput('/compact-threshold 0.5');
+
+    await vi.waitFor(() => {
+      expect(session.setCompactionTriggerRatio).toHaveBeenCalledWith(0.5);
+    });
+    expect(stripSgr(renderTranscript(driver))).not.toContain('while streaming');
   });
 
   const thinkingModelsConfig = () => ({

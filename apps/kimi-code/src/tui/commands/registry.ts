@@ -387,9 +387,11 @@ export const BUILTIN_SLASH_COMMANDS = [
     description: 'Show or set the per-session auto-compaction trigger ratio (0.05-0.99)',
     priority: 80,
     argumentHint: '[<ratio>|off]',
-    // Reading the effective threshold is always safe; changing it mid-turn
-    // would re-aim compaction under the running turn, so mutations wait for idle.
-    availability: (args) => (args.trim() === '' ? 'always' : 'idle-only'),
+    // Reading and writing the threshold are both safe mid-turn: the engine
+    // stores the override on the agent scope and re-reads it before every
+    // compaction check, so a change lands on the next step boundary of the
+    // running turn instead of waiting for the turn to end.
+    availability: 'always',
   },
   {
     name: 'compact-threshold-k',
@@ -398,7 +400,7 @@ export const BUILTIN_SLASH_COMMANDS = [
       'Show or set the per-session auto-compaction token budget (in thousands of tokens, absolute cap)',
     priority: 80,
     argumentHint: '[<tokens in 1000s>|off]',
-    availability: (args) => (args.trim() === '' ? 'always' : 'idle-only'),
+    availability: 'always',
   },
   {
     name: 'goal',
