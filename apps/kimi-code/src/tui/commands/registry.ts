@@ -212,8 +212,9 @@ export const BUILTIN_SLASH_COMMANDS = [
   {
     name: 'update-all-session-models',
     aliases: ['update-models'],
-    description: 'Switch the model for all active sessions at once',
+    description: 'Switch the model for the current session and the sessions you recently used',
     priority: 100,
+    argumentHint: '[model] [--all]',
     availability: 'always',
     // Bulk session mutation is strictly opt-in until the experiment graduates;
     // hidden from the palette and unresolvable while the flag is off.

@@ -810,6 +810,46 @@ auto_session_title = true
     }
   });
 
+  it('keeps a switched model across a reload and a later resume', async () => {
+    const { harness } = await makeHarness();
+    const workDir = await mkdtemp(join(tmpdir(), 'kimi-sdk-v2-work-'));
+    tempDirs.push(workDir);
+    try {
+      await harness.setConfig({
+        providers: {
+          a: { type: 'openai', baseUrl: 'https://a.example.test/v1', apiKey: 'sk-a' },
+        },
+        models: {
+          'a/m1': { provider: 'a', model: 'm1', maxContextSize: 100 },
+          'a/m2': { provider: 'a', model: 'm2', maxContextSize: 100 },
+        },
+        defaultModel: 'a/m1',
+      });
+      const session = await harness.createSession({ id: 'ses_model_switch', workDir });
+      expect((await session.getStatus()).model).toBe('a/m1');
+      // The alias-only read agrees with the status read.
+      expect(await session.getModelAlias()).toBe('a/m1');
+
+      // The bulk session-model switch writes the model to a live session and
+      // then re-materializes it (the `/reload` path): the new model must
+      // survive both, and reach the next resume of a cold session.
+      await session.setModel('a/m2');
+      expect(await session.getModelAlias()).toBe('a/m2');
+      const reloaded = await harness.reloadSession({ id: session.id });
+      expect((await reloaded.getStatus()).model).toBe('a/m2');
+      expect(await reloaded.getModelAlias()).toBe('a/m2');
+      await reloaded.close();
+
+      const resumed = await harness.resumeSession({ id: session.id });
+      expect((await resumed.getStatus()).model).toBe('a/m2');
+      // The bulk loop reads the alias of a cold resumed session the same way.
+      expect(await resumed.getModelAlias()).toBe('a/m2');
+      await resumed.close();
+    } finally {
+      await harness.close();
+    }
+  });
+
   it('folds the resumed main agent replay from the persisted wire on cold and live resumes', async () => {
     const homeDir = await mkdtemp(join(tmpdir(), 'kimi-sdk-v2-resume-fold-'));
     const workDir = await mkdtemp(join(tmpdir(), 'kimi-sdk-v2-work-'));

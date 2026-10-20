@@ -456,6 +456,16 @@ export class Session {
     return this.rpc.getStatus({ sessionId: this.id });
   }
 
+  /**
+   * The model alias bound to this session, read without the context/plan/
+   * usage slices `getStatus` aggregates — the cheap probe for a loop over
+   * many sessions.
+   */
+  async getModelAlias(): Promise<string | undefined> {
+    this.ensureOpen();
+    return this.rpc.getModelAlias({ sessionId: this.id });
+  }
+
   async listSkills(): Promise<readonly SkillSummary[]> {
     this.ensureOpen();
     return this.rpc.listSkills({ sessionId: this.id });

@@ -315,30 +315,102 @@ export async function handleModelCommand(host: SlashCommandHost, args: string): 
 // Bulk session model switch (`/update-all-session-models`)
 // ---------------------------------------------------------------------------
 
+/**
+ * How many of the scope's sessions the bulk switch touches by default: the
+ * current session plus the most recently used ones. `--all` lifts the limit
+ * and reaches every non-archived session.
+ */
+const BULK_SESSION_LIMIT = 20;
+
+/** Which sessions the bulk switch may touch. */
+type BulkScope = 'workspace' | 'all';
+
 type BulkSessionOutcome =
   | { readonly id: string; readonly status: 'succeeded' }
   | { readonly id: string; readonly status: 'skipped'; readonly reason: string }
   | { readonly id: string; readonly status: 'failed'; readonly reason: string };
 
+type BulkReloadOutcome =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly reason: string };
+
+interface BulkSelection {
+  readonly sessions: readonly SessionSummary[];
+  readonly scope: BulkScope;
+  /** Sessions the scope holds in total, before the limit applies. */
+  readonly total: number;
+  /** True when the limit left sessions of the scope untouched. */
+  readonly truncated: boolean;
+}
+
+/** `--all` widens the scope to every non-archived session; the model alias
+ * is the remaining argument. */
+function parseBulkArgs(args: string): { readonly alias: string; readonly scope: BulkScope } {
+  const tokens = args.trim().split(/\s+/).filter((token) => token.length > 0);
+  let scope: BulkScope = 'workspace';
+  const rest: string[] = [];
+  for (const token of tokens) {
+    if (token === '--all') {
+      scope = 'all';
+      continue;
+    }
+    rest.push(token);
+  }
+  return { alias: rest.join(' '), scope };
+}
+
 /**
- * Enumerate the active sessions the bulk switch will target: the non-archived
- * sessions the harness manages, plus the current session (which listSessions may
- * or may not include). Archived/closed sessions are excluded by the listing, so
- * they are never touched (FR-008); the current session is always in scope
- * (FR-003).
+ * The sessions the bulk switch targets. The default scope is the current
+ * workspace — the scope the session picker shows by default — limited to the
+ * most recently used sessions; the current session is always included, even
+ * when the limit dropped it. `--all` targets every non-archived session.
  */
-function activeSessionsForBulk(host: SlashCommandHost, listed: readonly SessionSummary[]): SessionSummary[] {
+async function selectBulkSessions(
+  host: SlashCommandHost,
+  scope: BulkScope,
+): Promise<BulkSelection> {
+  const workDir = bulkScopeWorkDir(host);
+  const listed =
+    scope === 'all' || workDir === undefined
+      ? await host.harness.listSessions()
+      : await host.harness.listSessions({ workDir });
+  const total = listed.length;
+  const byRecency = listed.toSorted((a, b) => b.updatedAt - a.updatedAt);
+  const limited = scope === 'all' ? byRecency : byRecency.slice(0, BULK_SESSION_LIMIT);
+  return {
+    sessions: withCurrentSessionFirst(host, limited),
+    scope,
+    total,
+    truncated: limited.length < total,
+  };
+}
+
+function bulkScopeWorkDir(host: SlashCommandHost): string | undefined {
+  const workDir = host.state.appState.workDir.trim();
+  if (workDir.length > 0) return workDir;
+  const sessionWorkDir = host.session?.workDir?.trim() ?? '';
+  return sessionWorkDir.length > 0 ? sessionWorkDir : undefined;
+}
+
+/**
+ * The current session leads the list — it is the one the user is looking at,
+ * and it is reloaded so the new model applies to the next message. A session
+ * the listing does not know yet (e.g. freshly created, nothing persisted) is
+ * still switched: synthesize a summary. `workDir` is normally a non-empty
+ * string, but fall back to the session id so a missing/empty value can never
+ * leak `undefined`/blank fields into downstream handling.
+ */
+function withCurrentSessionFirst(
+  host: SlashCommandHost,
+  sessions: readonly SessionSummary[],
+): SessionSummary[] {
   const current = host.session;
-  if (current === undefined) return [...listed];
-  const ids = new Set(listed.map((s) => s.id));
-  if (ids.has(current.id)) return [...listed];
-  // A session the listing does not know yet (e.g. freshly created, nothing
-  // persisted) is still switched: synthesize a summary. `workDir` is normally
-  // a non-empty string, but fall back to the session id so a missing/empty
-  // value can never leak `undefined`/blank fields into downstream handling.
+  if (current === undefined) return [...sessions];
+  const existing = sessions.find((s) => s.id === current.id);
+  const rest = sessions.filter((s) => s.id !== current.id);
   const dir = current.workDir && current.workDir.length > 0 ? current.workDir : current.id;
-  return [
-    ...listed,
+  const summary: SessionSummary =
+    existing ??
     {
       id: current.id,
       workDir: dir,
@@ -347,8 +419,8 @@ function activeSessionsForBulk(host: SlashCommandHost, listed: readonly SessionS
       updatedAt: 0,
       title: 'Current session',
       archived: false,
-    },
-  ];
+    };
+  return [summary, ...rest];
 }
 
 /** A setModel rejection is a "skip" when the model itself can't be applied to
@@ -366,28 +438,35 @@ function classifyModelError(error: unknown): 'skipped' | 'failed' {
 }
 
 export async function handleUpdateAllSessionModelsCommand(host: SlashCommandHost, args: string): Promise<void> {
-  const alias = args.trim();
+  const { alias, scope } = parseBulkArgs(args);
   await refreshModelsForPicker(host);
   if (alias.length > 0 && host.state.appState.availableModels[alias] === undefined) {
     host.showError(`Unknown model alias: ${alias}`);
     return;
   }
-  const listed = await host.harness.listSessions();
-  const sessions = activeSessionsForBulk(host, listed);
-  if (sessions.length === 0) {
+  // A model switch changes what the running agent talks to, so a live turn has
+  // to be cancelled first — the same guard the session switcher applies
+  // ("Cannot switch sessions while streaming — press Esc or Ctrl-C first.",
+  // apps/kimi-code/src/tui/kimi-tui.ts).
+  if (host.state.appState.streamingPhase !== 'idle') {
+    host.showError('Cannot update session models while streaming — press Esc or Ctrl-C first.');
+    return;
+  }
+  const selection = await selectBulkSessions(host, scope);
+  if (selection.sessions.length === 0) {
     host.showNotice(
       'No active sessions',
       'There are no active sessions to update. Start or resume a session, then try again.',
     );
     return;
   }
-  showBulkModelPicker(host, alias, sessions);
+  showBulkModelPicker(host, alias, selection);
 }
 
 function showBulkModelPicker(
   host: SlashCommandHost,
   selectedValue: string,
-  sessions: readonly SessionSummary[],
+  selection: BulkSelection,
 ): void {
   const models = pickerModelsForHost(host);
   const entries = Object.entries(models);
@@ -407,7 +486,7 @@ function showBulkModelPicker(
       warning: hasConversationHistory(host) ? MODEL_SWITCH_CACHE_WARNING : undefined,
       onSelect: ({ alias }) => {
         host.restoreEditor();
-        showBulkConfirm(host, alias, sessions);
+        showBulkConfirm(host, alias, selection);
       },
       onCancel: () => {
         host.restoreEditor();
@@ -416,16 +495,23 @@ function showBulkModelPicker(
   );
 }
 
-function showBulkConfirm(host: SlashCommandHost, alias: string, sessions: readonly SessionSummary[]): void {
-  const count = sessions.length;
+function showBulkConfirm(host: SlashCommandHost, alias: string, selection: BulkSelection): void {
+  const count = selection.sessions.length;
   const displayName = modelDisplayName(alias, host.state.appState.availableModels[alias]);
+  const scopeLine =
+    selection.scope === 'all'
+      ? `every non-archived session (${String(selection.total)} in total)`
+      : selection.truncated
+        ? `the current session and the ${String(count - 1)} most recently used sessions in this workspace (${String(selection.total)} sessions exist)`
+        : `the active sessions in this workspace (${String(count)})`;
   host.mountEditorReplacement(
     new ConfirmDialogComponent({
-      title: `Update ${count} active session${count === 1 ? '' : 's'} to ${displayName}?`,
+      title: `Update ${count} session${count === 1 ? '' : 's'} to ${displayName}?`,
       body: [
-        `This switches the working model for every active session${
-          count === 1 ? '' : ` (${String(count)})`
-        }.`,
+        `This switches the working model for ${scopeLine}.`,
+        ...(host.session === undefined
+          ? []
+          : ['The current session is reloaded, so your next message uses the new model.']),
         'The new-session default model will also be updated.',
         'This cannot be undone per session — choose Cancel to make no changes.',
       ],
@@ -440,7 +526,7 @@ function showBulkConfirm(host: SlashCommandHost, alias: string, sessions: readon
         // The apply loop is long-running (resume/setModel per session); the
         // `.catch` is the last line of defense — the CLI's unhandled-rejection
         // handler exits the whole TUI, so nothing may escape this call.
-        void applyModelToAllSessions(host, alias, sessions).catch((error) => {
+        void applyModelToAllSessions(host, alias, selection).catch((error) => {
           host.showError(`Failed to update session models: ${formatErrorMessage(error)}`);
         });
       },
@@ -451,7 +537,7 @@ function showBulkConfirm(host: SlashCommandHost, alias: string, sessions: readon
 async function applyModelToAllSessions(
   host: SlashCommandHost,
   alias: string,
-  sessions: readonly SessionSummary[],
+  selection: BulkSelection,
 ): Promise<void> {
   const currentId = host.session?.id;
   const displayName = modelDisplayName(alias, host.state.appState.availableModels[alias]);
@@ -459,40 +545,58 @@ async function applyModelToAllSessions(
   const resumedSessions = new Set<string>();
 
   try {
-    for (const summary of sessions) {
-      const id = summary.id;
-      let session: Session | undefined;
-      if (id === currentId) {
-        session = host.session;
+    // The current session goes first: it is the session the user is looking
+    // at, and reloading it is what makes the new model the one the next
+    // message uses — no manual `/reload` needed.
+    const currentSession = host.session;
+    if (currentId !== undefined && currentSession !== undefined) {
+      const applied = await applyModelToSession(
+        currentSession,
+        alias,
+        currentId,
+        async (target) => (await target.getStatus()).model,
+      );
+      if (applied.status !== 'succeeded') {
+        results.push(applied);
       } else {
-        // `getSession` is a map lookup in practice, but any throw here must
-        // not escape the loop: classify the session as failed and keep going.
+        // The read-back proves the profile changed; only the reload makes the
+        // live agent use it. A reload that failed leaves the session on the
+        // old model, so the outcome is a failure, not a success.
+        const reload = await reloadCurrentSession(host, currentId, alias);
+        results.push(
+          reload.ok ? applied : { id: currentId, status: 'failed', reason: reload.reason },
+        );
+      }
+    }
+
+    for (const summary of selection.sessions) {
+      const id = summary.id;
+      if (id === currentId) continue;
+      let session: Session | undefined;
+      // `getSession` is a map lookup in practice, but any throw here must
+      // not escape the loop: classify the session as failed and keep going.
+      try {
+        session = host.harness.getSession(id);
+      } catch (error) {
+        results.push({ id, status: 'failed', reason: formatErrorMessage(error) });
+        continue;
+      }
+      if (session === undefined) {
         try {
-          session = host.harness.getSession(id);
+          session = await host.harness.resumeSession({ id });
+          resumedSessions.add(id);
         } catch (error) {
           results.push({ id, status: 'failed', reason: formatErrorMessage(error) });
           continue;
-        }
-        if (session === undefined) {
-          try {
-            session = await host.harness.resumeSession({ id });
-            resumedSessions.add(id);
-          } catch (error) {
-            results.push({ id, status: 'failed', reason: formatErrorMessage(error) });
-            continue;
-          }
         }
       }
       if (session === undefined) {
         results.push({ id, status: 'failed', reason: 'session unavailable' });
         continue;
       }
-      try {
-        await session.setModel(alias);
-        results.push({ id, status: 'succeeded' });
-      } catch (error) {
-        results.push({ id, status: classifyModelError(error), reason: formatErrorMessage(error) });
-      }
+      results.push(
+        await applyModelToSession(session, alias, id, async (target) => target.getModelAlias()),
+      );
     }
 
     // Reflect the chosen model in the footer. It follows the pick for the
@@ -526,6 +630,63 @@ async function applyModelToAllSessions(
         await session.close().catch(() => {});
       }
     }
+  }
+}
+
+/**
+ * Switch one session to the model and read the model back: a switch that
+ * silently did not stick must not be reported as a success. `readModel` is
+ * the probe — the current session reads the full status, the bulk loop reads
+ * the alias alone, a local profile read that costs no round-trips.
+ */
+async function applyModelToSession(
+  session: Session,
+  alias: string,
+  id: string,
+  readModel: (target: Session) => Promise<string | undefined>,
+): Promise<BulkSessionOutcome> {
+  try {
+    await session.setModel(alias);
+  } catch (error) {
+    return { id, status: classifyModelError(error), reason: formatErrorMessage(error) };
+  }
+  try {
+    const model = await readModel(session);
+    if (model !== alias) {
+      return { id, status: 'failed', reason: `model is still ${model ?? 'unset'}` };
+    }
+  } catch (error) {
+    return { id, status: 'failed', reason: formatErrorMessage(error) };
+  }
+  return { id, status: 'succeeded' };
+}
+
+/**
+ * Re-materialize the current session so the new model is what the next
+ * message uses. This is the same path `/reload` takes, so the open session
+ * ends up exactly as it does after a manual reload. A failed reload is
+ * reported back to the caller: the session still runs on the old model, so it
+ * must not be counted as a success.
+ */
+async function reloadCurrentSession(
+  host: SlashCommandHost,
+  sessionId: string,
+  alias: string,
+): Promise<BulkReloadOutcome> {
+  const displayName = modelDisplayName(alias, host.state.appState.availableModels[alias]);
+  try {
+    const reloaded = await host.harness.reloadSession({
+      id: sessionId,
+      forcePluginSessionStartReminder: true,
+    });
+    await host.reloadCurrentSessionView(reloaded, `Session reloaded — the next message uses ${displayName}.`);
+    return { ok: true };
+  } catch (error) {
+    const reason = formatErrorMessage(error);
+    host.showError(
+      `Switched the current session to ${displayName}, but reloading it failed: ${reason}`,
+    );
+    return { ok: false, reason: `reload failed: ${reason}` };
   }
 }
 
