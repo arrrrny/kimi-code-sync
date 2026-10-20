@@ -234,6 +234,39 @@ describe('resolveSlashCommandInput', () => {
     });
   });
 
+  it('keeps the compaction-threshold commands usable while streaming and compacting', () => {
+    expect(resolve('/compact-threshold 0.5', { isStreaming: true })).toMatchObject({
+      kind: 'builtin',
+      name: 'compact-threshold',
+      args: '0.5',
+    });
+    expect(resolve('/compact-threshold off', { isStreaming: true })).toMatchObject({
+      kind: 'builtin',
+      name: 'compact-threshold',
+      args: 'off',
+    });
+    expect(resolve('/compact-threshold-k 120', { isStreaming: true })).toMatchObject({
+      kind: 'builtin',
+      name: 'compact-threshold-k',
+      args: '120',
+    });
+    expect(resolve('/compact-threshold-k off', { isStreaming: true })).toMatchObject({
+      kind: 'builtin',
+      name: 'compact-threshold-k',
+      args: 'off',
+    });
+    expect(resolve('/compact-threshold-k 120', { isCompacting: true })).toMatchObject({
+      kind: 'builtin',
+      name: 'compact-threshold-k',
+      args: '120',
+    });
+    expect(resolve('/compact-threshold 0.5', { isCompacting: true })).toMatchObject({
+      kind: 'builtin',
+      name: 'compact-threshold',
+      args: '0.5',
+    });
+  });
+
   it('blocks plan clear while compacting because it is idle-only', () => {
     expect(resolve('/plan clear', { isCompacting: true })).toEqual({
       kind: 'blocked',

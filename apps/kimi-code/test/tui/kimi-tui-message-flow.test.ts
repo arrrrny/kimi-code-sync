@@ -237,6 +237,8 @@ function makeSession(overrides: Record<string, unknown> = {}) {
     setPermission: vi.fn(async () => {}),
     setPlanMode: vi.fn(async () => {}),
     setSwarmMode: vi.fn(async () => {}),
+    setCompactionTriggerRatio: vi.fn(async () => {}),
+    setCompactionTokenBudget: vi.fn(async () => {}),
     onEvent: vi.fn(() => vi.fn()),
     listMcpServers: vi.fn(async () => []),
     listSkills: vi.fn(async () => []),
@@ -1604,6 +1606,56 @@ describe('KimiTUI message flow', () => {
     });
     expect(harness.createSession).toHaveBeenCalledTimes(1);
     expect(driver.getCurrentSessionId()).toBe('ses-lazy');
+  });
+
+  it('applies /compact-threshold-k while a turn is streaming', async () => {
+    const session = makeSession({ id: 'ses-lazy' });
+    const { driver } = await makeDriver(session);
+    driver.state.appState.streamingPhase = 'waiting';
+
+    driver.handleUserInput('/compact-threshold-k 120');
+
+    await vi.waitFor(() => {
+      expect(session.setCompactionTokenBudget).toHaveBeenCalledWith(120);
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(stripSgr(renderTranscript(driver))).not.toContain('while streaming');
+    expect(stripSgr(renderTranscript(driver))).toContain(
+      'Auto-compact token budget set to 120000 for this session',
+    );
+
+    driver.handleUserInput('/compact-threshold-k off');
+
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(session.setCompactionTokenBudget).toHaveBeenCalledWith(undefined);
+    expect(stripSgr(renderTranscript(driver))).toContain(
+      'Auto-compact token budget override cleared',
+    );
+  });
+
+  it('applies /compact-threshold while a turn is streaming', async () => {
+    const session = makeSession({ id: 'ses-lazy' });
+    const { driver } = await makeDriver(session);
+    driver.state.appState.streamingPhase = 'waiting';
+
+    driver.handleUserInput('/compact-threshold 0.5');
+
+    await vi.waitFor(() => {
+      expect(session.setCompactionTriggerRatio).toHaveBeenCalledWith(0.5);
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(stripSgr(renderTranscript(driver))).not.toContain('while streaming');
+    expect(stripSgr(renderTranscript(driver))).toContain(
+      'Auto-compact threshold set to 0.5 for this session',
+    );
+
+    driver.handleUserInput('/compact-threshold off');
+
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(session.setCompactionTriggerRatio).toHaveBeenCalledWith(undefined);
+    expect(stripSgr(renderTranscript(driver))).toContain(
+      'Auto-compact threshold override cleared',
+    );
   });
 
   const thinkingModelsConfig = () => ({
