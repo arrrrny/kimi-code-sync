@@ -827,13 +827,17 @@ auto_session_title = true
       });
       const session = await harness.createSession({ id: 'ses_model_switch', workDir });
       expect((await session.getStatus()).model).toBe('a/m1');
+      // The alias-only read agrees with the status read.
+      expect(await session.getModelAlias()).toBe('a/m1');
 
       // The bulk session-model switch writes the model to a live session and
       // then re-materializes it (the `/reload` path): the new model must
       // survive both, and reach the next resume of a cold session.
       await session.setModel('a/m2');
+      expect(await session.getModelAlias()).toBe('a/m2');
       const reloaded = await harness.reloadSession({ id: session.id });
       expect((await reloaded.getStatus()).model).toBe('a/m2');
+      expect(await reloaded.getModelAlias()).toBe('a/m2');
       await reloaded.close();
 
       const resumed = await harness.resumeSession({ id: session.id });

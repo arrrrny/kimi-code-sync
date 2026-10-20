@@ -1984,6 +1984,18 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
   }
 
   /**
+   * Alias-only read: the bound model alias from the agent's profile, the same
+   * value `getStatus` reports as `model`. The profile lives in the local
+   * scope, so this costs none of the context/plan/usage round-trips
+   * `getStatus` aggregates — a bulk loop over many sessions pays for the
+   * difference.
+   */
+  override async getModelAlias(input: SessionIdRpcInput): Promise<string | undefined> {
+    const agent = await this.agentScope(input.sessionId);
+    return agent.accessor.get(IAgentProfileService).data().modelAlias;
+  }
+
+  /**
    * Facade (`agentLoopService.cancelFromUser`) plus the session-level init
    * run: v1's cancel cascades from the agent's turn to every foreground
    * subagent run of the session, and /init is the one session-level run v2

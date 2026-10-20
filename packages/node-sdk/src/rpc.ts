@@ -436,6 +436,16 @@ abstract setThinking(input: SetSessionThinkingRpcInput): Promise<void>;
 
   abstract getStatus(input: SessionIdRpcInput): Promise<SessionStatus>;
 
+  /**
+   * The model alias bound to the session's interactive agent, without the
+   * context/plan/usage slices `getStatus` aggregates. The default reads the
+   * full status; clients that can serve the alias alone override it — a
+   * bulk loop over many sessions pays for the difference.
+   */
+  async getModelAlias(input: SessionIdRpcInput): Promise<string | undefined> {
+    return (await this.getStatus(input)).model;
+  }
+
   abstract listSkills(input: SessionIdRpcInput): Promise<readonly SkillSummary[]>;
 
   abstract listPluginCommands(input: SessionIdRpcInput): Promise<readonly PluginCommandDef[]>;

@@ -44,6 +44,7 @@ function makeSession(id: string, initialModel = 'k2'): Session {
       state.model = alias;
     }),
     getStatus: vi.fn(async () => ({ model: state.model })),
+    getModelAlias: vi.fn(async () => state.model),
   } as unknown as Session;
 }
 
@@ -268,6 +269,47 @@ describe('handleUpdateAllSessionModelsCommand — the change takes effect', () =
     });
     expect(host.reloadCurrentSessionView).toHaveBeenCalled();
     expect(host.reloadCurrentSessionView.mock.calls[0]![0]).toBe(current);
+  });
+
+  it('switches and reloads the current session before the other sessions', async () => {
+    // The order is the fix: the open session must be switched and
+    // re-materialized first, or it keeps the old model for the whole
+    // (potentially minutes-long) run over the other sessions.
+    const { host, current, other } = makeHost();
+
+    await handleUpdateAllSessionModelsCommand(host, '');
+    picker(host).onSelect(SELECTION);
+    confirmDialog(host).onResolve(true);
+
+    await vi.waitFor(() => {
+      expect(other.setModel).toHaveBeenCalledWith('cheap');
+    });
+    const currentSwitch = vi.mocked(current.setModel).mock.invocationCallOrder[0]!;
+    const reload = host.harness.reloadSession.mock.invocationCallOrder[0]!;
+    const otherSwitch = vi.mocked(other.setModel).mock.invocationCallOrder[0]!;
+    expect(currentSwitch).toBeLessThan(otherSwitch);
+    expect(reload).toBeLessThan(otherSwitch);
+  });
+
+  it('reports a failed reload as a failure and keeps the old model in the footer', async () => {
+    // The read-back proves the profile changed; only the reload makes the
+    // agent use it. A reload that failed leaves the session on the old model,
+    // so it must not be counted as a success.
+    const { host } = makeHost();
+    host.harness.reloadSession.mockRejectedValueOnce(new Error('reload exploded'));
+
+    await handleUpdateAllSessionModelsCommand(host, '');
+    picker(host).onSelect(SELECTION);
+    confirmDialog(host).onResolve(true);
+
+    await vi.waitFor(() => {
+      expect(host.showNotice).toHaveBeenCalled();
+    });
+    expect(host.showNotice.mock.calls[0]![1]).toContain('reload exploded');
+    // The current session is the failed one; the other session still switched.
+    expect(host.showStatus).toHaveBeenCalledWith(expect.stringContaining('1 failed'), 'warning');
+    // The footer keeps the old model: the session still runs on it.
+    expect(host.setAppState).not.toHaveBeenCalledWith({ model: 'cheap' });
   });
 
   it('reports a session whose model did not change instead of claiming success', async () => {

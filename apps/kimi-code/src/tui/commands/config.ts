@@ -330,6 +330,10 @@ type BulkSessionOutcome =
   | { readonly id: string; readonly status: 'skipped'; readonly reason: string }
   | { readonly id: string; readonly status: 'failed'; readonly reason: string };
 
+type BulkReloadOutcome =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly reason: string };
+
 interface BulkSelection {
   readonly sessions: readonly SessionSummary[];
   readonly scope: BulkScope;
@@ -348,10 +352,6 @@ function parseBulkArgs(args: string): { readonly alias: string; readonly scope: 
   for (const token of tokens) {
     if (token === '--all') {
       scope = 'all';
-      continue;
-    }
-    if (token === '--workspace') {
-      scope = 'workspace';
       continue;
     }
     rest.push(token);
@@ -444,8 +444,10 @@ export async function handleUpdateAllSessionModelsCommand(host: SlashCommandHost
     host.showError(`Unknown model alias: ${alias}`);
     return;
   }
-  // A model switch changes what the running agent talks to; the same guard as
-  // /model applies — the user cancels the turn (Esc) and switches afterwards.
+  // A model switch changes what the running agent talks to, so a live turn has
+  // to be cancelled first — the same guard the session switcher applies
+  // ("Cannot switch sessions while streaming — press Esc or Ctrl-C first.",
+  // apps/kimi-code/src/tui/kimi-tui.ts).
   if (host.state.appState.streamingPhase !== 'idle') {
     host.showError('Cannot update session models while streaming — press Esc or Ctrl-C first.');
     return;
@@ -546,11 +548,24 @@ async function applyModelToAllSessions(
     // The current session goes first: it is the session the user is looking
     // at, and reloading it is what makes the new model the one the next
     // message uses — no manual `/reload` needed.
-    if (currentId !== undefined && host.session !== undefined) {
-      const outcome = await applyModelToSession(host.session, alias, currentId);
-      results.push(outcome);
-      if (outcome.status === 'succeeded') {
-        await reloadCurrentSession(host, currentId, alias);
+    const currentSession = host.session;
+    if (currentId !== undefined && currentSession !== undefined) {
+      const applied = await applyModelToSession(
+        currentSession,
+        alias,
+        currentId,
+        async (target) => (await target.getStatus()).model,
+      );
+      if (applied.status !== 'succeeded') {
+        results.push(applied);
+      } else {
+        // The read-back proves the profile changed; only the reload makes the
+        // live agent use it. A reload that failed leaves the session on the
+        // old model, so the outcome is a failure, not a success.
+        const reload = await reloadCurrentSession(host, currentId, alias);
+        results.push(
+          reload.ok ? applied : { id: currentId, status: 'failed', reason: reload.reason },
+        );
       }
     }
 
@@ -579,7 +594,9 @@ async function applyModelToAllSessions(
         results.push({ id, status: 'failed', reason: 'session unavailable' });
         continue;
       }
-      results.push(await applyModelToSession(session, alias, id));
+      results.push(
+        await applyModelToSession(session, alias, id, async (target) => target.getModelAlias()),
+      );
     }
 
     // Reflect the chosen model in the footer. It follows the pick for the
@@ -618,12 +635,15 @@ async function applyModelToAllSessions(
 
 /**
  * Switch one session to the model and read the model back: a switch that
- * silently did not stick must not be reported as a success.
+ * silently did not stick must not be reported as a success. `readModel` is
+ * the probe — the current session reads the full status, the bulk loop reads
+ * the alias alone, a local profile read that costs no round-trips.
  */
 async function applyModelToSession(
   session: Session,
   alias: string,
   id: string,
+  readModel: (target: Session) => Promise<string | undefined>,
 ): Promise<BulkSessionOutcome> {
   try {
     await session.setModel(alias);
@@ -631,9 +651,9 @@ async function applyModelToSession(
     return { id, status: classifyModelError(error), reason: formatErrorMessage(error) };
   }
   try {
-    const status = await session.getStatus();
-    if (status.model !== alias) {
-      return { id, status: 'failed', reason: `model is still ${status.model ?? 'unset'}` };
+    const model = await readModel(session);
+    if (model !== alias) {
+      return { id, status: 'failed', reason: `model is still ${model ?? 'unset'}` };
     }
   } catch (error) {
     return { id, status: 'failed', reason: formatErrorMessage(error) };
@@ -644,13 +664,15 @@ async function applyModelToSession(
 /**
  * Re-materialize the current session so the new model is what the next
  * message uses. This is the same path `/reload` takes, so the open session
- * ends up exactly as it does after a manual reload.
+ * ends up exactly as it does after a manual reload. A failed reload is
+ * reported back to the caller: the session still runs on the old model, so it
+ * must not be counted as a success.
  */
 async function reloadCurrentSession(
   host: SlashCommandHost,
   sessionId: string,
   alias: string,
-): Promise<void> {
+): Promise<BulkReloadOutcome> {
   const displayName = modelDisplayName(alias, host.state.appState.availableModels[alias]);
   try {
     const reloaded = await host.harness.reloadSession({
@@ -658,10 +680,13 @@ async function reloadCurrentSession(
       forcePluginSessionStartReminder: true,
     });
     await host.reloadCurrentSessionView(reloaded, `Session reloaded — the next message uses ${displayName}.`);
+    return { ok: true };
   } catch (error) {
+    const reason = formatErrorMessage(error);
     host.showError(
-      `Switched the current session to ${displayName}, but reloading it failed: ${formatErrorMessage(error)}`,
+      `Switched the current session to ${displayName}, but reloading it failed: ${reason}`,
     );
+    return { ok: false, reason: `reload failed: ${reason}` };
   }
 }
 
