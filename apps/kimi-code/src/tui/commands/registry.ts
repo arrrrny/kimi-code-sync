@@ -387,10 +387,9 @@ export const BUILTIN_SLASH_COMMANDS = [
     description: 'Show or set the per-session auto-compaction trigger ratio (0.05-0.99)',
     priority: 80,
     argumentHint: '[<ratio>|off]',
-    // Reading and writing the threshold are both safe mid-turn: the engine
-    // stores the override on the agent scope and re-reads it before every
-    // compaction check, so a change lands on the next step boundary of the
-    // running turn instead of waiting for the turn to end.
+    // Reading and writing the threshold are both allowed while a turn is
+    // streaming; a mid-turn change can move the compaction trigger point
+    // later for the running turn.
     availability: 'always',
   },
   {

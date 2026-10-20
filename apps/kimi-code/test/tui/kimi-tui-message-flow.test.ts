@@ -1618,7 +1618,19 @@ describe('KimiTUI message flow', () => {
     await vi.waitFor(() => {
       expect(session.setCompactionTokenBudget).toHaveBeenCalledWith(120);
     });
+    await new Promise((resolve) => setImmediate(resolve));
     expect(stripSgr(renderTranscript(driver))).not.toContain('while streaming');
+    expect(stripSgr(renderTranscript(driver))).toContain(
+      'Auto-compact token budget set to 120000 for this session',
+    );
+
+    driver.handleUserInput('/compact-threshold-k off');
+
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(session.setCompactionTokenBudget).toHaveBeenCalledWith(undefined);
+    expect(stripSgr(renderTranscript(driver))).toContain(
+      'Auto-compact token budget override cleared',
+    );
   });
 
   it('applies /compact-threshold while a turn is streaming', async () => {
@@ -1631,7 +1643,19 @@ describe('KimiTUI message flow', () => {
     await vi.waitFor(() => {
       expect(session.setCompactionTriggerRatio).toHaveBeenCalledWith(0.5);
     });
+    await new Promise((resolve) => setImmediate(resolve));
     expect(stripSgr(renderTranscript(driver))).not.toContain('while streaming');
+    expect(stripSgr(renderTranscript(driver))).toContain(
+      'Auto-compact threshold set to 0.5 for this session',
+    );
+
+    driver.handleUserInput('/compact-threshold off');
+
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(session.setCompactionTriggerRatio).toHaveBeenCalledWith(undefined);
+    expect(stripSgr(renderTranscript(driver))).toContain(
+      'Auto-compact threshold override cleared',
+    );
   });
 
   const thinkingModelsConfig = () => ({

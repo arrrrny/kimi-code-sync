@@ -260,6 +260,11 @@ describe('resolveSlashCommandInput', () => {
       name: 'compact-threshold-k',
       args: '120',
     });
+    expect(resolve('/compact-threshold 0.5', { isCompacting: true })).toMatchObject({
+      kind: 'builtin',
+      name: 'compact-threshold',
+      args: '0.5',
+    });
   });
 
   it('blocks plan clear while compacting because it is idle-only', () => {
