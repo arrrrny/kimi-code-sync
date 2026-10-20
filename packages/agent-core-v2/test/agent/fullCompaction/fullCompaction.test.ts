@@ -3242,6 +3242,66 @@ describe('FullCompaction', () => {
     await ctx.expectResumeMatches();
   });
 
+  it('drops the observed provider context window when the compaction threshold changes', async () => {
+    let callCount = 0;
+    const generate: GenerateFn = requesterFromGenerateFn(async (_provider, _system, _tools, _history, callbacks) => {
+      callCount += 1;
+      if (callCount === 1) {
+        throw new APIContextOverflowError(400, 'Context length exceeded', 'req-observed-window');
+      }
+      if (callCount === 2) {
+        return textResult('Observed recovery summary.');
+      }
+      if (callCount === 3) {
+        await callbacks?.onMessagePart?.({
+          type: 'text',
+          text: 'Recovered after observed overflow.',
+        });
+        return textResult('Recovered after observed overflow.');
+      }
+      if (callCount === 4) {
+        await callbacks?.onMessagePart?.({
+          type: 'text',
+          text: 'Answered against the declared window.',
+        });
+        return textResult('Answered against the declared window.');
+      }
+      throw new Error(`Unexpected generate call ${String(callCount)}`);
+    });
+    const ctx = testAgent({ generate });
+    ctx.configure({
+      provider: CATALOGUED_PROVIDER,
+      modelCapabilities: {
+        ...CATALOGUED_MODEL_CAPABILITIES,
+        max_context_tokens: 200_000,
+      },
+      tools: SNAPSHOT_VISIBLE_TOOLS,
+    });
+    ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
+    ctx.newEvents();
+
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'learn observed window' }] });
+    await ctx.untilTurnEnd();
+    expect(callCount).toBe(3);
+
+    void ctx.rpc.setCompactionTriggerRatio({ ratio: 0.9 });
+
+    ctx.appendExchange(2, 'near observed user', 'near observed assistant', 120_000);
+    ctx.newEvents();
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'use the declared window' }] });
+    const events = await ctx.untilTurnEnd();
+
+    expect(callCount).toBe(4);
+    expect(eventIndex(events, 'compaction.started')).toBe(-1);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        event: 'turn.ended',
+        args: expect.objectContaining({ turnId: 2, reason: 'completed' }),
+      }),
+    );
+    await ctx.expectResumeMatches();
+  });
+
   it('triggers preemptive compaction against the declared input cap, not the total window', async () => {
     let callCount = 0;
     const generate: GenerateFn = requesterFromGenerateFn(async (_provider, _system, _tools, _history, callbacks) => {

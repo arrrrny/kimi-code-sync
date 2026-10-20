@@ -146,3 +146,13 @@ packages/node-sdk/src/sdk-rpc-client-v2.ts         :: supportsAtomicSectionRepla
 packages/node-sdk/src/index.ts                     :: removeProviderFromConfig
 apps/kimi-code/src/tui/controllers/auth-flow.ts    :: refreshCatalogProviderModels
 apps/kimi-code/src/tui/kimi-tui.ts                 :: rotateToNextFavoriteModel
+
+# --- compaction threshold settable while a turn is streaming (PR #113) ---
+# The two threshold commands are 'always' in the fork's command registry, and
+# the engine keeps clearing the observed context-overflow window when the
+# threshold changes (fork fix a73a5c1e6). The tests below pin that fork-only
+# behavior; upstream keeps the commands 'idle-only' and has neither test.
+apps/kimi-code/src/tui/commands/registry.ts         :: a mid-turn change can move the compaction trigger point
+apps/kimi-code/test/tui/commands/resolve.test.ts    :: keeps the compaction-threshold commands usable while streaming and compacting
+apps/kimi-code/test/tui/kimi-tui-message-flow.test.ts :: applies /compact-threshold-k while a turn is streaming
+packages/agent-core-v2/test/agent/fullCompaction/fullCompaction.test.ts :: drops the observed provider context window when the compaction threshold changes

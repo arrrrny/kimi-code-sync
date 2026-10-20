@@ -1,8 +1,9 @@
 /**
  * Scenario: /update-all-session-models command behavior in the interactive TUI.
- * Responsibilities: reuse /model's picker UX, show the active-session count and
- * require confirmation, apply the chosen model to every active session (current
- * included), skip/fail resiliently, and persist the new-session default.
+ * Responsibilities: reuse /model's picker UX, scope the switch to the sessions
+ * the user actually works in, reload the current session so the new model
+ * applies to the next message, require confirmation, apply the chosen model,
+ * skip/fail resiliently, and persist the new-session default.
  * Wiring: real command + dialogs with the SDK/session boundaries stubbed by a
  * small host rig.
  * Run: pnpm -C apps/kimi-code exec vitest run test/tui/commands/update-all-session-models.test.ts
@@ -34,12 +35,21 @@ function model(name: string): ModelAlias {
   } as unknown as ModelAlias;
 }
 
-function makeSession(id: string): Session {
+function makeSession(id: string, initialModel = 'k2'): Session {
+  const state = { model: initialModel };
   return {
     id,
     workDir: '/tmp/work',
-    setModel: vi.fn(async () => {}),
+    setModel: vi.fn(async (alias: string) => {
+      state.model = alias;
+    }),
+    getStatus: vi.fn(async () => ({ model: state.model })),
+    getModelAlias: vi.fn(async () => state.model),
   } as unknown as Session;
+}
+
+function summary(id: string, updatedAt: number, workDir = '/tmp/work'): SessionSummary {
+  return { id, workDir, sessionDir: workDir, createdAt: 0, updatedAt };
 }
 
 function makeHost(options?: RigOptions) {
@@ -54,26 +64,28 @@ function makeHost(options?: RigOptions) {
     transcriptEntries: [],
     model: 'k2',
     thinkingEffort: 'off',
+    workDir: '/tmp/work',
+    streamingPhase: 'idle',
   };
   const listed: readonly SessionSummary[] =
-    options?.listed ?? [
-      {
-        id: 'ses-other',
-        workDir: '/tmp/work',
-        sessionDir: '/tmp/work',
-        createdAt: 0,
-        updatedAt: 0,
-      },
-    ];
+    options?.listed ?? [summary('ses-other', 10)];
   const host = {
     state: { appState, transcriptEntries: [] },
     session: current,
     harness: {
-      listSessions: vi.fn(async () => listed),
+      listSessions: vi.fn(async (input?: { workDir?: string }) =>
+        input?.workDir === undefined
+          ? listed
+          : listed.filter((s) => s.workDir === input.workDir),
+      ),
       getSession: vi.fn(() => options?.getSessionReturns),
       resumeSession: vi.fn(async (input: { id: string }) =>
         options?.resumeRejects ? Promise.reject(new Error('model k2 not found')) : input.id === 'ses-other' ? other : makeSession(input.id),
       ),
+      reloadSession: vi.fn(async (input: { id: string }) => {
+        const session = input.id === 'ses-current' ? current : makeSession(input.id);
+        return session;
+      }),
       getConfig: vi.fn(async () => ({})),
       setConfig: vi.fn(async () => ({})),
     },
@@ -83,6 +95,7 @@ function makeHost(options?: RigOptions) {
     setAppState: vi.fn((patch: Record<string, unknown>) => Object.assign(appState, patch)),
     mountEditorReplacement: vi.fn(),
     restoreEditor: vi.fn(),
+    reloadCurrentSessionView: vi.fn(async () => {}),
     showStatus: vi.fn(),
     showError: vi.fn(),
     showNotice: vi.fn(),
@@ -92,10 +105,12 @@ function makeHost(options?: RigOptions) {
       listSessions: ReturnType<typeof vi.fn>;
       getSession: ReturnType<typeof vi.fn>;
       resumeSession: ReturnType<typeof vi.fn>;
+      reloadSession: ReturnType<typeof vi.fn>;
       setConfig: ReturnType<typeof vi.fn>;
     };
     session: Session;
     mountEditorReplacement: ReturnType<typeof vi.fn>;
+    reloadCurrentSessionView: ReturnType<typeof vi.fn>;
     showStatus: ReturnType<typeof vi.fn>;
     showError: ReturnType<typeof vi.fn>;
     showNotice: ReturnType<typeof vi.fn>;
@@ -134,14 +149,16 @@ describe('handleUpdateAllSessionModelsCommand', () => {
     await handleUpdateAllSessionModelsCommand(host, '');
     picker(host).onSelect(SELECTION);
     const dialog = confirmDialog(host);
-    expect(dialog.title).toContain('2 active sessions');
+    expect(dialog.title).toContain('2 sessions');
 
     dialog.onResolve(true);
 
     await vi.waitFor(() => {
       expect(current.setModel).toHaveBeenCalledWith('cheap');
     });
-    expect(other.setModel).toHaveBeenCalledWith('cheap');
+    await vi.waitFor(() => {
+      expect(other.setModel).toHaveBeenCalledWith('cheap');
+    });
     expect(host.harness.setConfig).toHaveBeenCalledWith({ defaultModel: 'cheap' });
     expect(host.setAppState).toHaveBeenCalledWith({ model: 'cheap' });
     expect(host.showStatus).toHaveBeenCalled();
@@ -174,6 +191,152 @@ describe('handleUpdateAllSessionModelsCommand', () => {
     // The current session still switches; the unresolvable one is reported, not fatal.
     expect(current.setModel).toHaveBeenCalledWith('cheap');
     expect(host.showStatus).toHaveBeenCalled();
+  });
+});
+
+describe('handleUpdateAllSessionModelsCommand — scope', () => {
+  it('only targets the current workspace by default', async () => {
+    const { host } = makeHost({
+      listed: [
+        summary('ses-here', 30, '/tmp/work'),
+        summary('ses-elsewhere', 20, '/tmp/other'),
+      ],
+    });
+
+    await handleUpdateAllSessionModelsCommand(host, '');
+
+    expect(host.harness.listSessions).toHaveBeenCalledWith({ workDir: '/tmp/work' });
+    picker(host).onSelect(SELECTION);
+    expect(confirmDialog(host).title).toContain('2 sessions');
+  });
+
+  it('reaches every non-archived session with --all', async () => {
+    const { host } = makeHost({
+      listed: [
+        summary('ses-here', 30, '/tmp/work'),
+        summary('ses-elsewhere', 20, '/tmp/other'),
+      ],
+    });
+
+    await handleUpdateAllSessionModelsCommand(host, '--all');
+
+    expect(host.harness.listSessions).toHaveBeenCalledWith();
+    picker(host).onSelect(SELECTION);
+    // The current session plus both listed sessions.
+    expect(confirmDialog(host).title).toContain('3 sessions');
+  });
+
+  it('keeps only the most recently used sessions of the scope', async () => {
+    const listed = Array.from({ length: 30 }, (_, index) =>
+      summary(`ses-${String(index)}`, index, '/tmp/work'),
+    );
+    const { host } = makeHost({ listed });
+
+    await handleUpdateAllSessionModelsCommand(host, '');
+
+    const dialog = (picker(host).onSelect(SELECTION), confirmDialog(host));
+    // The current session plus the 20 most recent of the scope.
+    expect(dialog.title).toContain('21 sessions');
+    expect(dialog.body.join(' ')).toContain('30 sessions exist');
+  });
+
+  it('applies to the current session even when the scope does not list it', async () => {
+    const { host, current } = makeHost({ listed: [] });
+
+    await handleUpdateAllSessionModelsCommand(host, '');
+    picker(host).onSelect(SELECTION);
+    confirmDialog(host).onResolve(true);
+
+    await vi.waitFor(() => {
+      expect(current.setModel).toHaveBeenCalledWith('cheap');
+    });
+  });
+});
+
+describe('handleUpdateAllSessionModelsCommand — the change takes effect', () => {
+  it('reloads the current session so the next message uses the new model', async () => {
+    const { host, current } = makeHost();
+
+    await handleUpdateAllSessionModelsCommand(host, '');
+    picker(host).onSelect(SELECTION);
+    confirmDialog(host).onResolve(true);
+
+    await vi.waitFor(() => {
+      expect(host.harness.reloadSession).toHaveBeenCalledWith({
+        id: 'ses-current',
+        forcePluginSessionStartReminder: true,
+      });
+    });
+    expect(host.reloadCurrentSessionView).toHaveBeenCalled();
+    expect(host.reloadCurrentSessionView.mock.calls[0]![0]).toBe(current);
+  });
+
+  it('switches and reloads the current session before the other sessions', async () => {
+    // The order is the fix: the open session must be switched and
+    // re-materialized first, or it keeps the old model for the whole
+    // (potentially minutes-long) run over the other sessions.
+    const { host, current, other } = makeHost();
+
+    await handleUpdateAllSessionModelsCommand(host, '');
+    picker(host).onSelect(SELECTION);
+    confirmDialog(host).onResolve(true);
+
+    await vi.waitFor(() => {
+      expect(other.setModel).toHaveBeenCalledWith('cheap');
+    });
+    const currentSwitch = vi.mocked(current.setModel).mock.invocationCallOrder[0]!;
+    const reload = host.harness.reloadSession.mock.invocationCallOrder[0]!;
+    const otherSwitch = vi.mocked(other.setModel).mock.invocationCallOrder[0]!;
+    expect(currentSwitch).toBeLessThan(otherSwitch);
+    expect(reload).toBeLessThan(otherSwitch);
+  });
+
+  it('reports a failed reload as a failure and keeps the old model in the footer', async () => {
+    // The read-back proves the profile changed; only the reload makes the
+    // agent use it. A reload that failed leaves the session on the old model,
+    // so it must not be counted as a success.
+    const { host } = makeHost();
+    host.harness.reloadSession.mockRejectedValueOnce(new Error('reload exploded'));
+
+    await handleUpdateAllSessionModelsCommand(host, '');
+    picker(host).onSelect(SELECTION);
+    confirmDialog(host).onResolve(true);
+
+    await vi.waitFor(() => {
+      expect(host.showNotice).toHaveBeenCalled();
+    });
+    expect(host.showNotice.mock.calls[0]![1]).toContain('reload exploded');
+    // The current session is the failed one; the other session still switched.
+    expect(host.showStatus).toHaveBeenCalledWith(expect.stringContaining('1 failed'), 'warning');
+    // The footer keeps the old model: the session still runs on it.
+    expect(host.setAppState).not.toHaveBeenCalledWith({ model: 'cheap' });
+  });
+
+  it('reports a session whose model did not change instead of claiming success', async () => {
+    const { host, current } = makeHost();
+    vi.mocked(current.setModel).mockImplementationOnce(async () => {});
+
+    await handleUpdateAllSessionModelsCommand(host, '');
+    picker(host).onSelect(SELECTION);
+    confirmDialog(host).onResolve(true);
+
+    await vi.waitFor(() => {
+      expect(host.showNotice).toHaveBeenCalled();
+    });
+    expect(host.showNotice.mock.calls[0]![1]).toContain('model is still k2');
+    expect(host.harness.reloadSession).not.toHaveBeenCalled();
+  });
+
+  it('refuses to run while a turn is streaming', async () => {
+    const { host } = makeHost();
+    (host.state.appState as { streamingPhase: string }).streamingPhase = 'streaming';
+
+    await handleUpdateAllSessionModelsCommand(host, '');
+
+    expect(host.showError).toHaveBeenCalledWith(
+      'Cannot update session models while streaming — press Esc or Ctrl-C first.',
+    );
+    expect(host.mountEditorReplacement).not.toHaveBeenCalled();
   });
 });
 
@@ -280,6 +443,6 @@ describe('handleUpdateAllSessionModelsCommand — crash safety and UI reflection
     // No throw: the synthesized summary falls back to the session id, and the
     // confirm dialog still reports the current session in its count.
     const dialog = confirmDialog(host);
-    expect(dialog.title).toContain('1 active session');
+    expect(dialog.title).toContain('1 session');
   });
 });
