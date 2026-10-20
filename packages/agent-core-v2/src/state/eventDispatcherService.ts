@@ -202,7 +202,7 @@ export class EventDispatcherService extends Service implements IEventDispatcher 
     readonly resolve: (disposable: IDisposable) => void;
     readonly reject: (error: unknown) => void;
   }> = [];
-  private lateAttachTail: Promise<unknown> = Promise.resolve();
+  private lateAttachTail: Promise<unknown> | undefined;
 
   constructor(
     @IWireService private readonly wire: IWireService,
@@ -297,11 +297,18 @@ export class EventDispatcherService extends Service implements IEventDispatcher 
   }
 
   private attachLateNow(participant: DurableAgentRuntimeParticipant): Promise<IDisposable> {
-    const run = this.lateAttachTail.then(() => this.runLateAttach(participant));
-    this.lateAttachTail = run.then(
+    const previous = this.lateAttachTail;
+    const run = previous === undefined
+      ? this.runLateAttach(participant)
+      : previous.then(() => this.runLateAttach(participant));
+    const settled = run.then(
       () => undefined,
       () => undefined,
     );
+    this.lateAttachTail = settled;
+    void settled.then(() => {
+      if (this.lateAttachTail === settled) this.lateAttachTail = undefined;
+    });
     return run;
   }
 
@@ -756,7 +763,7 @@ export class EventDispatcherService extends Service implements IEventDispatcher 
       this.dispatchingSince = Date.now();
     }
     try {
-      await this.lateAttachTail;
+      if (this.lateAttachTail !== undefined) await this.lateAttachTail;
       if (rerun) {
         await this.wire.flush();
         this.resetReplayState();
