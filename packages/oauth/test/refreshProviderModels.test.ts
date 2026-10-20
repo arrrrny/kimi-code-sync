@@ -524,7 +524,7 @@ describe('refreshProviderModels', () => {
         'a/m1': {
           provider: 'a',
           model: 'm1',
-          maxContextSize: 131072,
+          maxContextSize: 262144,
           capabilities: ['tool_use'],
           displayName: 'm1',
         },
@@ -587,7 +587,7 @@ describe('refreshProviderModels', () => {
     expect(host.current().models?.['b/m1']).toEqual({
       provider: 'b',
       model: 'm1',
-      maxContextSize: 131072,
+      maxContextSize: 262144,
       capabilities: ['tool_use'],
       displayName: 'm1',
     });
@@ -616,21 +616,21 @@ describe('refreshProviderModels', () => {
         'a/m1': {
           provider: 'a',
           model: 'm1',
-          maxContextSize: 131072,
+          maxContextSize: 262144,
           capabilities: ['tool_use'],
           displayName: 'm1',
         },
         'b/m1': {
           provider: 'b',
           model: 'm1',
-          maxContextSize: 131072,
+          maxContextSize: 262144,
           capabilities: ['tool_use'],
           displayName: 'm1',
         },
         'my-b': {
           provider: 'b',
           model: 'm1',
-          maxContextSize: 131072,
+          maxContextSize: 262144,
           capabilities: ['tool_use'],
           displayName: 'My B',
         },
@@ -709,14 +709,14 @@ describe('refreshProviderModels', () => {
         'a/m1': {
           provider: 'a',
           model: 'm1',
-          maxContextSize: 131072,
+          maxContextSize: 262144,
           capabilities: ['tool_use'],
           displayName: 'm1',
         },
         'b/m1': {
           provider: 'b',
           model: 'm1',
-          maxContextSize: 131072,
+          maxContextSize: 262144,
           capabilities: ['tool_use'],
           displayName: 'm1',
         },
@@ -784,7 +784,7 @@ describe('refreshProviderModels', () => {
     expect(host.current().models?.['b/m2']).toEqual({
       provider: 'b',
       model: 'm2',
-      maxContextSize: 131072,
+      maxContextSize: 262144,
       capabilities: ['tool_use'],
       displayName: 'm2',
     });
@@ -1374,7 +1374,7 @@ describe('refreshProviderModels', () => {
         'custom/m1': {
           provider: 'custom',
           model: 'm1',
-          maxContextSize: 131072,
+          maxContextSize: 262144,
           capabilities: ['tool_use'],
           displayName: 'm1',
         },

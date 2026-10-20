@@ -83,6 +83,7 @@ interface SetActiveToolsPayload { readonly names: readonly string[] }
 interface SetModelPayload { readonly model: string }
 interface SetPermissionPayload { readonly mode: PermissionMode }
 interface SetThinkingPayload { readonly level: string }
+interface SetCompactionTriggerRatioPayload { readonly ratio?: number | undefined }
 interface StopTaskPayload { readonly taskId: string; readonly reason?: string }
 interface UndoHistoryPayload { readonly count: number }
 interface UnregisterToolPayload { readonly name: string }
@@ -111,7 +112,6 @@ import { ProtocolAdapterRegistry } from '#/llm-adapter/protocol/protocolAdapterR
 import { summarizeSkill, type SkillCatalog } from '#/features/skill/catalog/types';
 import { type ModelCapability } from '#/llm-adapter/contract/capability';
 import { isToolCall, isToolCallPart, type ContentPart, type Message as KosongMessage, type StreamedMessagePart } from '#/llm-adapter/contract/message';
-import { type ThinkingEffort } from '#human/llm/thinking';
 import { type Tool as KosongTool } from '#/llm-adapter/contract/message';
 import { type TokenUsage } from '#human/llm/usage';
 import type { AgentLLMRequestSource } from '#/agent/llmRequester/llmRequester';
@@ -371,6 +371,7 @@ interface AgentRpcPassthroughAPI {
   runShellCommand: (payload: RunShellCommandPayload) => Promisable<ShellCommandResult>;
   cancelShellCommand: (payload: CancelShellCommandPayload) => void;
   setThinking: (payload: SetThinkingPayload) => void;
+  setCompactionTriggerRatio: (payload: SetCompactionTriggerRatioPayload) => void;
   setModel: (payload: SetModelPayload) => Promisable<SetModelResult>;
   getModel: (payload: EmptyPayload) => string;
   enterPlan: (payload: EmptyPayload) => Promisable<void>;
@@ -2222,6 +2223,8 @@ export class AgentTestContext {
       cancelShellCommand: (payload) =>
         this.get(IAgentShellCommandService).cancel(payload.commandId),
       setThinking: (payload) => this.get(IAgentProfileService).setThinking(payload.level),
+      setCompactionTriggerRatio: (payload) =>
+        this.get(IAgentProfileService).setCompactionTriggerRatio(payload.ratio),
       setModel: (payload) => this.get(IAgentProfileService).setModel(payload.model),
       getModel: () => this.get(IAgentProfileService).getModel(),
       enterPlan: () => this.get(IAgentPlanService).enter(),
@@ -2725,7 +2728,7 @@ function configWithProvider(
     ...config,
     providers: {
       ...config.providers,
-      [providerName]: providerConfigForAlias(provider),
+      [providerName]: { ...config.providers[providerName], ...providerConfigForAlias(provider) },
     },
     models: {
       ...config.models,

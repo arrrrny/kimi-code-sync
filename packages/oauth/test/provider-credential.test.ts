@@ -34,6 +34,54 @@ describe('declaredProviderCredential', () => {
     });
   });
 
+  it('resolves the active named key as the inline credential', () => {
+    expect(
+      declaredProviderCredential(
+        {
+          apiKeys: { k1: { key: 'sk-first' }, k2: { key: 'sk-second' } },
+          activeApiKeyId: 'k2',
+          apiKey: 'sk-legacy',
+        },
+        'acme',
+      ),
+    ).toEqual({ kind: 'inline', apiKey: 'sk-second' });
+  });
+
+  it('falls back to apiKey when the active named key is missing or blank', () => {
+    expect(
+      declaredProviderCredential(
+        { apiKeys: { k1: { key: 'sk-first' } }, activeApiKeyId: 'ghost', apiKey: 'sk-legacy' },
+        'acme',
+      ),
+    ).toEqual({ kind: 'inline', apiKey: 'sk-legacy' });
+    expect(
+      declaredProviderCredential(
+        { apiKeys: { k1: { key: '   ' } }, activeApiKeyId: 'k1', apiKey: 'sk-legacy' },
+        'acme',
+      ),
+    ).toEqual({ kind: 'inline', apiKey: 'sk-legacy' });
+  });
+
+  it('names apiKeys when a rotation provider conflicts with the declared fields', () => {
+    const withEnv = declaredProviderCredential(
+      { apiKeys: { k1: { key: 'sk-a' } }, activeApiKeyId: 'k1', apiKeyEnv: 'ACME_KEY' },
+      'acme',
+    );
+    expect(withEnv.kind).toBe('conflict');
+    if (withEnv.kind !== 'conflict') return;
+    expect(withEnv.message).toContain('apiKeys');
+    expect(withEnv.message).toContain('apiKeyEnv');
+
+    const withOAuth = declaredProviderCredential(
+      { apiKeys: { k1: { key: 'sk-a' } }, activeApiKeyId: 'k1', oauth: { storage: 'file', key: 'k' } },
+      'acme',
+    );
+    expect(withOAuth.kind).toBe('conflict');
+    if (withOAuth.kind !== 'conflict') return;
+    expect(withOAuth.message).toContain('apiKeys');
+    expect(withOAuth.message).toContain('oauth');
+  });
+
   it.each([
     [{ apiKey: 'sk-a', apiKeyEnv: 'ACME_KEY' }, 'apiKey', 'apiKeyEnv'],
     [{ apiKeyEnv: 'ACME_KEY', oauth: { storage: 'file', key: 'k' } }, 'apiKeyEnv', 'oauth'],

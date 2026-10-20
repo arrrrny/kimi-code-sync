@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   MAX_REVIEW_ROUNDS,
@@ -3204,16 +3204,17 @@ describe('concurrent state writes', () => {
     });
 
     let heldContent = '';
-    for (;;) {
-      try {
-        heldContent = await readFile(lockPath, 'utf8');
-        break;
-      } catch {
-        await new Promise<void>((resolve) => {
-          setTimeout(resolve, 10);
-        });
-      }
-    }
+    await vi.waitFor(
+      async () => {
+        try {
+          heldContent = await readFile(lockPath, 'utf8');
+        } catch {
+          return;
+        }
+        expect(heldContent).toMatch(/pid=\d+ since=\S+ token=[0-9a-f-]+/);
+      },
+      { timeout: 5000, interval: 10 },
+    );
     expect(heldContent).toMatch(/pid=\d+ since=\S+ token=[0-9a-f-]+/);
 
     openGate();

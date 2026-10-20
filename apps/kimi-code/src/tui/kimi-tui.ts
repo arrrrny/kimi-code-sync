@@ -65,6 +65,7 @@ import {
   type KimiSlashCommand,
   type SkillListSession,
 } from './commands';
+import { rotateToNextFavoriteModel } from './commands/config';
 import * as slashCommands from './commands/dispatch';
 import { CacheHintController } from './controllers/cache-hint-controller';
 import { BannerComponent } from './components/chrome/banner';
@@ -307,6 +308,7 @@ function createInitialAppState(input: KimiTUIStartupInput): AppState {
     upgrade: input.tuiConfig.upgrade,
     statusLine: input.tuiConfig.statusLine,
     markdown: input.tuiConfig.markdown,
+    favoriteModels: input.tuiConfig.favoriteModels ?? [],
     availableModels: {},
     availableProviders: {},
     sessionTitle: null,
@@ -838,13 +840,21 @@ export class KimiTUI {
       const result = await this.authFlow.refreshProviderModels();
       for (const c of result.changed) {
         if (c.added <= 0) continue;
-        this.showStatus(`${c.provider_name} · +${String(c.added)} model${c.added > 1 ? 's' : ''}.`);
+        this.showStatus(`${c.providerName} · +${String(c.added)} model${c.added > 1 ? 's' : ''}.`);
       }
       for (const f of result.failed) {
         this.showStatus(`Skipped refreshing ${f.provider}: ${f.reason}`, 'warning');
       }
-      if (result.retired_default !== undefined) {
-        await this.modelMigration.retire(result.retired_default);
+      if (result.retiredDefault !== undefined) {
+        // The oauth orchestrator carries the dropped model's full record; the
+        // migration controller (shared with the harness wire path) names it
+        // through a display string.
+        const { from, to, fromModel } = result.retiredDefault;
+        await this.modelMigration.retire({
+          from,
+          to,
+          from_display_name: fromModel.displayName ?? from,
+        });
       }
     } catch {
       // Best-effort: startup must not crash on background refresh failures.
@@ -1290,6 +1300,12 @@ export class KimiTUI {
 
   handlePlanToggle(next: boolean): void {
     void slashCommands.handlePlanCommand(this, next ? 'on' : 'off');
+  }
+
+  /** Alt+M: rotate the session model through the favorite models (see
+   * commands/config.ts `rotateToNextFavoriteModel`). */
+  rotateFavoriteModels(): void {
+    void rotateToNextFavoriteModel(this);
   }
 
   handleInputModeChange(mode: 'prompt' | 'bash'): void {
@@ -3242,11 +3258,11 @@ export class KimiTUI {
   private createTranscriptComponent(entry: TranscriptEntry): Component | null {
     if (entry.compactionData !== undefined) {
       const data = entry.compactionData;
-      const block = new CompactionComponent(this.state.ui, data.instruction);
+      const block = new CompactionComponent(this.state.ui, data.instruction, undefined, data.model);
       if (data.result === 'cancelled') {
         block.markCanceled();
       } else {
-        block.markDone(data.tokensBefore, data.tokensAfter, data.summary);
+        block.markDone(data.tokensBefore, data.tokensAfter, data.summary, data.handoffPath);
         if (this.state.toolOutputExpanded) {
           block.setExpanded(true);
         }

@@ -9694,7 +9694,7 @@ capabilities = ["image_in", "video_in"]
 
       await vi.waitFor(() => {
         expect(session.installPlugin).toHaveBeenCalledWith(
-          'https://code.kimi.com/kimi-code/plugins/official/kimi-datasource.zip',
+          expect.stringMatching(/^https:\/\/code\.kimi\.(com|ai)\/kimi-code\/plugins\/official\/kimi-datasource\.zip$/),
         );
       });
       expect(globalThis.fetch).toHaveBeenCalledWith(kimiCodePluginMarketplaceUrl());
@@ -9976,7 +9976,7 @@ capabilities = ["image_in", "video_in"]
     expect(driver.state.appState.thinkingEffort).toBe('on');
   });
 
-  it('applies /model selection to the session only on Alt+S without persisting', async () => {
+  it('applies /model selection to the session only on Shift+S without persisting', async () => {
     const session = makeSession();
     const setConfig = vi.fn(async () => ({ providers: {} }));
     const { driver } = await makeDriver(session, {
@@ -10009,7 +10009,7 @@ capabilities = ["image_in", "video_in"]
       expect(driver.state.editorContainer.children[0]).toBeInstanceOf(TabbedModelSelectorComponent);
     });
     const picker = driver.state.editorContainer.children[0];
-    (picker as TabbedModelSelectorComponent).handleInput(`${ESC}s`);
+    (picker as TabbedModelSelectorComponent).handleInput('S');
 
     await vi.waitFor(() => {
       expect(session.setModel).toHaveBeenCalledWith('turbo');
@@ -10509,10 +10509,13 @@ capabilities = ["image_in", "video_in"]
 
     try {
       process.title = 'kimi-test-runner';
-      driver.handleUserInput('/fork ignored args');
+      driver.handleUserInput('/fork');
 
       await vi.waitFor(() => {
-        expect(forkSession).toHaveBeenCalledWith({ id: 'ses-source' });
+        expect(forkSession).toHaveBeenCalledWith({
+          id: 'ses-source',
+          title: 'Fork: Source title',
+        });
         expect(driver.state.transcriptContainer.render(120).join('\n')).toContain(
           'Session forked (ses-fork). Still in the original session; switch to the fork via /sessions.',
         );
@@ -10611,7 +10614,10 @@ capabilities = ["image_in", "video_in"]
     driver.handleUserInput('/fork');
 
     await vi.waitFor(() => {
-      expect(forkSession).toHaveBeenCalledWith({ id: 'ses-source' });
+      expect(forkSession).toHaveBeenCalledWith({
+        id: 'ses-source',
+        title: 'Fork: ses-source',
+      });
       expect(driver.getCurrentSessionId()).toBe('ses-source');
       expect(driver.state.transcriptContainer.render(120).join('\n')).toContain(
         'Failed to fork session: fork unavailable',

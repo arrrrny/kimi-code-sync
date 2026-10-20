@@ -137,6 +137,8 @@ export const compactionStartedEventSchema = z.object({
   time: z.number().optional(),
   trigger: z.enum(['manual', 'auto']),
   instruction: z.string().optional(),
+  model: z.string().optional(),
+  model_display: z.string().optional(),
 });
 
 export const compactionBlockedEventSchema = z.object({
@@ -167,6 +169,7 @@ export const compactionCompletedEventSchema = z.object({
     keptUserMessageCount: z.number().optional(),
     keptHeadUserMessageCount: z.number().optional(),
     droppedCount: z.number().optional(),
+    handoffPath: z.string().optional(),
   }),
 });
 
