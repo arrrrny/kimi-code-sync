@@ -339,7 +339,7 @@ export function machineEngineAttachBundle(options: CreateMachineEngineOptions): 
   const baseJournal = options.journal;
   const initialTurnId = options.initialTurnId ?? 0;
   const journal = engineJournal(baseJournal, initialTurnId);
-  const store: AgentEventStore = createEventStoreSync({ journal, slices: agentSlices });
+  const store: AgentEventStore = createEventStoreSync({ journal, slices: agentSlices, mutableReplay: true });
   const failureNotice: { current: LlmRecoveryRecord | undefined } = { current: undefined };
   tools.sync();
   return {

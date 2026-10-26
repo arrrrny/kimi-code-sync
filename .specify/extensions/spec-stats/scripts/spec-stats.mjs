@@ -17,10 +17,8 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = process.cwd();
 
 // ---------------------------------------------------------------------------
@@ -49,7 +47,7 @@ function loadConfig() {
       if (!m) continue;
       let v = m[2].trim();
       if (!v || v.startsWith('#')) continue;
-      v = v.replace(/^["']|["']$/g, '');
+      v = v.replaceAll(/^["']|["']$/g, '');
       if (v === 'true') defaults[m[1]] = true;
       else if (v === 'false') defaults[m[1]] = false;
       else if (/^\d+$/.test(v)) defaults[m[1]] = Number(v);
@@ -78,7 +76,7 @@ function listSpecDirs(cfg) {
     .filter((n) => fs.statSync(path.join(dir, n)).isDirectory())
     .filter((n) => /^\d/.test(n))
     .map((n) => ({ dir: n, number: parseInt(n, 10), slug: n.replace(/^\d+-/, '') }))
-    .sort((a, b) => (cfg.sort_by === 'number' ? a.number - b.number : a.dir.localeCompare(b.dir)));
+    .toSorted((a, b) => (cfg.sort_by === 'number' ? a.number - b.number : a.dir.localeCompare(b.dir)));
 }
 
 // ---------------------------------------------------------------------------
@@ -335,7 +333,7 @@ function renderMarkdown(data, _cfg) {
 function openView(data, cfg) {
   const rows = data.specs.filter((s) => s.stage !== 'complete' && s.stage !== 'absent');
   const lines = ['# Spec Stats — Open (not complete)', ''];
-  if (!rows.length) { lines.push('_Nothing open._'); return lines.join('\n'); }
+  if (rows.length === 0) { lines.push('_Nothing open._'); return lines.join('\n'); }
   for (const s of rows) {
     const lu = s.lastUpdated.date || 'unknown';
     const days = lu !== 'unknown'
@@ -565,7 +563,7 @@ function runsView(targets, dryRun) {
     return 'No TDD profile (.specify/memory/tdd-profile.md). Run /speckit.tdd.setup first.';
   }
   const lines = ['# Spec Stats — Runs', ''];
-  if (!targets || !targets.length) { lines.push('_No specs selected and no active feature set._'); return lines.join('\n'); }
+  if (!targets || targets.length === 0) { lines.push('_No specs selected and no active feature set._'); return lines.join('\n'); }
 
   const history = [];
   for (const t of targets) {
@@ -575,9 +573,9 @@ function runsView(targets, dryRun) {
     let status = 'pass', tail = '';
     try {
       tail = execFileSync('sh', ['-c', suite], { cwd: path.join(ROOT, t), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-    } catch (e) {
+    } catch (error) {
       status = 'fail';
-      tail = (e.stdout || '') + (e.stderr || '');
+      tail = (error.stdout || '') + (error.stderr || '');
     }
     const ms = Date.now() - start;
     history.push({ spec: t, status, ms, tail: tail.split('\n').slice(-5).join('\n') });
@@ -667,7 +665,7 @@ function main() {
     let targets;
     if (args.all) {
       targets = listSpecDirs(cfg).map((s) => path.join(cfg.specs_dir, s.dir));
-    } else if (args._.length) {
+    } else if (args._.length > 0) {
       targets = args._.map((t) => t.startsWith(cfg.specs_dir) ? t : path.join(cfg.specs_dir, t));
     } else if (exists(path.join('.specify', 'feature.json'))) {
       targets = [JSON.parse(read(path.join('.specify', 'feature.json'))).feature_directory];
@@ -683,7 +681,7 @@ function main() {
     let targets;
     if (args.all) {
       targets = listSpecDirs(cfg).map((s) => path.join(cfg.specs_dir, s.dir));
-    } else if (args._.length) {
+    } else if (args._.length > 0) {
       targets = args._.map((t) => t.startsWith(cfg.specs_dir) ? t : path.join(cfg.specs_dir, t));
     } else if (exists(path.join('.specify', 'feature.json'))) {
       targets = [JSON.parse(read(path.join('.specify', 'feature.json'))).feature_directory];
