@@ -249,6 +249,8 @@ function makeSession(overrides: Record<string, unknown> = {}) {
     setPermission: vi.fn(async () => {}),
     setPlanMode: vi.fn(async () => {}),
     setSwarmMode: vi.fn(async () => {}),
+    setCompactionTriggerRatio: vi.fn(async () => {}),
+    setCompactionTokenBudget: vi.fn(async () => {}),
     onEvent: vi.fn(() => vi.fn()),
     listMcpServers: vi.fn(async () => []),
     listSkills: vi.fn(async () => []),
@@ -1754,6 +1756,56 @@ describe('KimiTUI message flow', () => {
     });
     expect(harness.createSession).toHaveBeenCalledTimes(1);
     expect(driver.getCurrentSessionId()).toBe('ses-lazy');
+  });
+
+  it('applies /compact-threshold-k while a turn is streaming', async () => {
+    const session = makeSession({ id: 'ses-lazy' });
+    const { driver } = await makeDriver(session);
+    driver.state.appState.streamingPhase = 'waiting';
+
+    driver.handleUserInput('/compact-threshold-k 120');
+
+    await vi.waitFor(() => {
+      expect(session.setCompactionTokenBudget).toHaveBeenCalledWith(120);
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(stripSgr(renderTranscript(driver))).not.toContain('while streaming');
+    expect(stripSgr(renderTranscript(driver))).toContain(
+      'Auto-compact token budget set to 120000 for this session',
+    );
+
+    driver.handleUserInput('/compact-threshold-k off');
+
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(session.setCompactionTokenBudget).toHaveBeenCalledWith(undefined);
+    expect(stripSgr(renderTranscript(driver))).toContain(
+      'Auto-compact token budget override cleared',
+    );
+  });
+
+  it('applies /compact-threshold while a turn is streaming', async () => {
+    const session = makeSession({ id: 'ses-lazy' });
+    const { driver } = await makeDriver(session);
+    driver.state.appState.streamingPhase = 'waiting';
+
+    driver.handleUserInput('/compact-threshold 0.5');
+
+    await vi.waitFor(() => {
+      expect(session.setCompactionTriggerRatio).toHaveBeenCalledWith(0.5);
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(stripSgr(renderTranscript(driver))).not.toContain('while streaming');
+    expect(stripSgr(renderTranscript(driver))).toContain(
+      'Auto-compact threshold set to 0.5 for this session',
+    );
+
+    driver.handleUserInput('/compact-threshold off');
+
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(session.setCompactionTriggerRatio).toHaveBeenCalledWith(undefined);
+    expect(stripSgr(renderTranscript(driver))).toContain(
+      'Auto-compact threshold override cleared',
+    );
   });
 
   const thinkingModelsConfig = () => ({
@@ -10194,7 +10246,7 @@ capabilities = ["image_in", "video_in"]
 
       await vi.waitFor(() => {
         expect(session.installPlugin).toHaveBeenCalledWith(
-          'https://code.kimi.com/kimi-code/plugins/official/kimi-datasource.zip',
+          expect.stringMatching(/^https:\/\/code\.kimi\.(com|ai)\/kimi-code\/plugins\/official\/kimi-datasource\.zip$/),
         );
       });
       expect(globalThis.fetch).toHaveBeenCalledWith(kimiCodePluginMarketplaceUrl());
@@ -10476,7 +10528,7 @@ capabilities = ["image_in", "video_in"]
     expect(driver.state.appState.thinkingEffort).toBe('on');
   });
 
-  it('applies /model selection to the session only on Alt+S without persisting', async () => {
+  it('applies /model selection to the session only on Shift+S without persisting', async () => {
     const session = makeSession();
     const setConfig = vi.fn(async () => ({ providers: {} }));
     const { driver } = await makeDriver(session, {
@@ -10509,7 +10561,7 @@ capabilities = ["image_in", "video_in"]
       expect(driver.state.editorContainer.children[0]).toBeInstanceOf(TabbedModelSelectorComponent);
     });
     const picker = driver.state.editorContainer.children[0];
-    (picker as TabbedModelSelectorComponent).handleInput(`${ESC}s`);
+    (picker as TabbedModelSelectorComponent).handleInput('S');
 
     await vi.waitFor(() => {
       expect(session.setModel).toHaveBeenCalledWith('turbo');
@@ -11009,10 +11061,13 @@ capabilities = ["image_in", "video_in"]
 
     try {
       process.title = 'kimi-test-runner';
-      driver.handleUserInput('/fork ignored args');
+      driver.handleUserInput('/fork');
 
       await vi.waitFor(() => {
-        expect(forkSession).toHaveBeenCalledWith({ id: 'ses-source' });
+        expect(forkSession).toHaveBeenCalledWith({
+          id: 'ses-source',
+          title: 'Fork: Source title',
+        });
         expect(driver.state.transcriptContainer.render(120).join('\n')).toContain(
           'Session forked (ses-fork). Still in the original session; switch to the fork via /sessions.',
         );
@@ -11111,7 +11166,10 @@ capabilities = ["image_in", "video_in"]
     driver.handleUserInput('/fork');
 
     await vi.waitFor(() => {
-      expect(forkSession).toHaveBeenCalledWith({ id: 'ses-source' });
+      expect(forkSession).toHaveBeenCalledWith({
+        id: 'ses-source',
+        title: 'Fork: ses-source',
+      });
       expect(driver.getCurrentSessionId()).toBe('ses-source');
       expect(driver.state.transcriptContainer.render(120).join('\n')).toContain(
         'Failed to fork session: fork unavailable',

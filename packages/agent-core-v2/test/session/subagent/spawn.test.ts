@@ -49,6 +49,7 @@ describe('SessionSubagentService planSpawn and spawn', () => {
   let disposables: DisposableStore;
   let ix: TestInstantiationService;
   let callerData: ProfileData;
+  let callerOverrides: Map<string, string>;
   let profiles: AgentProfile[];
   let modelIds: Set<string>;
   let modelMeta: Map<string, Partial<Model>>;
@@ -74,23 +75,33 @@ describe('SessionSubagentService planSpawn and spawn', () => {
     } as unknown as IAgentUserToolService;
   }
 
-  function profileServiceStub(data: ProfileData): IAgentProfileService {
+  function profileServiceStub(
+    data: ProfileData,
+    overrides: Map<string, string> = new Map(),
+  ): IAgentProfileService {
     return {
       _serviceBrand: undefined,
       data: () => data,
       getActiveToolNames: () => data.activeToolNames,
+      setSessionModelOverride: (kind: string, alias: string | undefined) => {
+        if (alias === undefined) {
+          overrides.delete(kind);
+        } else {
+          overrides.set(kind, alias);
+        }
+      },
+      getSessionModelOverride: (kind: string) => overrides.get(kind),
     } as unknown as IAgentProfileService;
   }
 
   function createdHandle(agentId: string): IAgentScopeHandle {
+    const profile = profileServiceStub({ ...callerData, modelCapabilities: {} as never });
     return {
       id: agentId,
       kind: LifecycleScope.Agent,
       accessor: {
         get: (serviceId: unknown) => {
-          if (serviceId === IAgentProfileService) {
-            return profileServiceStub({ ...callerData, modelCapabilities: {} as never });
-          }
+          if (serviceId === IAgentProfileService) return profile;
           if (serviceId === IAgentPermissionModeService) return createdPermissionMode;
           if (serviceId === IAgentUserToolService) return createdUserTools;
           if (serviceId === IAgentReminderService) return createdReminder;
@@ -112,6 +123,7 @@ describe('SessionSubagentService planSpawn and spawn', () => {
       systemPrompt: 'caller prompt',
       modelCapabilities: {} as never,
     };
+    callerOverrides = new Map();
     profiles = [
       normalizeAgentProfile({
         name: 'coder',
@@ -142,7 +154,7 @@ describe('SessionSubagentService planSpawn and spawn', () => {
       kind: LifecycleScope.Agent,
       accessor: {
         get: (serviceId: unknown) => {
-          if (serviceId === IAgentProfileService) return profileServiceStub(callerData);
+          if (serviceId === IAgentProfileService) return profileServiceStub(callerData, callerOverrides);
           if (serviceId === IAgentPermissionModeService) return callerPermissionMode;
           if (serviceId === IAgentUserToolService) return callerUserTools;
           if (serviceId === IAgentRuntimeService) {
@@ -535,6 +547,23 @@ describe('SessionSubagentService planSpawn and spawn', () => {
 
     expect(createdPermissionMode.setMode).toHaveBeenCalledWith('auto');
     expect(createdUserTools.inheritUserTools).toHaveBeenCalledWith(callerUserTools);
+  });
+
+  it('inherits the caller fallback model overrides', async () => {
+    const callerProfile = caller.accessor.get(IAgentProfileService);
+    callerProfile.setSessionModelOverride('fallback', 'fb-model');
+    callerProfile.setSessionModelOverride('fallbackSecondary', 'fb2-model');
+    callerProfile.setSessionModelOverride('substitute', 'sub-model');
+    callerProfile.setSessionModelOverride('secondary', 'secondary-model');
+    const svc = service();
+
+    await spawnNonForkChild(svc);
+
+    const childProfile = createdHandles.get('agent-child')!.accessor.get(IAgentProfileService);
+    expect(childProfile.getSessionModelOverride('fallback')).toBe('fb-model');
+    expect(childProfile.getSessionModelOverride('fallbackSecondary')).toBe('fb2-model');
+    expect(childProfile.getSessionModelOverride('substitute')).toBe('sub-model');
+    expect(childProfile.getSessionModelOverride('secondary')).toBeUndefined();
   });
 
   it('applies the profile prompt prefix to the spawned prompt', async () => {

@@ -3,6 +3,10 @@ import { z } from 'zod';
 import { type EnvBindings, envBindings, stripEnvBoundFields } from '#/app/config/config';
 import { registerConfigSection } from '#/app/config/configSectionContributions';
 import { plainObjectToToml } from '#/app/config/toml';
+import {
+  COMPACTION_TRIGGER_RATIO_MAX,
+  COMPACTION_TRIGGER_RATIO_MIN,
+} from '#/agent/profile/profile';
 
 export const LOOP_CONTROL_SECTION = 'loopControl';
 
@@ -15,7 +19,8 @@ export const LoopControlSchema = z.object({
   maxAttemptsPerStep: z.number().int().min(0).optional(),
   maxRalphIterations: z.number().int().min(-1).optional(),
   reservedContextSize: z.number().int().min(0).optional(),
-  compactionTriggerRatio: z.number().min(0.5).max(0.99).optional(),
+  compactionTriggerRatio: z.number().min(COMPACTION_TRIGGER_RATIO_MIN).max(COMPACTION_TRIGGER_RATIO_MAX).optional(),
+  compactionTokenBudget: z.number().int().min(1).optional(),
   compactionMaxAttempts: z.number().int().min(1).optional(),
 });
 

@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import { assign, shake } from 'radashi';
+import { ProxyAgent, type Dispatcher } from 'undici';
 
 import { headersToRecord } from '#/llm/errors';
 import type { LlmModel } from '#/llm/model';
@@ -8,6 +9,7 @@ import type { ProtocolBase, ProtocolRequesterOptions, TraitContext } from '#/llm
 import { resolveModelConnection } from '#/llm/protocol/connection';
 import { applyThinking } from '#/llm/protocol/thinking';
 import { resolveMaxCompletionCap, type FormatRequestInput } from '#/llm/protocol/format';
+import { opencodeSessionHeaders } from '#/llm/protocol/session-headers';
 import { encodeReasoningEffortFallback } from '#/llm/thinking';
 import {
   mergeRequestHeaders,
@@ -52,10 +54,17 @@ const OPENAI_RESPONSES_TOOL_CALL_ID_POLICY: ToolCallIdPolicy = {
   maxLength: 64,
 };
 
-function createClient(model: LlmModel, headers: Record<string, string> | undefined): OpenAI {
+function buildProxyDispatcher(model: LlmModel): Dispatcher | undefined {
   const headersTimeoutMs = resolveLlmHeadersTimeoutMs();
-  const dispatcher =
-    headersTimeoutMs === undefined ? undefined : getLlmHeadersTimeoutDispatcher(headersTimeoutMs);
+  if (model.proxyUrl === undefined || model.proxyUrl.length === 0) {
+    return headersTimeoutMs === undefined ? undefined : getLlmHeadersTimeoutDispatcher(headersTimeoutMs);
+  }
+  if (headersTimeoutMs === undefined) return new ProxyAgent(model.proxyUrl);
+  return new ProxyAgent({ uri: model.proxyUrl, headersTimeout: headersTimeoutMs });
+}
+
+function createClient(model: LlmModel, headers: Record<string, string> | undefined): OpenAI {
+  const dispatcher = buildProxyDispatcher(model);
   return new OpenAI({
     apiKey: model.apiKey ?? 'unused',
     baseURL: model.baseUrl,
@@ -116,7 +125,11 @@ export function prepareOpenAIResponsesRequest(
   );
   const params = assembleOpenAIResponsesRequest(input, { input: merged, tools, kwargs });
   const finalParams = trait?.buildParams?.(params, ctx) ?? params;
-  return encodeOpenAIResponsesRequest(finalParams);
+  const headers = opencodeSessionHeaders(input);
+  return {
+    ...encodeOpenAIResponsesRequest(finalParams),
+    ...(headers !== undefined ? { headers } : {}),
+  };
 }
 
 interface OpenAIResponsesTransport {

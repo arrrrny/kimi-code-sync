@@ -40,6 +40,10 @@ const KIMI_CONFIG_DOMAINS = [
   'background',
   'subagent',
   'secondaryModel',
+  'substituteModel',
+  'visualModel',
+  'compactionModel',
+  'fallbackModel',
   'mcp',
   'image',
   'modelCatalog',
@@ -47,6 +51,14 @@ const KIMI_CONFIG_DOMAINS = [
   'telemetry',
   'disableFeedbackSurvey',
 ] as const;
+
+/** Sections whose all-optional v2 schema materializes an empty `{}` default; see {@link resolvedConfigToKimiConfig}. */
+const EMPTY_DEFAULT_SECTIONS: ReadonlySet<string> = new Set([
+  'visualModel',
+  'substituteModel',
+  'compactionModel',
+  'fallbackModel',
+]);
 
 /**
  * Pick the v1-shaped fields out of the v2 engine's resolved config
@@ -59,9 +71,23 @@ export function resolvedConfigToKimiConfig(resolved: Record<string, unknown>): K
   const config: Record<string, unknown> = {};
   for (const domain of KIMI_CONFIG_DOMAINS) {
     const value = resolved[domain];
-    if (value !== undefined) {
-      config[domain] = value;
+    if (value === undefined) continue;
+    // The optional-field model-override sections materialize as `{}` section
+    // defaults on v2 even when unset, while v1 leaves them absent. Omit the
+    // empty form so both engines report an unset section identically; a
+    // configured section is a non-empty object and passes through, which is
+    // what the `/visual-model`, `/substitute-model`, and `/compaction-model`
+    // read-backs need.
+    if (
+      EMPTY_DEFAULT_SECTIONS.has(domain) &&
+      typeof value === 'object' &&
+      value !== null &&
+      !Array.isArray(value) &&
+      Object.keys(value).length === 0
+    ) {
+      continue;
     }
+    config[domain] = value;
   }
   return config as KimiConfig;
 }
@@ -131,5 +157,29 @@ export function planProviderRemoval(input: {
     models,
     clearDefaultModel: removedDefault,
     clearDefaultProvider: input.defaultProvider === input.providerId,
+  };
+}
+/**
+ * Apply the v1 remove-provider cascade to a whole `KimiConfig` in memory (no
+ * persistence): drop the provider entry, every model pointing at it, and the
+ * default pointers when they dangle. Hosts that stage a removal and fold it
+ * into a later atomic write (instead of persisting it immediately) build on
+ * this — the same role the v2 engine's `shapeWithoutProvider` plays for its
+ * own refresh path.
+ */
+export function removeProviderFromConfig(config: KimiConfig, providerId: string): KimiConfig {
+  const plan = planProviderRemoval({
+    providers: config.providers as Record<string, unknown> | undefined,
+    models: config.models as Record<string, Record<string, unknown>> | undefined,
+    defaultModel: config.defaultModel,
+    defaultProvider: config.defaultProvider,
+    providerId,
+  });
+  return {
+    ...config,
+    providers: plan.providers as KimiConfig['providers'],
+    models: plan.models as KimiConfig['models'],
+    defaultModel: plan.clearDefaultModel ? undefined : config.defaultModel,
+    defaultProvider: plan.clearDefaultProvider ? undefined : config.defaultProvider,
   };
 }
