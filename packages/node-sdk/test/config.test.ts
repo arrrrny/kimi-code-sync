@@ -158,6 +158,22 @@ name = "personal"
     });
   });
 
+  it('carries provider free_models_only through a read/write cycle', () => {
+    const config = parseConfigString(`
+[providers.kilo]
+type = "openai"
+base_url = "https://api.kilo.ai/api/gateway"
+free_models_only = true
+`);
+
+    expect(config.providers['kilo']?.freeModelsOnly).toBe(true);
+
+    const written = configToTomlData(config) as {
+      providers: Record<string, Record<string, unknown>>;
+    };
+    expect(written.providers['kilo']).toMatchObject({ free_models_only: true });
+  });
+
   it('accepts a compaction trigger ratio the engine allows and writes it back', async () => {
     const rpc = createKimiConfigRpc();
     const text = `

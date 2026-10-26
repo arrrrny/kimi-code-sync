@@ -599,7 +599,7 @@ describe('refreshProviderCatalog — free_models_only filter', () => {
   it('keeps a model id containing :free (case-insensitive) when free_models_only is true', async () => {
     const config: ManagedKimiConfigShape = {
       providers: {
-        openrouter: { type: 'openai', baseUrl, apiKey: 'sk-or', free_models_only: true },
+        openrouter: { type: 'openai', baseUrl, apiKey: 'sk-or', freeModelsOnly: true },
       },
       telemetry: true,
     };
@@ -623,7 +623,7 @@ describe('refreshProviderCatalog — free_models_only filter', () => {
   it('drops a model id without free when free_models_only is true', async () => {
     const config: ManagedKimiConfigShape = {
       providers: {
-        openrouter: { type: 'openai', baseUrl, apiKey: 'sk-or', free_models_only: true },
+        openrouter: { type: 'openai', baseUrl, apiKey: 'sk-or', freeModelsOnly: true },
       },
       telemetry: true,
     };
@@ -672,7 +672,7 @@ describe('refreshProviderCatalog — free_models_only filter', () => {
   it('keeps every fetched model when free_models_only is false', async () => {
     const config: ManagedKimiConfigShape = {
       providers: {
-        openrouter: { type: 'openai', baseUrl, apiKey: 'sk-or', free_models_only: false },
+        openrouter: { type: 'openai', baseUrl, apiKey: 'sk-or', freeModelsOnly: false },
       },
       telemetry: true,
     };
@@ -698,7 +698,7 @@ describe('refreshProviderCatalog — free_models_only filter', () => {
   it('filters only the provider with the flag; a sibling without it keeps its full catalog', async () => {
     const config: ManagedKimiConfigShape = {
       providers: {
-        openrouter: { type: 'openai', baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'sk-or', free_models_only: true },
+        openrouter: { type: 'openai', baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'sk-or', freeModelsOnly: true },
         kilo: { type: 'openai', baseUrl: 'https://api.kilo.ai/api/gateway', apiKey: 'sk-kilo' },
       },
       telemetry: true,
@@ -731,7 +731,7 @@ describe('refreshProviderCatalog — free_models_only filter', () => {
   it('scoped refresh honors free_models_only identically', async () => {
     const config: ManagedKimiConfigShape = {
       providers: {
-        openrouter: { type: 'openai', baseUrl, apiKey: 'sk-or', free_models_only: true },
+        openrouter: { type: 'openai', baseUrl, apiKey: 'sk-or', freeModelsOnly: true },
       },
       telemetry: true,
     };
@@ -754,7 +754,7 @@ describe('refreshProviderCatalog — free_models_only filter', () => {
   it('enriches only the retained free models (no enrichment attempted on dropped ones)', async () => {
     const config: ManagedKimiConfigShape = {
       providers: {
-        openrouter: { type: 'openai', baseUrl, apiKey: 'sk-or', free_models_only: true },
+        openrouter: { type: 'openai', baseUrl, apiKey: 'sk-or', freeModelsOnly: true },
       },
       telemetry: true,
     };
@@ -812,7 +812,7 @@ describe('refreshProviderCatalog — free_models_only filter', () => {
   it('keeps a free model absent from models.dev (fallback to base id, else provider name/id)', async () => {
     const config: ManagedKimiConfigShape = {
       providers: {
-        openrouter: { type: 'openai', baseUrl, apiKey: 'sk-or', free_models_only: true },
+        openrouter: { type: 'openai', baseUrl, apiKey: 'sk-or', freeModelsOnly: true },
       },
       telemetry: true,
     };
@@ -844,7 +844,7 @@ describe('refreshProviderCatalog — free_models_only filter', () => {
   it('free model with -free suffix (opencode style) is kept when flag is true', async () => {
     const config: ManagedKimiConfigShape = {
       providers: {
-        opencode: { type: 'openai', baseUrl: 'https://opencode.ai/zen/v1', apiKey: 'sk-oc', free_models_only: true },
+        opencode: { type: 'openai', baseUrl: 'https://opencode.ai/zen/v1', apiKey: 'sk-oc', freeModelsOnly: true },
       },
       telemetry: true,
     };
