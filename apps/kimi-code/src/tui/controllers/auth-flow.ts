@@ -200,9 +200,10 @@ export class AuthFlowController {
 
   async refreshOAuthProviderModels(): Promise<RefreshProviderModelsResponse> {
     const result = await this.host.harness.refreshProviderModels({ scope: 'oauth' });
-    if (result.changed.length > 0) {
-      await this.refreshAvailableModels();
-    }
+    // Same rationale as refreshProviderModels: an oauth-scoped refresh rewrites
+    // provider metadata (type, baseUrl, …) while reporting the provider as
+    // unchanged, so reload even when no model changed.
+    await this.refreshAvailableModels();
     return result;
   }
 
