@@ -22,7 +22,8 @@ import {
   type GoalSnapshot,
   type Session,
 } from '@moonshot-ai/kimi-code-sdk';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { resetSurveyPopupConfigCache } from '@moonshot-ai/kimi-code-product/session-rating/node';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApprovalPanelComponent } from '#/tui/components/dialogs/approval-panel';
 import { CacheHintDialogComponent } from '#/tui/components/dialogs/cache-hint-dialog';
@@ -62,6 +63,7 @@ import type { StreamingUIController } from '#/tui/controllers/streaming-ui';
 import type { SurveyController } from '#/tui/controllers/survey-controller';
 import { handleFeedbackCommand } from '#/tui/commands/info';
 import { copyTextToClipboard } from '#/utils/clipboard/clipboard-text';
+import { clientConfigs } from '#/utils/client-configs';
 import { openUrl } from '#/utils/open-url';
 import { createFeedbackArchivePath } from '../../src/feedback/archive';
 import { packageCodebase, scanCodebase } from '../../src/feedback/codebase';
@@ -11427,6 +11429,10 @@ describe('footer ctrl+o hint', () => {
 });
 
 describe('KimiTUI session rating survey', () => {
+  beforeEach(() => {
+    resetSurveyPopupConfigCache(clientConfigs);
+  });
+
   it.each(['startup', 'switch', 'reload'] as const)(
     'reports cumulative user turns after a %s mount',
     async (mount) => {
