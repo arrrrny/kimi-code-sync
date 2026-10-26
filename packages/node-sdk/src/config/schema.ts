@@ -64,7 +64,7 @@ export const ProviderConfigSchema = z.object({
   rotateKeys: z.boolean().optional(),
   baseUrl: z.string().optional(),
   proxyUrl: z.string().optional(),
-  free_models_only: z.boolean().optional(),
+  freeModelsOnly: z.boolean().optional(),
   defaultModel: z.string().optional(),
   oauth: OAuthRefSchema.optional(),
   env: StringRecordSchema.optional(),

@@ -128,7 +128,7 @@ describe.skipIf(!hasOpenRouterKey && !hasOpenCodeKey && !hasKiloKey)('free_model
       async () => {
         const config: ManagedKimiConfigShape = {
           providers: {
-            openrouter: { type: 'openai', baseUrl: OPENROUTER_BASE, apiKey: OPENROUTER_KEY, free_models_only: true },
+            openrouter: { type: 'openai', baseUrl: OPENROUTER_BASE, apiKey: OPENROUTER_KEY, freeModelsOnly: true },
           },
           models: {
             'openrouter/some-paid-model': { provider: 'openrouter', model: 'some-paid-model', maxContextSize: 100000 },
@@ -168,7 +168,7 @@ describe.skipIf(!hasOpenRouterKey && !hasOpenCodeKey && !hasKiloKey)('free_model
       async () => {
         const config: ManagedKimiConfigShape = {
           providers: {
-            opencode: { type: 'openai', baseUrl: OPENCODE_BASE, apiKey: OPENCODE_KEY, free_models_only: true },
+            opencode: { type: 'openai', baseUrl: OPENCODE_BASE, apiKey: OPENCODE_KEY, freeModelsOnly: true },
           },
           models: {
             'opencode/paid-claude-sonnet': { provider: 'opencode', model: 'claude-sonnet-4-5', maxContextSize: 200000 },
@@ -208,7 +208,7 @@ describe.skipIf(!hasOpenRouterKey && !hasOpenCodeKey && !hasKiloKey)('free_model
       async () => {
         const config: ManagedKimiConfigShape = {
           providers: {
-            kilo: { type: 'openai', baseUrl: KILO_BASE, apiKey: KILO_KEY, free_models_only: true },
+            kilo: { type: 'openai', baseUrl: KILO_BASE, apiKey: KILO_KEY, freeModelsOnly: true },
           },
           models: {
             'kilo/paid-claude-opus': { provider: 'kilo', model: 'anthropic/claude-opus-4', maxContextSize: 200000 },
@@ -246,8 +246,8 @@ describe.skipIf(!hasOpenRouterKey && !hasOpenCodeKey && !hasKiloKey)('free_model
       async () => {
         const config: ManagedKimiConfigShape = {
           providers: {
-            openrouter: { type: 'openai', baseUrl: OPENROUTER_BASE, apiKey: OPENROUTER_KEY, free_models_only: true },
-            kilo: { type: 'openai', baseUrl: KILO_BASE, apiKey: KILO_KEY, free_models_only: true },
+            openrouter: { type: 'openai', baseUrl: OPENROUTER_BASE, apiKey: OPENROUTER_KEY, freeModelsOnly: true },
+            kilo: { type: 'openai', baseUrl: KILO_BASE, apiKey: KILO_KEY, freeModelsOnly: true },
             'opencode-go': { type: 'openai', baseUrl: 'https://opencode.ai/zen/go/v1', apiKey: process.env['OPENCODE_GO_API_KEY'] ?? '' },
           },
           models: {
@@ -302,8 +302,8 @@ describe.skipIf(!hasOpenRouterKey && !hasOpenCodeKey && !hasKiloKey)('free_model
       async () => {
         const config: ManagedKimiConfigShape = {
           providers: {
-            openrouter: { type: 'openai', baseUrl: OPENROUTER_BASE, apiKey: OPENROUTER_KEY, free_models_only: true },
-            kilo: { type: 'openai', baseUrl: KILO_BASE, apiKey: KILO_KEY, free_models_only: true },
+            openrouter: { type: 'openai', baseUrl: OPENROUTER_BASE, apiKey: OPENROUTER_KEY, freeModelsOnly: true },
+            kilo: { type: 'openai', baseUrl: KILO_BASE, apiKey: KILO_KEY, freeModelsOnly: true },
           },
           models: {
             'openrouter/old-paid': { provider: 'openrouter', model: 'old-paid', maxContextSize: 100000 },
@@ -344,7 +344,7 @@ describe.skipIf(!hasOpenRouterKey && !hasOpenCodeKey && !hasKiloKey)('free_model
       async () => {
         const config: ManagedKimiConfigShape = {
           providers: {
-            openrouter: { type: 'openai', baseUrl: OPENROUTER_BASE, apiKey: OPENROUTER_KEY, free_models_only: true },
+            openrouter: { type: 'openai', baseUrl: OPENROUTER_BASE, apiKey: OPENROUTER_KEY, freeModelsOnly: true },
           },
           telemetry: true,
         };

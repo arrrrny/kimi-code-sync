@@ -34,7 +34,7 @@ export interface ProviderConfig {
   oauth?: OAuthRef;
   env?: Record<string, string>;
   source?: Record<string, unknown>;
-  free_models_only?: boolean;
+  freeModelsOnly?: boolean;
 }
 
 export type ProvidersSection = Record<string, ProviderConfig>;
