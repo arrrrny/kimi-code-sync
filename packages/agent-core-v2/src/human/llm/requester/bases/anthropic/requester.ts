@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { assign, shake } from 'radashi';
+import { ProxyAgent, type Dispatcher } from 'undici';
 
 import { headersToRecord } from '#/llm/errors';
 import { providerImagePolicy } from '#/llm/media/image-formats';
@@ -9,6 +10,7 @@ import type { ProtocolBase, ProtocolRequesterOptions, TraitContext } from '#/llm
 import { resolveModelConnection } from '#/llm/protocol/connection';
 import { applyThinking } from '#/llm/protocol/thinking';
 import { resolveMaxCompletionCap, type FormatRequestInput } from '#/llm/protocol/format';
+import { opencodeSessionHeaders } from '#/llm/protocol/session-headers';
 import {
   mergeRequestHeaders,
   type LlmClientContext,
@@ -86,10 +88,17 @@ function buildDefaultHeaders(
   return defaultHeaders;
 }
 
-function createClient(model: LlmModel, headers: Record<string, string> | undefined): Anthropic {
+function buildProxyDispatcher(model: LlmModel): Dispatcher | undefined {
   const headersTimeoutMs = resolveLlmHeadersTimeoutMs();
-  const dispatcher =
-    headersTimeoutMs === undefined ? undefined : getLlmHeadersTimeoutDispatcher(headersTimeoutMs);
+  if (model.proxyUrl === undefined || model.proxyUrl.length === 0) {
+    return headersTimeoutMs === undefined ? undefined : getLlmHeadersTimeoutDispatcher(headersTimeoutMs);
+  }
+  if (headersTimeoutMs === undefined) return new ProxyAgent(model.proxyUrl);
+  return new ProxyAgent({ uri: model.proxyUrl, headersTimeout: headersTimeoutMs });
+}
+
+function createClient(model: LlmModel, headers: Record<string, string> | undefined): Anthropic {
+  const dispatcher = buildProxyDispatcher(model);
   return new Anthropic({
     apiKey: model.apiKey ?? 'unused',
     authToken: null,
@@ -157,7 +166,11 @@ export function prepareAnthropicRequest(
     betaApi: options?.betaApi === true,
   });
   const finalParams = trait?.buildParams?.(assembly.params, ctx) ?? assembly.params;
-  return encodeAnthropicRequest({ ...assembly, params: finalParams });
+  const headers = opencodeSessionHeaders(input);
+  return {
+    ...encodeAnthropicRequest({ ...assembly, params: finalParams }),
+    ...(headers !== undefined ? { headers } : {}),
+  };
 }
 
 interface AnthropicTransport {
@@ -183,7 +196,12 @@ async function executeAnthropicRequest(
     !request.useBetaApi && request.betas.length > 0
       ? { 'anthropic-beta': request.betas.join(',') }
       : undefined;
-  const requestOptions = { signal, headers: betaHeaders };
+  const sessionHeaders = request.headers;
+  const mergedHeaders =
+    betaHeaders === undefined && sessionHeaders === undefined
+      ? undefined
+      : { ...sessionHeaders, ...betaHeaders };
+  const requestOptions = { signal, ...(mergedHeaders !== undefined ? { headers: mergedHeaders } : {}) };
   const { data: stream, response } = request.useBetaApi
     ? await client.beta.messages.create(request.params, requestOptions).withResponse()
     : await client.messages.create(request.params, requestOptions).withResponse();

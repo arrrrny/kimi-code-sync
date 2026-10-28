@@ -192,7 +192,6 @@ export class EventDispatcherService extends Service implements IEventDispatcher 
 
   restorePhase: RestorePhase = 'new';
   private dispatching = false;
-  private lateAttachmentTail: Promise<void> | undefined;
   private dispatchingSince: number | undefined;
   private queueStuckWarned = false;
   private disposed = false;
@@ -204,6 +203,7 @@ export class EventDispatcherService extends Service implements IEventDispatcher 
     readonly resolve: (disposable: IDisposable) => void;
     readonly reject: (error: unknown) => void;
   }> = [];
+  private lateAttachTail: Promise<unknown> | undefined;
 
   constructor(
     @IWireService private readonly wire: IWireService,
@@ -294,19 +294,26 @@ export class EventDispatcherService extends Service implements IEventDispatcher 
         `Agent runtime participant '${participant.id}' late-attached while the event dispatcher is in phase '${this.restorePhase}'; late attach requires a restored dispatcher`,
       );
     }
-    const previous = this.lateAttachmentTail;
-    const pending = previous === undefined
-      ? this.attachLateNow(participant)
-      : previous.then(() => this.attachLateNow(participant));
-    const settled = pending.then(() => {}, () => {});
-    this.lateAttachmentTail = settled;
-    void settled.then(() => {
-      if (this.lateAttachmentTail === settled) this.lateAttachmentTail = undefined;
-    });
-    return pending;
+    return this.attachLateNow(participant);
   }
 
-  private async attachLateNow(participant: DurableAgentRuntimeParticipant): Promise<IDisposable> {
+  private attachLateNow(participant: DurableAgentRuntimeParticipant): Promise<IDisposable> {
+    const previous = this.lateAttachTail;
+    const run = previous === undefined
+      ? this.runLateAttach(participant)
+      : previous.then(() => this.runLateAttach(participant));
+    const settled = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.lateAttachTail = settled;
+    void settled.then(() => {
+      if (this.lateAttachTail === settled) this.lateAttachTail = undefined;
+    });
+    return run;
+  }
+
+  private async runLateAttach(participant: DurableAgentRuntimeParticipant): Promise<IDisposable> {
     if (this.disposed) {
       throw new Error(`Agent runtime participant '${participant.id}' late-attached to a disposed event dispatcher`);
     }
@@ -772,7 +779,7 @@ export class EventDispatcherService extends Service implements IEventDispatcher 
       this.dispatchingSince = Date.now();
     }
     try {
-      if (this.lateAttachmentTail !== undefined) await this.lateAttachmentTail;
+      if (this.lateAttachTail !== undefined) await this.lateAttachTail;
       if (rerun) {
         await this.wire.flush();
         this.resetReplayState();

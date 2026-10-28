@@ -33,7 +33,7 @@ import { stubLoopWithHooks, type StubLoop } from '../loop/stubs';
 import { stubToolExecutorEvents } from '../toolExecutor/stubs';
 import { registerToolResultTruncationServices } from '../toolResultTruncation/stubs';
 import { registerTestAgentWireServices } from '../../wire/stubs';
-import { createTestAgent, execEnvServices, telemetryServices } from '../../harness';
+import { createTestAgent, execEnvServices, requesterFromGenerateFn, telemetryServices, type LegacyGenerateResult } from '../../harness';
 import { createFakeProcessRunner } from '../../tools/fixtures/fake-exec';
 import { stubAgentContext } from '../agentContext/stubs';
 
@@ -68,9 +68,14 @@ interface Harness {
 
 function createHarness(
   telemetry: ITelemetryService = recordingTelemetry(telemetryEvents),
-  options: { readonly executorEvents?: boolean; readonly env?: Record<string, string> } = {},
+  options: {
+    readonly executorEvents?: boolean;
+    readonly env?: Record<string, string>;
+    readonly preRegisterHooks?: (loop: IAgentLoopService) => void;
+  } = {},
 ): Harness {
   const loop = stubLoopWithHooks();
+  options.preRegisterHooks?.(loop);
   const events = options.executorEvents === true ? stubToolExecutorEvents() : undefined;
   const ix = createServices(disposables, {
     additionalServices: (reg) => {
@@ -793,6 +798,22 @@ describe('AgentToolDedupeService', () => {
       }
       expect(drainHandoff(h)).toBe('handoff');
     });
+
+    it('enqueues the handoff even when the compaction block runs ahead of it', async () => {
+      const h = createHarness(recordingTelemetry(telemetryEvents), {
+        preRegisterHooks: (loop) => {
+          loop.hooks.onDidFinishStep.register('full-compaction', async (ctx) => {
+            if (ctx.step === 12) throw new Error('compaction failed');
+          });
+        },
+      });
+      h.registry.register(new EchoTool('Read'));
+      await runStreak(h, 11);
+      await expect(runStep(h, 1, 12, [toolCall('c11', 'Read', { p: 1 })])).rejects.toThrow(
+        'compaction failed',
+      );
+      expect(drainHandoff(h)).toBe('handoff');
+    });
   });
 
   describe('repeat telemetry', () => {
@@ -1167,6 +1188,69 @@ describe('AgentToolDedupeService', () => {
       return { ctx, exec };
     }
 
+    function textResult(text: string): LegacyGenerateResult {
+      return {
+        id: null,
+        message: { role: 'assistant', content: [{ type: 'text', text }], toolCalls: [] },
+        usage: { inputOther: 1, output: 1, inputCacheRead: 0, inputCacheCreation: 0 },
+        finishReason: 'completed',
+        rawFinishReason: 'stop',
+      };
+    }
+
+    function toolCallResult(call: ToolCall, inputOther = 1): LegacyGenerateResult {
+      return {
+        id: null,
+        message: { role: 'assistant', content: [], toolCalls: [call] },
+        usage: { inputOther, output: 1, inputCacheRead: 0, inputCacheCreation: 0 },
+        finishReason: 'tool_calls',
+        rawFinishReason: 'tool_calls',
+      };
+    }
+
+    function repeatBreakerWithAutoCompaction(cancelFirstCompaction: boolean): {
+      readonly records: TelemetryRecord[];
+      readonly ctx: ReturnType<typeof createTestAgent>;
+      readonly exec: ReturnType<typeof vi.fn>;
+      readonly turnCalls: () => number;
+      readonly compactionCalls: () => number;
+    } {
+      const records: TelemetryRecord[] = [];
+      const exec = vi.fn<IHostProcessService['spawn']>().mockRejectedValue(new Error('Bash should not execute'));
+      let turnCalls = 0;
+      let compactionCalls = 0;
+      const generate = requesterFromGenerateFn(async (_provider, _systemPrompt, _tools, history) => {
+        if (JSON.stringify(history).includes('You are about to run out of context')) {
+          compactionCalls += 1;
+          if (cancelFirstCompaction && compactionCalls === 1) {
+            ctx.appendSystemReminder('reminder landing mid-round');
+          }
+          return textResult('Compacted summary of the blocked bash call.');
+        }
+        turnCalls += 1;
+        if (turnCalls > 13) throw new Error(`Unexpected turn generate ${String(turnCalls)}`);
+        if (turnCalls === 13) return textResult('Handoff: still blocked on the same call.');
+        return toolCallResult(invalidBashCallWithId(`call_bad_${String(turnCalls)}`), 4_500 * turnCalls);
+      });
+      const ctx = createTestAgent(
+        { generate, telemetry: recordingTelemetry(records) },
+        execEnvServices({
+          processRunner: createFakeProcessRunner({ spawn: exec as unknown as IHostProcessService['spawn'] }),
+        }),
+        { initialConfig: { providers: {}, loopControl: { compactionMaxAttempts: 1 } } },
+      );
+      ctx.get(IAgentProfileService).update({ activeToolNames: ['Bash'] });
+      ctx.appendExchange(1, 'old user one', 'old assistant one', 48_500);
+      ctx.get(IAgentProfileService).setCompactionTriggerRatio(0.05);
+      return {
+        records,
+        ctx,
+        exec,
+        turnCalls: () => turnCalls,
+        compactionCalls: () => compactionCalls,
+      };
+    }
+
     it('force-stops a turn that keeps re-issuing the same validation-rejected call', async () => {
       const records: TelemetryRecord[] = [];
       const { ctx, exec } = rejectedBashAgent(records);
@@ -1264,6 +1348,46 @@ describe('AgentToolDedupeService', () => {
       expect(exec).not.toHaveBeenCalled();
       expect(ctx.llmCalls).toHaveLength(12);
       await expect(turn!.result).resolves.toMatchObject({ type: 'failed', steps: 12 });
+    });
+
+    it('still runs the handoff step when auto compaction fires in the same turn', async () => {
+      const { records, ctx, exec, compactionCalls } = repeatBreakerWithAutoCompaction(false);
+
+      await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Repeat the bad call' }] });
+      const turn = (ctx.get(IAgentLoopService) as unknown as { active?: { turn: Turn } }).active?.turn;
+      await ctx.untilTurnEnd();
+
+      expect(exec).not.toHaveBeenCalled();
+      expect(compactionCalls()).toBe(1);
+      expect(records.find((entry) => entry.event === 'compaction_finished')?.properties).toMatchObject({
+        source: 'auto',
+      });
+      expect(
+        records.find((entry) => entry.event === 'tool_call_repeat_handoff')?.properties,
+      ).toMatchObject({ outcome: 'text' });
+      await expect(turn!.result).resolves.toMatchObject({
+        type: 'completed',
+        stopReason: 'repeat_breaker',
+      });
+    });
+
+    it('still runs the handoff step when a reminder cancels the auto compaction', async () => {
+      const { records, ctx, exec, turnCalls, compactionCalls } = repeatBreakerWithAutoCompaction(true);
+
+      await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Repeat the bad call' }] });
+      const turn = (ctx.get(IAgentLoopService) as unknown as { active?: { turn: Turn } }).active?.turn;
+      await ctx.untilTurnEnd();
+
+      expect(exec).not.toHaveBeenCalled();
+      expect(compactionCalls()).toBeGreaterThan(0);
+      expect(turnCalls()).toBe(13);
+      expect(
+        records.find((entry) => entry.event === 'tool_call_repeat_handoff')?.properties,
+      ).toMatchObject({ outcome: 'text' });
+      await expect(turn!.result).resolves.toMatchObject({
+        type: 'completed',
+        stopReason: 'repeat_breaker',
+      });
     });
 
     it('does not force-stop when the malformed argument text keeps changing', async () => {

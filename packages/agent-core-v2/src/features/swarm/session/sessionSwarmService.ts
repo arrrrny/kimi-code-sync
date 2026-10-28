@@ -15,6 +15,7 @@ import {
   isSubagentMeta,
   labelsFromAgentMeta,
   subagentLabels,
+  subagentModelSource,
   subagentParentAgentId,
   subagentSwarmItem,
 } from '#/session/agentLifecycle/subagentMetadata';
@@ -25,6 +26,7 @@ import {
   SubagentCancelled,
   SubagentFailed,
 } from '#/session/subagent/mirrorAgentRun';
+import { inheritFallbackOverrides } from '#/session/subagent/configSection';
 import { type AgentRunHandle, ISessionSubagentService } from '#/session/subagent/subagent';
 import { ISessionMetadata, type AgentMeta } from '#/session/sessionMetadata/sessionMetadata';
 import { IEventDispatcher } from '#/state/eventDispatcher';
@@ -155,7 +157,10 @@ export class SessionSwarmService implements ISessionSwarmService {
     const spawned = await this.subagents.spawn({
       callerAgentId,
       plan,
-      labels: subagentLabels(callerAgentId, { swarmItem: options.swarmItem }),
+      labels: subagentLabels(callerAgentId, {
+        swarmItem: options.swarmItem,
+        modelSource: plan.modelSource,
+      }),
       prompt: options.prompt,
     });
     emitAgentRunSpawned(caller, spawned.agentId, {
@@ -197,10 +202,12 @@ export class SessionSwarmService implements ISessionSwarmService {
       this.agentLifecycle.handleOf(agentId) ??
       (await this.rebuildSubagent(agentId, meta, caller, options.signal));
     this.requireIdleSubagent(agentId, child);
-    const profileName =
-      child.accessor.get(IAgentProfileService).data().profileName ?? RESUMED_PROFILE_FALLBACK;
-    if (!retryTurn) {
-      const resumedModel = child.accessor.get(IAgentProfileService).data().modelAlias;
+    const profile = child.accessor.get(IAgentProfileService);
+    const callerProfile = caller.accessor.get(IAgentProfileService);
+    inheritFallbackOverrides(profile, callerProfile);
+    const rebound = await this.rebindInheritedModel(meta, callerProfile, profile);
+    const profileName = profile.data().profileName ?? RESUMED_PROFILE_FALLBACK;
+    if (!retryTurn || rebound) {
       emitAgentRunSpawned(caller, agentId, {
         profileName,
         parentToolCallId: options.parentToolCallId,
@@ -208,7 +215,8 @@ export class SessionSwarmService implements ISessionSwarmService {
         description: options.description,
         swarmIndex: options.swarmIndex,
         runInBackground: options.runInBackground,
-        model: resumedModel,
+        model: profile.data().modelAlias,
+        modelSource: subagentModelSource(meta),
       });
     }
     const request = retryTurn
@@ -314,6 +322,19 @@ export class SessionSwarmService implements ISessionSwarmService {
       );
     }
     return meta;
+  }
+
+  private async rebindInheritedModel(
+    meta: AgentMeta | undefined,
+    callerProfile: IAgentProfileService,
+    childProfile: IAgentProfileService,
+  ): Promise<boolean> {
+    const source = subagentModelSource(meta);
+    if (source !== 'inherited' && source !== 'primary_override') return false;
+    const callerModel = callerProfile.data().modelAlias;
+    if (callerModel === undefined || childProfile.data().modelAlias === callerModel) return false;
+    await childProfile.setModel(callerModel);
+    return true;
   }
 
   private async agentMeta(agentId: string): Promise<AgentMeta | undefined> {
