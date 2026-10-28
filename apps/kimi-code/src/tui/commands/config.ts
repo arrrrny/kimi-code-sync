@@ -1538,8 +1538,6 @@ export async function rotateToNextFavoriteModel(host: SlashCommandHost): Promise
     'session',
   );
 }
-  );
-}
 
 /**
  * Cloud-gated confirmation for a model or effort switch. Model changes ignore

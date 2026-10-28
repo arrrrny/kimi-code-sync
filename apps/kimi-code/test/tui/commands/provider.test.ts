@@ -46,6 +46,7 @@ function makeFlowHost(providers: Record<string, ProviderConfig> = {}) {
   };
   const host = {
     state: { appState },
+    beginAuthBlock: vi.fn(() => () => {}),
     harness: {
       supportsAtomicSectionReplace: () => true,
       replaceConfigSections,

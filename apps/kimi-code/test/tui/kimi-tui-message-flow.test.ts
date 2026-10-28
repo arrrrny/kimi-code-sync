@@ -72,7 +72,6 @@ import type { StreamingUIController } from '#/tui/controllers/streaming-ui';
 import type { SurveyController } from '#/tui/controllers/survey-controller';
 import { handleFeedbackCommand } from '#/tui/commands/info';
 import { copyTextToClipboard } from '#/utils/clipboard/clipboard-text';
-import { clientConfigs } from '#/utils/client-configs';
 import { openUrl } from '#/utils/open-url';
 import { createFeedbackArchivePath } from '../../src/feedback/archive';
 import { packageCodebase, scanCodebase } from '../../src/feedback/codebase';

@@ -24,7 +24,7 @@
 // cross-reducers), blobs (the folding states whose blob codec offloads inline
 // media to blob storage), owner (the source file declaring the class).
 
-// Index (67 record types)
+// Index (68 record types)
 //   changeNotifier.snapshot            changeNotifier.snapshot                                                        src/agent/changeNotifier/changeNotifierOps.ts
 //   config.update                      profile                                                                        src/agent/profile/profileOps.ts
 //   context.append_loop_event          contextMemory, turn                                                            src/agent/contextMemory/contextEvents.ts
