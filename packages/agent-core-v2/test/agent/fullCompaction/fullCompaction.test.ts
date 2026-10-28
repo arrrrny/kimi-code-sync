@@ -2175,6 +2175,57 @@ describe('FullCompaction', () => {
     }
   });
 
+  it('gives the third handoff request the whole handoff trail and anchors it at the original prompt', async () => {
+    vi.stubEnv('KIMI_CODE_EXPERIMENTAL_COMPACTION_HANDOFF', '1');
+    const homeDir = mkdtempSync(join(tmpdir(), 'kimi-handoff-trail-home-'));
+    try {
+      const ctx = testAgent(homeDirServices(homeDir));
+      ctx.configure({
+        provider: CATALOGUED_PROVIDER,
+        modelCapabilities: CATALOGUED_MODEL_CAPABILITIES,
+      });
+      ctx.appendExchange(1, 'original goal: ship the exporter', 'starting the exporter work', 20);
+      for (const round of [1, 2, 3]) {
+        const completed = ctx.once('compaction.completed');
+        ctx.mockNextResponse({ type: 'text', text: `Summary ${round}.` });
+        ctx.mockNextResponse({
+          type: 'text',
+          text: `# Handoff\n\n## Session Gist\n\nHandoff ${round} gist.`,
+        });
+        ctx.get(IAgentFullCompactionService).begin({ source: 'auto', instruction: undefined });
+        await completed;
+      }
+      await ctx.wire.flush();
+
+      const dir = findHandoffDir(homeDir);
+      expect(dir).toBeDefined();
+      const files = readdirSync(dir!).toSorted();
+      expect(files).toHaveLength(3);
+      const firstPath = join(dir!, files[0]!);
+      const secondPath = join(dir!, files[1]!);
+
+      const thirdHandoffCall = ctx.llmCalls[5]!;
+      const instruction = messageText(thirdHandoffCall.history.at(-1));
+      expect(instruction).toContain(firstPath);
+      expect(instruction).toContain(secondPath);
+      expect(instruction.indexOf(firstPath)).toBeLessThan(instruction.indexOf(secondPath));
+      expect(instruction).toContain("access to all of this session's compactions");
+      expect(instruction).toContain('original goal: ship the exporter');
+      expect(instruction).toContain('Treat it as the anchor of this session');
+
+      const applyRecords = (
+        ctx.newEvents() as readonly { event?: string; args?: Record<string, unknown> }[]
+      ).filter((entry) => entry.event === 'context.apply_compaction');
+      const contextSummary = applyRecords.at(-1)?.args?.['contextSummary'];
+      expect(typeof contextSummary).toBe('string');
+      expect(contextSummary).toContain(firstPath);
+      expect(contextSummary).toContain(secondPath);
+      await ctx.expectResumeMatches();
+    } finally {
+      rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
   it('produces a handoff document from the overflow recovery path', async () => {
     vi.stubEnv('KIMI_CODE_EXPERIMENTAL_COMPACTION_HANDOFF', '1');
     const homeDir = mkdtempSync(join(tmpdir(), 'kimi-handoff-overflow-home-'));

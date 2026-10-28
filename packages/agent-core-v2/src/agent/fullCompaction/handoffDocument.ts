@@ -26,6 +26,7 @@ export class AgentHandoffDocumentService extends Service implements IAgentHandof
 
   private sequence = 0;
   private lastPath: string | undefined;
+  private allPaths: readonly string[] | undefined;
 
   constructor(
     @IBlobStore private readonly blobs: IBlobStore,
@@ -39,10 +40,13 @@ export class AgentHandoffDocumentService extends Service implements IAgentHandof
     return this.lastPath;
   }
 
+  async allHandoffPaths(): Promise<readonly string[]> {
+    this.allPaths ??= await this.storedHandoffPaths();
+    return this.allPaths;
+  }
+
   async resumePointer(): Promise<string | undefined> {
-    if (this.lastPath === undefined) {
-      this.lastPath = await this.newestStoredHandoffPath();
-    }
+    this.lastPath ??= (await this.allHandoffPaths()).at(-1);
     return this.lastPath;
   }
 
@@ -52,26 +56,28 @@ export class AgentHandoffDocumentService extends Service implements IAgentHandof
     const bytes = new TextEncoder().encode(document.replace(/\s+$/, ''));
     await this.blobs.put(this.agent.scope(), `${HANDOFF_STORAGE_DIR}/${fileName}`, bytes);
     this.lastPath = handoffStoragePath(this.sessionCtx.sessionDir, this.agent.agentId, fileName);
+    this.allPaths = [...(this.allPaths ?? []), this.lastPath];
     return this.lastPath;
   }
 
-  private async newestStoredHandoffPath(): Promise<string | undefined> {
+  private async storedHandoffPaths(): Promise<readonly string[]> {
     let names: readonly string[];
     try {
       names = await this.blobs.list(`${this.agent.scope()}/${HANDOFF_STORAGE_DIR}`);
     } catch {
-      return undefined;
+      return [];
     }
-    const newest = names.filter((name) => name.endsWith('.md')).toSorted().at(-1);
-    return newest === undefined
-      ? undefined
-      : handoffStoragePath(this.sessionCtx.sessionDir, this.agent.agentId, newest);
+    return names
+      .filter((name) => name.endsWith('.md'))
+      .toSorted()
+      .map((name) => handoffStoragePath(this.sessionCtx.sessionDir, this.agent.agentId, name));
   }
 }
 
 export interface IAgentHandoffDocumentService {
   readonly _serviceBrand: undefined;
   readonly previousHandoffPath: string | undefined;
+  allHandoffPaths(): Promise<readonly string[]>;
   resumePointer(): Promise<string | undefined>;
   record(document: string, timestampMs: number): Promise<string>;
 }
