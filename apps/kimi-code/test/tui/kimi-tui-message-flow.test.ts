@@ -11199,7 +11199,7 @@ capabilities = ["image_in", "video_in"]
       await vi.waitFor(() => {
         expect(driver.state.editorContainer.children[0]).toBeInstanceOf(TabbedModelSelectorComponent);
       });
-      (driver.state.editorContainer.children[0] as TabbedModelSelectorComponent).handleInput(`${ESC}s`);
+      (driver.state.editorContainer.children[0] as TabbedModelSelectorComponent).handleInput('S');
 
       await vi.waitFor(() => {
         expect(driver.state.editorContainer.children[0]).toBeInstanceOf(ModelSwitchConfirmDialogComponent);
@@ -11255,7 +11255,7 @@ capabilities = ["image_in", "video_in"]
       await vi.waitFor(() => {
         expect(driver.state.editorContainer.children[0]).toBeInstanceOf(TabbedModelSelectorComponent);
       });
-      (driver.state.editorContainer.children[0] as TabbedModelSelectorComponent).handleInput(`${ESC}s`);
+      (driver.state.editorContainer.children[0] as TabbedModelSelectorComponent).handleInput('S');
 
       await vi.waitFor(() => {
         expect(driver.state.editorContainer.children[0]).toBeInstanceOf(ModelSwitchConfirmDialogComponent);
