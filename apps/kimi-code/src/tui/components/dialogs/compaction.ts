@@ -27,7 +27,6 @@ export class CompactionComponent extends Container {
   private readonly headerText: Text;
   private instructionText: Text | undefined;
   private readonly instruction: string | undefined;
-  private readonly tip: string | undefined;
   private readonly model: string | undefined;
   private blinkOn = true;
   private blinkTimer: ReturnType<typeof setInterval> | null = null;
@@ -40,11 +39,10 @@ export class CompactionComponent extends Container {
   private summaryText: Text | undefined;
   private expanded = false;
 
-  constructor(ui?: TUI, instruction?: string | undefined, tip?: string, model?: string) {
+  constructor(ui?: TUI, instruction?: string | undefined, model?: string) {
     super();
     this.ui = ui;
     this.instruction = instruction;
-    this.tip = tip;
     this.model = model;
 
     // Top margin so the block isn't glued to the previous transcript
@@ -194,8 +192,7 @@ export class CompactionComponent extends Container {
     const label = this.model
       ? currentTheme.boldFg('primary', `Compacting context using ${this.model}…`)
       : currentTheme.boldFg('primary', 'Compacting context…');
-    const tip = this.tip ? currentTheme.fg('textDim', ` · Tip: ${this.tip}`) : '';
-    return `${bullet}${label}${tip}`;
+    return `${bullet}${label}`;
   }
 
   private startBlink(): void {

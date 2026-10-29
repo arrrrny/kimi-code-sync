@@ -760,7 +760,7 @@ export class StreamingUIController {
     const compaction = this._activeCompaction;
     if (compaction === undefined) return;
     const { state } = this.host;
-    const block = new CompactionComponent(state.ui, compaction.instruction, undefined, compaction.model);
+    const block = new CompactionComponent(state.ui, compaction.instruction, compaction.model);
     block.markDone(tokensBefore, tokensAfter, summary, handoffPath);
     this._activeCompaction = undefined;
     this.mountCompactionBlock(block);
@@ -771,7 +771,7 @@ export class StreamingUIController {
     const compaction = this._activeCompaction;
     if (compaction === undefined) return;
     const { state } = this.host;
-    const block = new CompactionComponent(state.ui, compaction.instruction, undefined, compaction.model);
+    const block = new CompactionComponent(state.ui, compaction.instruction, compaction.model);
     block.markCanceled();
     this._activeCompaction = undefined;
     this.mountCompactionBlock(block);

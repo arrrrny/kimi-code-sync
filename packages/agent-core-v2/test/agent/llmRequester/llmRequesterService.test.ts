@@ -1115,6 +1115,42 @@ describe('AgentLLMRequesterService media recovery prefix parity', () => {
       expect(inputs).toHaveLength(4);
     },
   );
+
+  it('strips the fallback model request after a strip already latched on the primary model', async () => {
+    const TERMINAL_400 = new APIStatusError(400, 'endpoint broken');
+    const inputs: ModelRequestInput[] = [];
+    const accepting = createRequester({ value: 0 }, null);
+    const requester: ModelRequester = {
+      model: accepting.model,
+      request: async function* (input, signal, params) {
+        inputs.push(input);
+        const attempt = inputs.length;
+        if (attempt === 1 || attempt === 3) throw IMAGE_FORMAT_400;
+        if (attempt === 2) throw TERMINAL_400;
+        yield* accepting.request(input, signal, params);
+      },
+    };
+    const { service } = createService(requester, undefined, {
+      fallbackFlag: true,
+      fallbackConfig: { model: 'fallback-alias' },
+    });
+
+    const result = await service.request({
+      messages: [imageMessage(REJECTED_FORMAT_URL, 'rejected')],
+      source: { type: 'turn', turnId: 1, step: 1 },
+    });
+
+    expect(result.model).toBe('fallback-alias');
+    expect(inputs).toHaveLength(4);
+    expect(
+      inputs.map((input) =>
+        input.messages
+          .flatMap((message) => message.content)
+          .filter((part) => part.type === 'image_url')
+          .map((part) => part.imageUrl.url),
+      ),
+    ).toEqual([[REJECTED_FORMAT_URL], [], [REJECTED_FORMAT_URL], []]);
+  });
 });
 
 describe('AgentLLMRequesterService combined recovery projections', () => {

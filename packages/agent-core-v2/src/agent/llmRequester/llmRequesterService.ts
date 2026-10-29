@@ -608,6 +608,10 @@ export class AgentLLMRequesterService implements IAgentLLMRequesterService {
           this.activateFallback('terminal-error')
         ) {
           request = this.resolveRequest(overrides, request.promptCacheProbe);
+          mediaStrippedThisRequest = false;
+          previousMediaCount = undefined;
+          previousMediaPolicy = undefined;
+          mediaPaths = undefined;
           onAttemptRetry?.();
           policy = undefined;
           infiniteRetryAttempt = 0;
