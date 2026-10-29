@@ -45,6 +45,9 @@ function makeSession(id: string, initialModel = 'k2'): Session {
     }),
     getStatus: vi.fn(async () => ({ model: state.model })),
     getModelAlias: vi.fn(async () => state.model),
+    // `hasConversationHistory` reads the resume state for turn counts; no
+    // replay history in these fixtures, so the transcript path decides.
+    getResumeState: vi.fn(() => null),
   } as unknown as Session;
 }
 
