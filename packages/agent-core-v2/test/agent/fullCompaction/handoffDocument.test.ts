@@ -137,6 +137,21 @@ describe('AgentHandoffDocumentService', () => {
     ]);
     await expect(revived.service.resumePointer()).resolves.toBe(thirdPath);
   });
+
+  it('keeps the stored trail when a revived process records before its first read', async () => {
+    const first = makeService();
+    const firstPath = await first.service.record('first\n', Date.UTC(2026, 8, 25, 10, 0, 0, 0));
+    const secondPath = await first.service.record('second\n', Date.UTC(2026, 8, 25, 10, 0, 5, 0));
+
+    const revived = makeService(first.homeDir);
+    const thirdPath = await revived.service.record('third\n', Date.UTC(2026, 8, 25, 10, 0, 10, 0));
+
+    await expect(revived.service.allHandoffPaths()).resolves.toEqual([
+      firstPath,
+      secondPath,
+      thirdPath,
+    ]);
+  });
 });
 
 describe('renderHandoffInstruction', () => {

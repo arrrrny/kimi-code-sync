@@ -52,6 +52,7 @@ export class AgentHandoffDocumentService extends Service implements IAgentHandof
 
   async record(document: string, timestampMs: number): Promise<string> {
     this.sequence += 1;
+    this.allPaths ??= await this.storedHandoffPaths();
     const fileName = handoffFileName(timestampMs, this.sequence);
     const bytes = new TextEncoder().encode(document.replace(/\s+$/, ''));
     await this.blobs.put(this.agent.scope(), `${HANDOFF_STORAGE_DIR}/${fileName}`, bytes);
