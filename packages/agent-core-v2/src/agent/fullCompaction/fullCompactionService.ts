@@ -4,7 +4,11 @@ import { LifecycleScope } from '#/app/scopes';
 import { ScopeActivation, registerScopedService } from '#/_base/di/scope';
 import { defineState } from '#/state/state';
 import { estimateTokensForMessage } from "#/llm-adapter/contract/tokens";
-import { buildCompactionSummaryText, isRealUserInput } from '#/agent/contextMemory/compactionHandoff';
+import {
+  buildCompactionSummaryText,
+  firstUserPromptText,
+  isRealUserInput,
+} from '#/agent/contextMemory/compactionHandoff';
 import { IAgentContextMemoryService } from '#/agent/contextMemory/contextMemory';
 import type { ContextMessage } from '#/agent/contextMemory/types';
 import { ISessionTokenCountingService } from '#/session/tokenCounting/sessionTokenCounting';
@@ -960,6 +964,7 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
         active,
         data,
         historyForModel,
+        originalHistory,
         compactionRequestModel,
         effectiveMaxOutputSize,
         signal,
@@ -1052,6 +1057,7 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
     active: ActiveCompaction,
     data: Readonly<CompactionBeginData>,
     history: readonly ContextMessage[],
+    originalHistory: readonly ContextMessage[],
     model: string | undefined,
     maxOutputSize: number | undefined,
     signal: AbortSignal,
@@ -1060,8 +1066,10 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
       return undefined;
     }
     try {
+      const previousHandoffPaths = await this.handoffDocuments.allHandoffPaths();
       const handoffInstruction = renderHandoffInstruction({
-        previousHandoffPath: await this.handoffDocuments.resumePointer(),
+        originalPrompt: firstUserPromptText(originalHistory),
+        previousHandoffPaths,
         customInstruction: data.instruction,
       });
       const runRequest = async () => {
@@ -1096,7 +1104,7 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
         throw new APIEmptyResponseError('The handoff response did not contain a usable document.');
       }
       const path = await this.handoffDocuments.record(document, Date.now());
-      return { path, footer: renderHandoffPointerFooter(path) };
+      return { path, footer: renderHandoffPointerFooter(path, previousHandoffPaths) };
     } catch (error) {
       if (isAbortError(error)) throw error;
       this.log.warn('compaction handoff generation failed', { reason: String(error) });

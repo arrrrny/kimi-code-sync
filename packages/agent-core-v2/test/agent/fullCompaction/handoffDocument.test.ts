@@ -8,7 +8,10 @@ import {
   handoffFileName,
   handoffStoragePath,
 } from '#/agent/fullCompaction/handoffDocument';
-import { renderHandoffInstruction } from '#/agent/fullCompaction/handoffInstruction';
+import {
+  renderHandoffInstruction,
+  renderHandoffPointerFooter,
+} from '#/agent/fullCompaction/handoffInstruction';
 import { BlobStoreService } from '#/persistence/backends/node-fs/blobStoreService';
 import { FileStorageService } from '#/persistence/backends/node-fs/fileStorageService';
 import type { ISessionContext } from '#/session/sessionContext/sessionContext';
@@ -108,6 +111,47 @@ describe('AgentHandoffDocumentService', () => {
     await expect(revived.service.resumePointer()).resolves.toBe(secondPath);
     expect(revived.service.previousHandoffPath).toBe(secondPath);
   });
+
+  it('lists every recorded handoff in chronological order', async () => {
+    const { service } = makeService();
+    await expect(service.allHandoffPaths()).resolves.toEqual([]);
+
+    const first = await service.record('first handoff\n', Date.UTC(2026, 8, 25, 10, 0, 0, 0));
+    const second = await service.record('second handoff\n', Date.UTC(2026, 8, 25, 10, 0, 5, 0));
+    const third = await service.record('third handoff\n', Date.UTC(2026, 8, 25, 10, 0, 10, 0));
+
+    await expect(service.allHandoffPaths()).resolves.toEqual([first, second, third]);
+  });
+
+  it('seeds the whole stored handoff trail in a revived process, not just the newest', async () => {
+    const first = makeService();
+    const firstPath = await first.service.record('first\n', Date.UTC(2026, 8, 25, 10, 0, 0, 0));
+    const secondPath = await first.service.record('second\n', Date.UTC(2026, 8, 25, 10, 0, 5, 0));
+    const thirdPath = await first.service.record('third\n', Date.UTC(2026, 8, 25, 10, 0, 10, 0));
+
+    const revived = makeService(first.homeDir);
+    await expect(revived.service.allHandoffPaths()).resolves.toEqual([
+      firstPath,
+      secondPath,
+      thirdPath,
+    ]);
+    await expect(revived.service.resumePointer()).resolves.toBe(thirdPath);
+  });
+
+  it('keeps the stored trail when a revived process records before its first read', async () => {
+    const first = makeService();
+    const firstPath = await first.service.record('first\n', Date.UTC(2026, 8, 25, 10, 0, 0, 0));
+    const secondPath = await first.service.record('second\n', Date.UTC(2026, 8, 25, 10, 0, 5, 0));
+
+    const revived = makeService(first.homeDir);
+    const thirdPath = await revived.service.record('third\n', Date.UTC(2026, 8, 25, 10, 0, 10, 0));
+
+    await expect(revived.service.allHandoffPaths()).resolves.toEqual([
+      firstPath,
+      secondPath,
+      thirdPath,
+    ]);
+  });
 });
 
 describe('renderHandoffInstruction', () => {
@@ -137,10 +181,46 @@ describe('renderHandoffInstruction', () => {
 
   it('points at the earlier handoff when one exists', () => {
     const rendered = renderHandoffInstruction({
-      previousHandoffPath: '/home/sessions/w/s/agents/a/handoff/first.md',
+      previousHandoffPaths: ['/home/sessions/w/s/agents/a/handoff/first.md'],
     });
     expect(rendered).toContain('/home/sessions/w/s/agents/a/handoff/first.md');
     expect(rendered).toContain('## Resume from');
+  });
+
+  it('lists every previous handoff in chronological order and emphasizes access to all of them', () => {
+    const paths = [
+      '/home/sessions/w/s/agents/a/handoff/2026-09-25T10-00-00-000-001.md',
+      '/home/sessions/w/s/agents/a/handoff/2026-09-25T11-00-00-000-002.md',
+      '/home/sessions/w/s/agents/a/handoff/2026-09-25T12-00-00-000-003.md',
+    ];
+    const rendered = renderHandoffInstruction({ previousHandoffPaths: paths });
+
+    expect(rendered).toContain("access to all of this session's compactions");
+    expect(rendered).toContain('chronological order, oldest first');
+    for (const path of paths) {
+      expect(rendered).toContain(path);
+    }
+    expect(rendered.indexOf(paths[0]!)).toBeLessThan(rendered.indexOf(paths[1]!));
+    expect(rendered.indexOf(paths[1]!)).toBeLessThan(rendered.indexOf(paths[2]!));
+    expect(rendered).toContain('## Resume from');
+    expect(rendered.indexOf(paths[2]!)).toBeLessThan(rendered.indexOf('## Resume from'));
+  });
+
+  it('quotes the original prompt as the anchor of the session', () => {
+    const rendered = renderHandoffInstruction({
+      originalPrompt: 'Ship the exporter migration',
+      previousHandoffPaths: ['/home/sessions/w/s/agents/a/handoff/first.md'],
+    });
+    expect(rendered).toContain('The original prompt that opened this session');
+    expect(rendered).toContain('Treat it as the anchor of this session');
+    expect(rendered).toContain('Ship the exporter migration');
+  });
+
+  it('omits the session anchor when no original prompt is available', () => {
+    const rendered = renderHandoffInstruction({
+      previousHandoffPaths: ['/home/sessions/w/s/agents/a/handoff/first.md'],
+    });
+    expect(rendered).not.toContain('The original prompt that opened this session');
   });
 
   it('embeds the compaction instruction only when present', () => {
@@ -151,5 +231,32 @@ describe('renderHandoffInstruction', () => {
       customInstruction: 'Focus the handoff on the migration',
     });
     expect(withInstruction).toContain('Focus the handoff on the migration');
+  });
+});
+
+describe('renderHandoffPointerFooter', () => {
+  it('mandates reading the latest handoff end to end', () => {
+    const footer = renderHandoffPointerFooter('/home/s/handoff/latest.md');
+    expect(footer).toContain('/home/s/handoff/latest.md');
+    expect(footer).toContain('read that file end to end');
+  });
+
+  it('carries a brief reference to every earlier handoff document', () => {
+    const footer = renderHandoffPointerFooter('/home/s/handoff/third.md', [
+      '/home/s/handoff/first.md',
+      '/home/s/handoff/second.md',
+    ]);
+    expect(footer).toContain('complete compaction history of this session');
+    expect(footer).toContain('/home/s/handoff/first.md');
+    expect(footer).toContain('/home/s/handoff/second.md');
+    expect(footer.indexOf('/home/s/handoff/first.md')).toBeLessThan(
+      footer.indexOf('/home/s/handoff/second.md'),
+    );
+  });
+
+  it('stays silent about earlier handoffs when there are none', () => {
+    const footer = renderHandoffPointerFooter('/home/s/handoff/only.md');
+    expect(footer).toContain('/home/s/handoff/only.md');
+    expect(footer).not.toContain('complete compaction history of this session');
   });
 });

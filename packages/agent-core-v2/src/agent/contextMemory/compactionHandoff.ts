@@ -182,6 +182,17 @@ export function collectCompactableUserMessages<T extends MessageLike>(messages: 
   );
 }
 
+export function firstUserPromptText(
+  messages: readonly MessageLike[],
+  maxChars = 2_000,
+): string | undefined {
+  const first = collectCompactableUserMessages(messages).at(0);
+  if (first === undefined) return undefined;
+  const text = extractText(first.content).trim();
+  if (text.length === 0) return undefined;
+  return text.length <= maxChars ? text : `${text.slice(0, maxChars)}...`;
+}
+
 export function isCompactionSummaryMessage(message: MessageLike): boolean {
   return message.origin?.kind === 'compaction_summary';
 }

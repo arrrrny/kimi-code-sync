@@ -5,7 +5,7 @@ conversation it summarizes is gone.
 
 --- This message is a direct task, not part of the above conversation ---
 
-${resume_from_block}Write the document with exactly these sections, in this order, each under its
+${session_anchor_block}${resume_from_block}Write the document with exactly these sections, in this order, each under its
 own `## ` heading:
 
 ## Session Gist
