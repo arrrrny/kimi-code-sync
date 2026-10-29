@@ -74,6 +74,7 @@
         ./packages/pi-tui
         ./packages/product
         ./packages/remote-control
+        ./packages/session-import
         ./packages/telemetry
         ./packages/transcript
         ./packages/tree-sitter-bash
@@ -99,6 +100,7 @@
         "@moonshot-ai/pi-tui"
         "@moonshot-ai/kimi-code-product"
         "@moonshot-ai/remote-control"
+        "@moonshot-ai/session-import"
         "@moonshot-ai/kimi-telemetry"
         "@moonshot-ai/transcript"
         "@moonshot-ai/tree-sitter-bash"
@@ -158,7 +160,7 @@
               inherit (finalAttrs) pname version src pnpmWorkspaces;
               inherit pnpm;
               fetcherVersion = 3;
-              hash = "sha256-7C+sTtqhyNAANXhBrizAjM283V1I57nfkimgoES+l6Q=";
+              hash = "sha256-c1PBSpHoJFB0KcvQLNMreuTVkfrHZJQaj1Hy5n4ngNg=";
             };
 
             nativeBuildInputs = [

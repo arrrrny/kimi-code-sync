@@ -44,6 +44,8 @@ export interface AgentLLMRequestOverrides {
   systemPrompt?: string;
   source?: AgentLLMRequestSource;
   maxOutputSize?: number;
+  usedContextTokens?: number;
+  promptCacheProbe?: 'compaction';
   model?: string;
   onAttemptRetry?: () => void;
 }
@@ -62,6 +64,8 @@ export interface AgentLLMTurnRequestSnapshot {
   readonly contextRevision: number;
   readonly toolsHash: string;
   readonly systemPromptHash: string;
+  readonly messageCount: number;
+  readonly historyHash: string;
   readonly inputTokens?: number;
   readonly startedAt: number;
   readonly finishedAt: number;

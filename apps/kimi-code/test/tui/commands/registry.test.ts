@@ -219,6 +219,7 @@ describe('built-in slash command registry', () => {
         'fork',
         'fork-and-switch',
         'help',
+        'import-sessions',
         'init',
         'login',
         'logout',

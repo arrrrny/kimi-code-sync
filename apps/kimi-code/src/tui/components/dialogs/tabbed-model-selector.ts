@@ -65,6 +65,7 @@ export interface TabbedModelSelectorOptions {
   /** Forwarded to each inner selector; set to false to hide the Thinking
    * footer and disable ←/→ effort switching. */
   readonly thinkingControl?: boolean;
+  readonly effortDescriptions?: Readonly<Record<string, string>>;
   /** Favorite aliases (add-order). When provided, a Favorites tab is prepended
    * and every list row carries a ★ for favorited models. */
   readonly favoriteAliases?: readonly string[];
@@ -276,6 +277,7 @@ function makeSelector(
     providerSwitchHint: true,
     warning: opts.warning,
     thinkingControl: opts.thinkingControl,
+    effortDescriptions: opts.effortDescriptions,
     favoriteAliases: favoriteSet,
     ...(emptyMessage !== undefined ? { emptyMessage } : {}),
     ...(opts.onToggleFavorite !== undefined ? { onToggleFavorite: opts.onToggleFavorite } : {}),
