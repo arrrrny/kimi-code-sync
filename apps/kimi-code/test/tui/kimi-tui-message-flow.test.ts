@@ -35,6 +35,7 @@ import {
   resetModelSwitchConfirmConfigCache,
 } from '#/utils/model-switch-confirm-config';
 import { resetEffortSwitchConfigCache } from '#/utils/effort-switch-config';
+import { resetKimiRegionCache } from '#/utils/region';
 import { EffortSelectorComponent } from '#/tui/components/dialogs/effort-selector';
 import { kimiCodePluginMarketplaceUrl } from '#/constant/app';
 import { MOON_SPINNER_FRAMES } from '#/tui/constant/rendering';
@@ -601,6 +602,8 @@ afterEach(async () => {
   } else {
     process.env['KIMI_CODE_HOME'] = originalKimiCodeHome;
   }
+  delete process.env['KIMI_CODE_OAUTH_HOST'];
+  resetKimiRegionCache();
   if (originalVisual === undefined) {
     delete process.env['VISUAL'];
   } else {
@@ -2608,6 +2611,14 @@ command = "vim"
   });
 
   it('prints the sign-up page and GitHub Issues links when not signed in', async () => {
+    // Hermetic region: without an explicit oauth host the resolver falls
+    // through to local timezone/locale inference, which yields the global
+    // (.ai) profile on non-CN dev hosts. Pin the mainland profile the same
+    // way cli/telemetry.test.ts does, and pin KIMI_CODE_HOME so the marker /
+    // region-cache files under the real home stay unread (issue #125).
+    vi.stubEnv('KIMI_CODE_OAUTH_HOST', 'https://auth.kimi.com');
+    resetKimiRegionCache();
+    process.env['KIMI_CODE_HOME'] = await makeTempHome();
     const { driver, harness } = await makeDriver(makeSession());
     harness.auth.status.mockResolvedValueOnce({
       providers: [{ providerName: 'managed:kimi-code', hasToken: false }],
