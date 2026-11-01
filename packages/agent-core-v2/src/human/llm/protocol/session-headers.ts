@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { sha256Hex } from '#/utils/hash';
 
 const OPENCODE_HOSTNAME = 'opencode.ai';
 const OPENCODE_CLIENT_USER_AGENT = 'opencode/1.17.0';
@@ -8,13 +8,13 @@ const OPENCODE_KEY_FINGERPRINT_LENGTH = 6;
 
 function keyFingerprint(apiKey: string | undefined): string {
   if (apiKey === undefined || apiKey.length === 0) return '';
-  return createHash('sha256').update(apiKey).digest('hex').slice(0, OPENCODE_KEY_FINGERPRINT_LENGTH);
+  return sha256Hex(new TextEncoder().encode(apiKey)).slice(0, OPENCODE_KEY_FINGERPRINT_LENGTH);
 }
 
 function encodeOpencodeSessionId(cacheKey: string, apiKey: string | undefined): string {
   const fingerprint = keyFingerprint(apiKey);
   const sessionLength = OPENCODE_SESSION_LENGTH - fingerprint.length;
-  const session = createHash('sha256').update(cacheKey).digest('hex').slice(0, sessionLength);
+  const session = sha256Hex(new TextEncoder().encode(cacheKey)).slice(0, sessionLength);
   return `${OPENCODE_SESSION_PREFIX}${session}${fingerprint}`;
 }
 

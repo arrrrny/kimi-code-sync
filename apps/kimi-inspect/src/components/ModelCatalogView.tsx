@@ -14,7 +14,6 @@
 
 import { IAgentProfileService } from '@moonshot-ai/agent-core-v2/agent/profile/profile';
 import { ISessionManager } from '@moonshot-ai/agent-core-v2/app/sessionManager/sessionManager';
-import type { TokenUsage } from '@moonshot-ai/agent-core-v2/human/llm-requester/usage';
 import {
   IModelCatalog,
   type ModelCatalogItem,
@@ -25,7 +24,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 
 import { useConnection } from '../connection';
-import { ActionButton, Badge, ErrorLine, errorMessage } from '../ui';
+import { ActionButton, Badge, ErrorLine } from '../ui';
 
 interface FlatEntry {
   readonly item: ModelCatalogItem;
@@ -351,11 +350,6 @@ function ModelSection({
       {sessionError !== null ? <ErrorLine error={sessionError} /> : null}
     </section>
   );
-}
-
-function usageLine(usage: TokenUsage): string {
-  const input = usage.inputOther + usage.inputCacheRead + usage.inputCacheCreation;
-  return `in ${input} · out ${usage.output}`;
 }
 
 function formatContextSize(size: number): string {

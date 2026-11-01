@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import type { CompactionResult } from '@moonshot-ai/agent-core-v2/agent/fullCompaction/types';
+
 import { configResponseSchema } from './rest-config';
 import { sessionPendingInteractionSchema, sessionSchema } from './session';
 import { workspaceSchema } from './workspace';
@@ -123,6 +125,44 @@ export const diUnitChangedEventSchema = z.object({
   error: z.string().optional(),
 });
 
+export const compactionResultSchema = z.object({
+  summary: z.string(),
+  contextSummary: z.string().optional(),
+  compactedCount: z.number(),
+  tokensBefore: z.number(),
+  tokensAfter: z.number(),
+  keptUserMessageCount: z.number().optional(),
+  keptHeadUserMessageCount: z.number().optional(),
+  droppedCount: z.number().optional(),
+  handoffPath: z.string().optional(),
+}) satisfies z.ZodType<CompactionResult>;
+
+export const compactionStartedEventSchema = z.object({
+  type: z.literal('compaction.started'),
+  agentId: z.string(),
+  trigger: z.string(),
+  instruction: z.string().optional(),
+  model: z.string().optional(),
+  model_display: z.string().optional(),
+});
+
+export const compactionBlockedEventSchema = z.object({
+  type: z.literal('compaction.blocked'),
+  agentId: z.string(),
+  turnId: z.number().optional(),
+});
+
+export const compactionCancelledEventSchema = z.object({
+  type: z.literal('compaction.cancelled'),
+  agentId: z.string(),
+});
+
+export const compactionCompletedEventSchema = z.object({
+  type: z.literal('compaction.completed'),
+  agentId: z.string(),
+  result: compactionResultSchema,
+});
+
 export const pushEventSchema = z.discriminatedUnion('type', [
   sessionMetaUpdatedEventSchema,
   sessionCreatedEventSchema,
@@ -138,6 +178,10 @@ export const pushEventSchema = z.discriminatedUnion('type', [
   diUnitChangedEventSchema,
   pluginChangedEventSchema,
   capabilityChangedEventSchema,
+  compactionStartedEventSchema,
+  compactionBlockedEventSchema,
+  compactionCancelledEventSchema,
+  compactionCompletedEventSchema,
 ]).and(
   z.object({
     agentId: z.string(),

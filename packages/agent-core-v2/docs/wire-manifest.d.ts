@@ -643,17 +643,6 @@ interface SqueezeModelDecidedPayload {
 
 /**
  * states: (none)
- * owner: src/agent/fullCompaction/squeezeForkOps.ts
- */
-interface SqueezeModelDecidedPayload {
-  _name: 'squeeze_model.decided';
-  agentId: string;
-  model: string;
-  modelDisplay?: string;
-}
-
-/**
- * states: (none)
  * owner: src/session/subagent/mirrorAgentRun.ts
  */
 interface SubagentCancelledPayload {
