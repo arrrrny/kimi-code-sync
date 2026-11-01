@@ -1,3 +1,6 @@
+import { ProxyAgent, type Dispatcher } from 'undici';
+
+import { resolveLlmHeadersTimeoutMs } from '#/llm-requester/timeout';
 import type { LlmEndpoint } from '#/llm/request';
 
 export interface ResolvedEndpoint {
@@ -26,12 +29,23 @@ export function mergeHeaders(
   return Object.keys(merged).length > 0 ? merged : undefined;
 }
 
+function buildProxyFetch(proxyUrl: string): typeof fetch {
+  const headersTimeoutMs = resolveLlmHeadersTimeoutMs();
+  const dispatcher: Dispatcher =
+    headersTimeoutMs === undefined
+      ? new ProxyAgent(proxyUrl)
+      : new ProxyAgent({ uri: proxyUrl, headersTimeout: headersTimeoutMs });
+  return ((input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) =>
+    fetch(input, { ...init, dispatcher } as unknown as Parameters<typeof fetch>[1])) as typeof fetch;
+}
+
 export async function resolveEndpoint(endpoint: LlmEndpoint | undefined): Promise<ResolvedEndpoint> {
   const credential = await endpoint?.credentials?.resolve();
+  const proxyUrl = credential?.proxyUrl;
   return {
     baseUrl: endpoint?.baseUrl ?? endpoint?.defaultBaseUrl,
     apiKey: credential?.apiKey,
     headers: mergeHeaders(endpoint?.headers, credential?.headers),
-    fetch: endpoint?.fetch,
+    fetch: proxyUrl !== undefined && proxyUrl.length > 0 ? buildProxyFetch(proxyUrl) : endpoint?.fetch,
   };
 }

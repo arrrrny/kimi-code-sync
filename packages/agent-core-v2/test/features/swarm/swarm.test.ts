@@ -223,6 +223,7 @@ function realSubagents(
         thinkingLevel: data.thinkingLevel ?? 'off',
       };
     },
+    getSessionModelOverride: () => undefined,
   } as unknown as IAgentProfileService;
   const callerHandle = {
     id: 'main',

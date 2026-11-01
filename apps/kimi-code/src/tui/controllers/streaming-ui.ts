@@ -54,7 +54,7 @@ export class StreamingUIController {
   private _thinkingDraft = '';
   private _streamingBlock: { component: AssistantMessageComponent; entry: TranscriptEntry } | null = null;
   private _activeThinkingComponent: ThinkingComponent | undefined = undefined;
-  private _activeCompaction: { instruction: string | undefined } | undefined = undefined;
+  private _activeCompaction: { instruction: string | undefined; model: string | undefined } | undefined = undefined;
   private _activeToolCalls = new Map<string, ToolCallBlockData>();
   private _runningWaitForCalls = new Set<string>();
   private _streamingToolCallArguments = new Map<
@@ -745,18 +745,23 @@ export class StreamingUIController {
     this.host.mergeCurrentTurnSteps();
   }
 
-  beginCompaction(instruction?: string): void {
+  beginCompaction(instruction?: string, model?: string): void {
     if (this._activeCompaction !== undefined) this.endCompaction();
-    this._activeCompaction = { instruction };
+    this._activeCompaction = { instruction, model };
     this.host.state.ui.requestRender();
   }
 
-  endCompaction(tokensBefore?: number, tokensAfter?: number, summary?: string): void {
+  endCompaction(
+    tokensBefore?: number,
+    tokensAfter?: number,
+    summary?: string,
+    handoffPath?: string,
+  ): void {
     const compaction = this._activeCompaction;
     if (compaction === undefined) return;
     const { state } = this.host;
-    const block = new CompactionComponent(state.ui, compaction.instruction);
-    block.markDone(tokensBefore, tokensAfter, summary);
+    const block = new CompactionComponent(state.ui, compaction.instruction, compaction.model);
+    block.markDone(tokensBefore, tokensAfter, summary, handoffPath);
     this._activeCompaction = undefined;
     this.mountCompactionBlock(block);
     state.ui.requestRender();
@@ -766,7 +771,7 @@ export class StreamingUIController {
     const compaction = this._activeCompaction;
     if (compaction === undefined) return;
     const { state } = this.host;
-    const block = new CompactionComponent(state.ui, compaction.instruction);
+    const block = new CompactionComponent(state.ui, compaction.instruction, compaction.model);
     block.markCanceled();
     this._activeCompaction = undefined;
     this.mountCompactionBlock(block);

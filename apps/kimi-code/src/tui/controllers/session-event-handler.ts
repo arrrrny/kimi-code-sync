@@ -1167,7 +1167,7 @@ export class SessionEventHandler {
       streamingPhase: 'waiting',
       streamingStartTime: Date.now(),
     });
-    this.host.streamingUI.beginCompaction(event.instruction);
+    this.host.streamingUI.beginCompaction(event.instruction, event.model_display ?? event.model);
   }
 
   private handleCompactionEnd(
@@ -1181,6 +1181,7 @@ export class SessionEventHandler {
       event.result.tokensBefore,
       event.result.tokensAfter,
       event.result.summary,
+      event.result.handoffPath,
     );
     // A completed compaction just refreshed and shrank the cached context —
     // count it as activity so the next submit isn't judged against the

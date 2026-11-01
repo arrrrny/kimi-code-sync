@@ -46,6 +46,7 @@ export interface ContextCompactionShapeInput {
   readonly keptHeadUserMessageCount?: number;
   readonly droppedCount?: number;
   readonly legacyTail?: boolean;
+  readonly handoffPath?: string;
 }
 
 export interface ContextCompactionShape {
@@ -97,7 +98,7 @@ export function buildContextCompactionShape(
     ? [...selection.head, ...selection.tail]
     : [...selection.head, elisionMessage, ...selection.tail];
   const contextSummary = input.contextSummary ?? input.summary;
-  const continuationMessage = createCompactionContinuationMessage();
+  const continuationMessage = createCompactionContinuationMessage(input.handoffPath);
   const tokensAfter =
     input.tokensAfter ??
     (input.requestOverheadTokens ?? 0) +
@@ -152,15 +153,22 @@ export function buildCompactionElisionText(omittedTokens: number): string {
   );
 }
 
-export function createCompactionContinuationMessage(): ContextMessage {
+export function createCompactionContinuationMessage(handoffPath?: string): ContextMessage {
   return {
     role: 'user',
-    content: [{ type: 'text', text: buildCompactionContinuationText() }],
+    content: [{ type: 'text', text: buildCompactionContinuationText(handoffPath) }],
+    toolCalls: [],
     origin: { kind: 'injection', variant: COMPACTION_CONTINUATION_VARIANT },
   };
 }
 
-export function buildCompactionContinuationText(): string {
+export function buildCompactionContinuationText(handoffPath?: string): string {
+  const handoff = handoffPath?.trim() ?? '';
+  if (handoff.length > 0) {
+    return wrapSystemReminder(
+      `Context compaction is complete, and a handoff document for the work in progress is on disk at ${handoff}. Read it end to end now, before any other tool call and before replying to the user, then continue that work from the threads it records — this is the same task you were mid-way through, not a new one.`,
+    );
+  }
   return wrapSystemReminder(
     'Context compaction is complete — continue the work that was in progress when it began.',
   );
@@ -170,6 +178,17 @@ export function collectCompactableUserMessages<T extends MessageLike>(messages: 
   return messages.filter(
     (message) => isRealUserInput(message) && !isCompactionSummaryMessage(message),
   );
+}
+
+export function firstUserPromptText(
+  messages: readonly MessageLike[],
+  maxChars = 2_000,
+): string | undefined {
+  const first = collectCompactableUserMessages(messages).at(0);
+  if (first === undefined) return undefined;
+  const text = extractText(first.content).trim();
+  if (text.length === 0) return undefined;
+  return text.length <= maxChars ? text : `${text.slice(0, maxChars)}...`;
 }
 
 export function isCompactionSummaryMessage(message: MessageLike): boolean {
@@ -333,11 +352,9 @@ function truncateTextToTokensFromEnd(text: string, maxTokens: number): string {
   let start = text.length;
   for (let i = text.length - 1; i >= 0; i--) {
     let isAscii = false;
-    // oxlint-disable-next-line unicorn/prefer-code-point
-    const code = text.charCodeAt(i);
+    const code = text.codePointAt(i)!;
     if (code >= 0xdc00 && code <= 0xdfff && i > 0) {
-      // oxlint-disable-next-line unicorn/prefer-code-point
-      const high = text.charCodeAt(i - 1);
+      const high = text.codePointAt(i - 1)!;
       if (high >= 0xd800 && high <= 0xdbff) {
         i--;
       }

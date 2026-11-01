@@ -210,11 +210,71 @@ export const BUILTIN_SLASH_COMMANDS = [
     availability: 'always',
   },
   {
+    name: 'update-all-session-models',
+    aliases: ['update-models'],
+    description: 'Switch the model for the current session and the sessions you recently used',
+    priority: 100,
+    argumentHint: '[model] [--all]',
+    availability: 'always',
+    // Bulk session mutation is strictly opt-in until the experiment graduates;
+    // hidden from the palette and unresolvable while the flag is off.
+    experimentalFlag: 'update-all-session-models',
+  },
+  {
     name: 'secondary-model',
     aliases: ['subagent-model'],
     description: 'Configure the secondary model for subagents',
     priority: 90,
     availability: 'always',
+  },
+  {
+    name: 'visual-model',
+    aliases: [],
+    description: 'Configure the visual model for image inspection',
+    priority: 91,
+    availability: 'always',
+  },
+  {
+    // Renamed from `compaction-model` (issue: `/comp` + Tab autocompleted to
+    // this command instead of `/compact`, breaking muscle memory). The
+    // engine flag id stays `compaction-model` — only the command name moved.
+    name: 'squeeze-model',
+    aliases: [],
+    description: 'Configure the model used for context compaction (squeeze)',
+    priority: 91,
+    availability: 'always',
+  },
+  {
+    name: 'squeeze-model-secondary',
+    aliases: [],
+    description:
+      'Configure the fallback compaction model (tried after the squeeze model, before the current model)',
+    priority: 91,
+    availability: 'always',
+  },
+  {
+    name: 'fallback-model',
+    aliases: [],
+    description:
+      'Configure the fallback model (tried after the primary model exhausts its retry budget)',
+    priority: 91,
+    availability: 'always',
+  },
+  {
+    name: 'fallback-model-secondary',
+    aliases: [],
+    description:
+      'Configure the secondary fallback model (tried after the first fallback model also exhausts retries)',
+    priority: 91,
+    availability: 'always',
+  },
+  {
+    name: 'substitute-model',
+    aliases: [],
+    description: 'Configure the substitute model for rate-limit fallback',
+    priority: 91,
+    availability: 'always',
+    experimentalFlag: 'substitute-model',
   },
   {
     name: 'effort',
@@ -227,6 +287,14 @@ export const BUILTIN_SLASH_COMMANDS = [
     name: 'provider',
     aliases: ['providers'],
     description: 'Manage AI providers (add / delete / refresh)',
+    priority: 95,
+    availability: 'always',
+  },
+  {
+    name: 'refresh-catalog',
+    aliases: [],
+    description:
+      'Refresh OpenAI-compatible provider model catalogs (preserves curated context windows, enriches names from models.dev)',
     priority: 95,
     availability: 'always',
   },
@@ -315,6 +383,26 @@ export const BUILTIN_SLASH_COMMANDS = [
     argumentHint: '<instruction>',
   },
   {
+    name: 'compact-threshold',
+    aliases: [],
+    description: 'Show or set the per-session auto-compaction trigger ratio (0.05-0.99)',
+    priority: 80,
+    argumentHint: '[<ratio>|off]',
+    // Reading and writing the threshold are both allowed while a turn is
+    // streaming; a mid-turn change can move the compaction trigger point
+    // later for the running turn.
+    availability: 'always',
+  },
+  {
+    name: 'compact-threshold-k',
+    aliases: [],
+    description:
+      'Show or set the per-session auto-compaction token budget (in thousands of tokens, absolute cap)',
+    priority: 80,
+    argumentHint: '[<tokens in 1000s>|off]',
+    availability: 'always',
+  },
+  {
     name: 'goal',
     aliases: [],
     description: 'Start or manage an autonomous goal',
@@ -338,9 +426,16 @@ export const BUILTIN_SLASH_COMMANDS = [
   },
   {
     name: 'fork',
-    aliases: [],
+    aliases: ['fork-session'],
     description: 'Fork the current session into a copy without switching to it',
     priority: 80,
+  },
+  {
+    name: 'fork-and-switch',
+    aliases: [],
+    description: 'Fork the current session and switch into the fork immediately',
+    priority: 80,
+    availability: 'idle-only',
   },
   {
     name: 'title',

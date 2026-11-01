@@ -6,6 +6,7 @@ export interface LlmConnection {
   readonly defaultHeaders?: Record<string, string>;
   readonly betaApi?: boolean;
   readonly vertexai?: boolean;
+  readonly proxyUrl?: string;
 }
 
 export interface LlmModel extends LlmConnection {

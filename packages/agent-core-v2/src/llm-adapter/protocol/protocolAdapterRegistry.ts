@@ -186,6 +186,7 @@ export class ProtocolAdapterRegistry implements IProtocolAdapterRegistry {
       maxContextSize: model.maxContextSize > 0 ? model.maxContextSize : undefined,
       maxInputSize: model.maxInputSize,
       baseUrl: model.baseUrl,
+      proxyUrl: model.proxyUrl,
       defaultHeaders: Object.keys(model.headers).length > 0 ? { ...model.headers } : undefined,
       supportEfforts: model.supportEfforts,
       defaultEffort: model.defaultEffort,
@@ -222,8 +223,11 @@ export class ProtocolAdapterRegistry implements IProtocolAdapterRegistry {
         resolve: async () => {
           const credential = await model.credentialProvider?.resolve();
           const apiKey = credential?.apiKey ?? connection.apiKey;
-          if (credential === undefined && apiKey === undefined) return undefined;
-          return { ...credential, apiKey };
+          const proxyUrl = credential?.proxyUrl ?? connection.proxyUrl;
+          if (credential === undefined && apiKey === undefined && proxyUrl === undefined) {
+            return undefined;
+          }
+          return { ...credential, apiKey, proxyUrl };
         },
         canRecover: (error) => model.credentialProvider?.canRecover?.(error) === true,
         invalidate: () => model.credentialProvider?.invalidate?.(),

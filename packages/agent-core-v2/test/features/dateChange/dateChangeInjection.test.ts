@@ -298,7 +298,8 @@ describe('AgentDateChangeService', () => {
     await runWillBeginStepHooks(loop);
     expect(dateReminders(context)).toHaveLength(1);
 
-    await ctx.get(IAgentConversationUndoService).undo(1);
+    expect(await ctx.get(IAgentConversationUndoService).undo(1)).toBe(1);
+    expect(context.get().some((message) => messageText(message).includes('first turn'))).toBe(false);
     expect(dateReminders(context)).toHaveLength(1);
     context.append({
       role: 'user',
@@ -325,7 +326,8 @@ describe('AgentDateChangeService', () => {
     await runWillBeginStepHooks(loop);
     expect(dateReminders(context)).toHaveLength(1);
 
-    await ctx.get(IAgentConversationUndoService).undo(1);
+    expect(await ctx.get(IAgentConversationUndoService).undo(1)).toBe(1);
+    expect(context.get().some((message) => messageText(message).includes('first turn'))).toBe(false);
     expect(dateReminders(context)).toHaveLength(1);
     context.append({
       role: 'user',

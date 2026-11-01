@@ -273,7 +273,7 @@ function agentLoopServiceView(agent: IAgentScopeHandle): Record<string, unknown>
           request_id: snapshot.activeRequestId,
         });
       }
-      loop.cancel(turnId === undefined ? undefined : { turnId });
+      loop.cancelFromUser(turnId);
     },
   };
 }

@@ -52,6 +52,7 @@ export class ApiKeyInputDialogComponent extends Container implements Focusable {
   private readonly subtitleLines: readonly string[];
   private readonly mask: boolean;
   private readonly emptyHint: string;
+  private readonly allowEmpty: boolean;
   private done = false;
   private emptyHinted = false;
 
@@ -59,7 +60,13 @@ export class ApiKeyInputDialogComponent extends Container implements Focusable {
     platformName: string,
     subtitleLines: readonly string[],
     onDone: (result: ApiKeyInputResult) => void,
-    private readonly options?: { title?: string; mask?: boolean; emptyHint?: string; trimValue?: boolean },
+    private readonly options?: {
+      title?: string;
+      mask?: boolean;
+      emptyHint?: string;
+      allowEmpty?: boolean;
+      trimValue?: boolean;
+    },
   ) {
     super();
     this.onDone = onDone;
@@ -67,6 +74,7 @@ export class ApiKeyInputDialogComponent extends Container implements Focusable {
     this.subtitleLines = subtitleLines;
     this.mask = options?.mask ?? true;
     this.emptyHint = options?.emptyHint ?? 'API key cannot be empty.';
+    this.allowEmpty = options?.allowEmpty ?? false;
     this.input.onSubmit = (value) => {
       this.submit(value);
     };
@@ -152,6 +160,11 @@ export class ApiKeyInputDialogComponent extends Container implements Focusable {
     if (this.done) return;
     const trimmed = value.trim();
     if (trimmed.length === 0) {
+      if (this.allowEmpty) {
+        this.done = true;
+        this.onDone({ kind: 'ok', value: '' });
+        return;
+      }
       this.emptyHinted = true;
       return;
     }

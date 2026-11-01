@@ -1,5 +1,6 @@
-import { resolveEndpoint } from '#/llm/endpoint';
+import { mergeHeaders, resolveEndpoint } from '#/llm/endpoint';
 import { isAbortError, toLlmErrorMessage, toLlmSyntaxErrorMessage } from '#/llm/protocol/errors';
+import { opencodeSessionHeaders } from '#/llm/protocol/session-headers';
 import type { DecodeSink, LlmModule, ProtocolReply } from '#/llm/protocol/protocol';
 import { withProtocolCapabilities } from '#/llm/protocol/rules/model';
 import type { LlmRequest } from '#/llm/request';
@@ -83,11 +84,18 @@ export async function generate(request: LlmRequest, control: LlmAttemptControl):
   }
   try {
     const endpoint = await resolveEndpoint(request.endpoint);
+    const sessionHeaders = opencodeSessionHeaders({
+      cacheKey: module.model.cacheKey,
+      apiKey: endpoint.apiKey,
+      baseUrl: endpoint.baseUrl,
+    });
+    const effectiveEndpoint =
+      sessionHeaders === undefined ? endpoint : { ...endpoint, headers: mergeHeaders(endpoint.headers, sessionHeaders) };
     const clientFactory = request.endpoint?.clientFactory;
     const client =
       clientFactory === undefined
-        ? base.client(endpoint, options)
-        : clientFactory(endpoint);
+        ? base.client(effectiveEndpoint, options)
+        : clientFactory(effectiveEndpoint);
     const sink = createEventSink(onEvent);
     onEvent?.({ type: 'attempt.sending' });
     const chunks = stream

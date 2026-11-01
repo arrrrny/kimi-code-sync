@@ -27,30 +27,31 @@ describe('CompactionComponent', () => {
     }
   });
 
-  it('renders a tip suffix while compacting', () => {
-    const component = new CompactionComponent(undefined, undefined, 'ctrl+s: steer mid-turn');
+  it('renders the saved handoff path after compaction completes', () => {
+    const component = new CompactionComponent();
 
     try {
+      component.markDone(1000, 500, 'summary text', '/home/s/w/agents/a/handoff/x.md');
       const lines = component.render(120).map(strip);
       const text = lines.join('\n');
 
-      expect(text).toContain('Compacting context… · Tip: ctrl+s: steer mid-turn');
+      expect(text).toContain('Compaction complete');
+      expect(text).toContain('Handoff saved: /home/s/w/agents/a/handoff/x.md');
     } finally {
       component.dispose();
     }
   });
 
-  it('does not render a tip after compaction completes', () => {
-    const component = new CompactionComponent(undefined, undefined, 'ctrl+s: steer mid-turn');
+  it('renders no handoff line when the compaction produced none', () => {
+    const component = new CompactionComponent();
 
     try {
-      component.markDone(1000, 500);
+      component.markDone(1000, 500, 'summary text');
       const lines = component.render(120).map(strip);
       const text = lines.join('\n');
 
       expect(text).toContain('Compaction complete');
-      expect(text).not.toContain('Tip:');
-      expect(text).not.toContain('Ctrl-O');
+      expect(text).not.toContain('Handoff saved:');
     } finally {
       component.dispose();
     }
@@ -172,6 +173,31 @@ describe('CompactionComponent', () => {
       expect(after).not.toBe(before);
     } finally {
       chalk.level = previousLevel;
+      component.dispose();
+    }
+  });
+
+  it('renders the model name in the compacting label when supplied', () => {
+    const component = new CompactionComponent(undefined, undefined, 'kimi-k2');
+
+    try {
+      const text = component.render(120).map(strip).join('\n');
+
+      expect(text).toContain('Compacting context using kimi-k2…');
+    } finally {
+      component.dispose();
+    }
+  });
+
+  it('falls back to the generic label when no model is supplied', () => {
+    const component = new CompactionComponent();
+
+    try {
+      const text = component.render(120).map(strip).join('\n');
+
+      expect(text).toContain('Compacting context…');
+      expect(text).not.toContain('using ');
+    } finally {
       component.dispose();
     }
   });

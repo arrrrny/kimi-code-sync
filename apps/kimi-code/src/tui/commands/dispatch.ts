@@ -29,11 +29,20 @@ import { handleCopyCommand } from './copy';
 import { handleDesktopCommand } from './desktop';
 import {
   handleCompactCommand,
+  handleCompactThresholdCommand,
+  handleCompactThresholdKCommand,
   handleEditorCommand,
   handleEffortCommand,
   handleModelCommand,
   handlePlanCommand,
   handleSecondaryModelCommand,
+  handleSubstituteModelCommand,
+  handleUpdateAllSessionModelsCommand,
+  handleVisualModelCommand,
+  handleSqueezeModelCommand,
+  handleSqueezeModelSecondaryCommand,
+  handleFallbackModelCommand,
+  handleFallbackModelSecondaryCommand,
   handleThemeCommand,
   showExperimentsPanel,
   showModelPicker,
@@ -46,7 +55,7 @@ import { handleFeedbackCommand, showMcpServers, showStatusReport, showUsage } fr
 import { handleAddDirCommand } from './add-dir';
 import { parseSlashInput } from './parse';
 import { handlePluginsCommand } from './plugins';
-import { handleProviderCommand } from './provider';
+import { handleProviderCommand, handleRefreshCatalogCommand } from './provider';
 import {
   findBuiltInSlashCommand,
   resolveSlashCommandAvailability,
@@ -64,6 +73,7 @@ import {
 import {
   handleExportDebugZipCommand,
   handleExportMdCommand,
+  handleForkAndSwitchCommand,
   handleForkCommand,
   handleInitCommand,
   handleTitleCommand,
@@ -84,11 +94,20 @@ export { handleDesktopCommand } from './desktop';
 export { handleAddDirCommand } from './add-dir';
 export {
   handleCompactCommand,
+  handleCompactThresholdCommand,
+  handleCompactThresholdKCommand,
   handleEditorCommand,
   handleEffortCommand,
   handleModelCommand,
   handlePlanCommand,
   handleSecondaryModelCommand,
+  handleSubstituteModelCommand,
+  handleUpdateAllSessionModelsCommand,
+  handleVisualModelCommand,
+  handleSqueezeModelCommand,
+  handleSqueezeModelSecondaryCommand,
+  handleFallbackModelCommand,
+  handleFallbackModelSecondaryCommand,
   handleThemeCommand,
   showModelPicker,
   showExperimentsPanel,
@@ -101,13 +120,6 @@ export { handleFeedbackCommand, showMcpServers, showStatusReport, showUsage } fr
 export { handlePluginsCommand } from './plugins';
 export { handleReloadCommand, handleReloadTuiCommand } from './reload';
 export { handleGoalCommand } from './goal';
-export {
-  handleExportDebugZipCommand,
-  handleExportMdCommand,
-  handleForkCommand,
-  handleInitCommand,
-  handleTitleCommand,
-} from './session';
 export { handleUndoCommand } from './undo';
 export { handleRemoteControlCommand, handleWebCommand } from './web';
 
@@ -352,6 +364,7 @@ const SESSION_REQUIRING_COMMANDS: ReadonlySet<BuiltinSlashCommandName> = new Set
   'export-debug-zip',
   'export-md',
   'fork',
+  'fork-and-switch',
   'goal',
   'init',
   'plan',
@@ -473,8 +486,29 @@ async function handleBuiltInSlashCommand(
     case 'model':
       await handleModelCommand(host, args);
       return;
+    case 'update-all-session-models':
+      await handleUpdateAllSessionModelsCommand(host, args);
+      return;
     case 'secondary-model':
       await handleSecondaryModelCommand(host, args);
+      return;
+    case 'visual-model':
+      await handleVisualModelCommand(host, args);
+      return;
+    case 'squeeze-model':
+      await handleSqueezeModelCommand(host, args);
+      return;
+    case 'squeeze-model-secondary':
+      await handleSqueezeModelSecondaryCommand(host, args);
+      return;
+    case 'fallback-model':
+      await handleFallbackModelCommand(host, args);
+      return;
+    case 'fallback-model-secondary':
+      await handleFallbackModelSecondaryCommand(host, args);
+      return;
+    case 'substitute-model':
+      await handleSubstituteModelCommand(host, args);
       return;
     case 'effort':
       await handleEffortCommand(host, args);
@@ -482,6 +516,11 @@ async function handleBuiltInSlashCommand(
     case 'provider':
       await handleProviderCommand(host, args);
       return;
+    case 'refresh-catalog': {
+      const providerId = args.trim().length > 0 ? args.trim() : undefined;
+      await handleRefreshCatalogCommand(host, providerId);
+      return;
+    }
     case 'permission':
       showPermissionPicker(host);
       return;
@@ -521,6 +560,12 @@ async function handleBuiltInSlashCommand(
     case 'compact':
       await handleCompactCommand(host, args);
       return;
+    case 'compact-threshold':
+      await handleCompactThresholdCommand(host, args);
+      return;
+    case 'compact-threshold-k':
+      await handleCompactThresholdKCommand(host, args);
+      return;
     case 'goal':
       await handleGoalCommand(host, args);
       return;
@@ -529,6 +574,9 @@ async function handleBuiltInSlashCommand(
       return;
     case 'fork':
       await handleForkCommand(host, args);
+      return;
+    case 'fork-and-switch':
+      await handleForkAndSwitchCommand(host, args);
       return;
     case 'export-md':
       await handleExportMdCommand(host, args);

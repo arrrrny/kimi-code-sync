@@ -34,3 +34,5 @@ export interface IAgentFullCompactionService {
 }
 
 export const IAgentFullCompactionService = createDecorator<IAgentFullCompactionService>('agentFullCompactionService');
+
+export const FULL_COMPACTION_STEP_HOOK_ID = 'full-compaction';

@@ -21,6 +21,7 @@ import {
   classifyApiError,
   errorDiagnostics,
   isRetryableGenerateError,
+  isTerminalProviderApiError,
 } from '#/llm-adapter/contract/errors';
 import { type ThinkingEffort } from '#human/llm-requester/thinking';
 import type { LlmCredentialProvider } from '#human/llm-requester/requester';
@@ -84,6 +85,10 @@ import {
   sleepForRetry,
 } from '#/_base/utils/retry';
 import { IBootstrapService } from '#/app/bootstrap/bootstrap';
+import { IFlagService } from '#/app/flag/flag';
+import { substituteModelActiveKey } from '#/session/substitute/state';
+import { fallbackModelActiveKey, type ActiveFallbackModel } from '#/session/fallback/state';
+import { resolveFallbackBinding } from '#/session/fallback/configSection';
 
 const noopOnPart: AgentLLMRequestPartHandler = () => {};
 
@@ -166,6 +171,7 @@ export class AgentLoopRequester implements LoopRequester {
     @IAgentScopeContext private readonly scopeContext: IAgentScopeContext,
     @IAgentStateService private readonly states: IAgentStateService,
     @IBootstrapService private readonly bootstrap: IBootstrapService,
+    @IFlagService private readonly flags: IFlagService,
   ) {
     this.projector = new AgentLoopProjector(log, telemetry, states);
     this.states.contributeState(llmRequestTraceKey);
@@ -173,6 +179,7 @@ export class AgentLoopRequester implements LoopRequester {
     this.states.contributeState(llmRequesterTurnConfigsKey);
     this.states.contributeState(llmRequesterMediaRecoveryKey);
     this.states.contributeState(llmRequesterEmittedThinkingEffortWarningsKey);
+    this.states.contributeState(fallbackModelActiveKey);
   }
 
   registerMediaPolicy(factory: AgentMediaPolicyFactory): void {
@@ -249,7 +256,7 @@ export class AgentLoopRequester implements LoopRequester {
     setRequestId(undefined);
     try {
       return await this.runRequest(
-        this.resolveRequest(overrides),
+        overrides,
         onPart,
         signal,
         setRequestId,
@@ -321,12 +328,14 @@ export class AgentLoopRequester implements LoopRequester {
   }
 
   private async runRequest(
-    request: ResolvedLLMRequest,
+    overrides: AgentLLMRequestOverrides,
     onPart: AgentLLMRequestPartHandler,
     signal: AbortSignal | undefined,
     onRequestId: (requestId: string | undefined) => void,
     onAttemptRetry: (() => void) | undefined,
   ): Promise<AgentLLMRequestFinish> {
+    let request = this.resolveRequest(overrides);
+    this.toolCallIdNormalizer.seedFrom(this.context.get());
     let cacheProbeReported = false;
     const mediaPolicy = this.mediaPolicyFactory?.(request.model, request.request);
     const recoveredMedia = this.recoveredMedia(request);
@@ -538,6 +547,22 @@ export class AgentLoopRequester implements LoopRequester {
       } catch (error) {
         const raw = unwrapErrorCause(error);
         if (
+          isTerminalProviderApiError(raw) &&
+          overrides.model === undefined &&
+          signal?.aborted !== true &&
+          this.activateFallback('terminal-error')
+        ) {
+          request = this.resolveRequest(overrides);
+          mediaStrippedThisRequest = false;
+          previousMediaCount = undefined;
+          previousMediaPolicy = undefined;
+          mediaPaths = undefined;
+          onAttemptRetry?.();
+          policy = undefined;
+          infiniteRetryAttempt = 0;
+          continue;
+        }
+        if (
           !this.infiniteRetryEnabled ||
           isAbortError(error) ||
           signal?.aborted === true ||
@@ -624,7 +649,19 @@ export class AgentLoopRequester implements LoopRequester {
 
   private resolveRequest(overrides: AgentLLMRequestOverrides): ResolvedLLMRequest {
     const turnConfig = this.resolveTurnConfig(overrides.source);
-    const resolved = turnConfig?.resolved ?? this.profile.resolveModelContext();
+    const fallbackAlias = overrides.model === undefined ? this.activeFallbackAlias() : undefined;
+    const substituteAlias =
+      overrides.model === undefined && fallbackAlias === undefined
+        ? this.activeSubstituteAlias()
+        : undefined;
+    const resolved =
+      overrides.model !== undefined
+        ? this.profile.resolveModelContextFor(overrides.model)
+        : fallbackAlias !== undefined
+          ? this.profile.resolveModelContextFor(fallbackAlias)
+          : substituteAlias !== undefined
+            ? this.profile.resolveModelContextFor(substituteAlias)
+            : turnConfig?.resolved ?? this.profile.resolveModelContext();
     const baseParams = turnConfig?.params ?? this.profile.resolveRequestParams();
     const model = this.modelCatalog.get(resolved.modelAlias);
     const maxCompletionTokensCap =
@@ -665,6 +702,85 @@ export class AgentLoopRequester implements LoopRequester {
       source: overrides.source,
       logFields: logFieldsForSource(overrides.source),
     };
+  }
+
+  private activeSubstituteAlias(): string | undefined {
+    if (!this.states.has(substituteModelActiveKey)) return undefined;
+    const active = this.states.get(substituteModelActiveKey);
+    if (active === undefined) return undefined;
+    if (Date.now() >= active.until) {
+      this.states.set(substituteModelActiveKey, undefined);
+      void this.dispatcher.dispatch(
+        new WarningIssued({
+          agentId: this.scopeContext.agentId,
+          code: 'substitute-model',
+          message: `Substitute model cooldown ended, retrying primary model ${active.primaryAlias}`,
+        }),
+      );
+      return undefined;
+    }
+    try {
+      this.profile.resolveModelContextFor(active.alias);
+    } catch {
+      return undefined;
+    }
+    return active.alias;
+  }
+
+  private activeFallbackAlias(): string | undefined {
+    if (!this.states.has(fallbackModelActiveKey)) return undefined;
+    const active = this.states.get(fallbackModelActiveKey);
+    if (active === undefined) return undefined;
+    if (active.forModelAlias !== this.profile.data().modelAlias) {
+      this.states.set(fallbackModelActiveKey, undefined);
+      return undefined;
+    }
+    try {
+      this.profile.resolveModelContextFor(active.alias);
+    } catch {
+      return undefined;
+    }
+    return active.alias;
+  }
+
+  private activateFallback(cause: 'retry-budget' | 'terminal-error'): boolean {
+    const currentActive = this.states.get(fallbackModelActiveKey);
+    if (currentActive?.tier === 'secondary') return false;
+    const lastTriedAlias =
+      currentActive !== undefined ? currentActive.alias : this.profile.data().modelAlias;
+    const own = {
+      modelAlias: lastTriedAlias ?? '',
+      thinkingLevel: this.profile.getEffectiveThinkingLevel(),
+    };
+    const binding = resolveFallbackBinding(this.config, this.flags, own, lastTriedAlias, {
+      fallbackAlias: this.profile.getSessionModelOverride('fallback'),
+      fallbackSecondaryAlias: this.profile.getSessionModelOverride('fallbackSecondary'),
+    });
+    if (binding === undefined) return false;
+    if (binding.model === lastTriedAlias) return false;
+    try {
+      this.profile.resolveModelContextFor(binding.model);
+    } catch {
+      return false;
+    }
+    const tier: ActiveFallbackModel['tier'] = currentActive === undefined ? 'primary' : 'secondary';
+    this.states.set(fallbackModelActiveKey, {
+      alias: binding.model,
+      tier,
+      forModelAlias: this.profile.data().modelAlias,
+    });
+    const switchReason =
+      cause === 'terminal-error'
+        ? 'failed with a terminal provider error'
+        : 'exhausted its retry budget';
+    void this.dispatcher.dispatch(
+      new WarningIssued({
+        agentId: this.scopeContext.agentId,
+        code: 'fallback-model',
+        message: `Model ${lastTriedAlias ?? '<unknown>'} ${switchReason}, switching to fallback model ${binding.model} (tier: ${tier})`,
+      }),
+    );
+    return true;
   }
 
   private resolveTurnConfig(source: AgentLLMRequestSource | undefined): TurnRequestConfig | undefined {
@@ -833,6 +949,7 @@ function toolSignature(tools: readonly Tool[]): readonly LlmRequestToolSchema[] 
 function requestKindForRecord(fields: AgentLLMRequestLogFields): LlmRequestPayload['kind'] {
   if (fields['kind'] === 'compaction') return 'compaction';
   if (fields['requestKind'] === 'full_compaction') return 'compaction';
+  if (fields['requestKind'] === 'full_compaction_handoff') return 'compaction';
   return 'loop';
 }
 

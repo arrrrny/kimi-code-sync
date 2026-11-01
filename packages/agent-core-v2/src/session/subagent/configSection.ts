@@ -11,6 +11,7 @@ import {
 } from '#/app/config/config';
 import { registerConfigSection } from '#/app/config/configSectionContributions';
 import { THINKING_SECTION } from '#/app/kosongConfig/configSection';
+import type { IAgentProfileService, SessionModelOverrideKind } from '#/agent/profile/profile';
 import type { IModelCatalog, Model } from '#/llm-adapter/model/catalog';
 import {
   declaredDefaultEffortForModel,
@@ -247,11 +248,31 @@ export type SubagentModelSource = 'primary_override' | 'inherited' | 'secondary_
 
 type SubagentBinding = { model: string; thinking?: string; modelSource: SubagentModelSource };
 
+const INHERITED_SESSION_MODEL_OVERRIDE_KINDS: readonly SessionModelOverrideKind[] = [
+  'fallback',
+  'fallbackSecondary',
+  'substitute',
+];
+
+export function inheritFallbackOverrides(
+  target: IAgentProfileService,
+  source: IAgentProfileService,
+): void {
+  for (const kind of INHERITED_SESSION_MODEL_OVERRIDE_KINDS) {
+    target.setSessionModelOverride(kind, source.getSessionModelOverride(kind));
+  }
+}
+
 export function resolveSubagentBinding(
   config: IConfigService,
   own: { modelAlias: string; thinkingLevel: string },
   requested?: string,
+  overrides?: { secondaryAlias?: string },
 ): SubagentBinding {
+  const overrideAlias = overrides?.secondaryAlias;
+  if (overrideAlias !== undefined) {
+    return { model: overrideAlias, thinking: own.thinkingLevel, modelSource: 'secondary_pool' };
+  }
   return bindSubagentModel(config, own, requested, []);
 }
 
@@ -259,7 +280,12 @@ export function resolveSubagentBindingWithPrimary(
   config: IConfigService,
   own: { modelAlias: string; thinkingLevel: string },
   requested?: string,
+  overrides?: { secondaryAlias?: string },
 ): SubagentBinding {
+  const overrideAlias = overrides?.secondaryAlias;
+  if (overrideAlias !== undefined) {
+    return { model: overrideAlias, thinking: own.thinkingLevel, modelSource: 'secondary_pool' };
+  }
   if (requested === PRIMARY_SUBAGENT_MODEL_CHOICE) {
     return { model: own.modelAlias, thinking: own.thinkingLevel, modelSource: 'primary_override' };
   }

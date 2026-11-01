@@ -49,6 +49,7 @@ export interface AgentLLMRequestOverrides {
   maxOutputSize?: number;
   usedContextTokens?: number;
   promptCacheProbe?: 'compaction';
+  model?: string;
   onAttemptRetry?: () => void;
 }
 

@@ -176,11 +176,11 @@ function replayPendingDelta(
   snap: PendingSnapshot,
   pending: PendingSnapshot,
 ): void {
-  const snapNotifications = new Set(snap.notifications);
-  for (const entry of pending.notifications) {
-    if (!snapNotifications.has(entry)) {
-      deps.actor.send({ type: 'input.notify', entry });
-    }
+  const replayedNotifications = new Set<UserEntry>();
+  for (const entry of [...snap.notifications, ...pending.notifications]) {
+    if (replayedNotifications.has(entry)) continue;
+    replayedNotifications.add(entry);
+    deps.actor.send({ type: 'input.notify', entry });
   }
   const snapReminders = new Set(snap.reminders);
   for (const entry of pending.reminders) {

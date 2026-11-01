@@ -221,6 +221,7 @@ export class TowerSpawnTool implements ITowerSpawnTool {
                 { modelAlias: own.modelAlias, thinkingLevel: own.thinkingLevel },
                 args.model ??
                   (args.kind === 'reviewer' ? PRIMARY_SUBAGENT_MODEL_CHOICE : undefined),
+                { secondaryAlias: this.profile.getSessionModelOverride('secondary') },
               );
       } catch (error) {
         return {

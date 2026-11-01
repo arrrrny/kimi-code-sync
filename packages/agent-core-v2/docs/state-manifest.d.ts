@@ -58,6 +58,7 @@
 //     contextProjector.lastRepairSignature            src/agent/loop/projector.ts
 //     environmentBinding                              src/agent/environmentBinding/environmentBindingOps.ts
 //     externalHooks.stopHookContinuationUsed          src/features/externalHooks/agent/agentExternalHooksService.ts
+//     fallbackModel.active                            src/session/fallback/state.ts
 //     fileHistory                                     src/features/fileHistory/fileHistoryOps.ts
 //     fullCompaction                                  src/agent/fullCompaction/compactionOps.ts
 //     fullCompaction.activeTurnId                     src/agent/fullCompaction/fullCompactionService.ts
@@ -96,6 +97,7 @@
 //     profile.emittedThinkingEffortWarnings           src/agent/profile/profileService.ts
 //     profile.emittedToolPatternWarnings              src/agent/profile/profileService.ts
 //     shellCommand.tasks                              src/agent/shellCommand/shellCommandService.ts
+//     squeezeModel                                    src/agent/fullCompaction/squeezeForkOps.ts
 //     swarm                                           src/features/swarm/swarmOps.ts
 //     task                                            src/agent/task/taskOps.ts
 //     task.activeTaskReminderPending                  src/agent/task/taskService.ts
@@ -1628,6 +1630,12 @@ export interface AgentStateSnapshot {
   'fullCompaction.consecutiveOverflowCompactions': number;
   'fullCompaction.lastCompactedTokenCount': number | null;
   'fullCompaction.observedMaxContextTokensByModel': Map<string, number>;
+  // src/agent/fullCompaction/squeezeForkOps.ts
+  // replayable · durable — folds: SqueezeModelDecided
+  'squeezeModel': /* SqueezeModelState — packages/agent-core-v2/src/agent/fullCompaction/squeezeForkOps.ts */ {
+    readonly model: string;
+    readonly modelDisplay?: string;
+  };
   // src/agent/interruptionReminder/interruptionReminderOps.ts
   // replayable · durable — folds: InterruptionReminderRecorded
   'interruptionReminder': null;
@@ -1667,6 +1675,7 @@ export interface AgentStateSnapshot {
       readonly thinkingLevel: /* ThinkingEffort — packages/agent-core-v2/src/human/llm-requester/thinking.ts */ 'off' | 'on' | (string & {});
       readonly reservedContextSize: number | undefined;
       readonly compactionTriggerRatio: number | undefined;
+      readonly compactionTokenBudget: number | undefined;
       readonly compactionMaxAttempts: number | undefined;
     };
     readonly params: /* ModelRequestParams — packages/agent-core-v2/src/llm-adapter/model/generate.ts */ {
@@ -2018,6 +2027,12 @@ export interface AgentStateSnapshot {
   'tower': boolean;
   // replayable · durable — folds: TowerModeEnter, TowerModeExit
   'tower.owner': string | undefined;
+  // src/session/fallback/state.ts
+  'fallbackModel.active': /* ActiveFallbackModel — packages/agent-core-v2/src/session/fallback/state.ts */ {
+    readonly alias: string;
+    readonly tier: 'primary' | 'secondary';
+    readonly forModelAlias: string | undefined;
+  } | undefined;
 }
 
 export type AgentStateKey = keyof AgentStateSnapshot;
