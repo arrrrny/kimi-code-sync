@@ -1,0 +1,17 @@
+import type { ModelCapability } from '#/llm-requester/capability';
+export interface LlmConnection {
+    readonly baseUrl?: string;
+    readonly apiKey?: string;
+    readonly defaultHeaders?: Record<string, string>;
+    readonly betaApi?: boolean;
+    readonly vertexai?: boolean;
+    readonly proxyUrl?: string;
+}
+export interface LlmModel extends LlmConnection {
+    readonly provider: string;
+    readonly model: string;
+    readonly capability: ModelCapability;
+    readonly maxContextSize?: number;
+    readonly maxInputSize?: number;
+}
+export declare function modelKey(model: LlmModel): string;

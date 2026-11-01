@@ -182,12 +182,11 @@ function replayPendingDelta(
     replayedNotifications.add(entry);
     deps.actor.send({ type: 'input.notify', entry });
   }
-  const replayedReminders = new Set<HistoryMessage>();
-  for (const entry of [...snap.reminders, ...pending.reminders]) {
-    if (entry.meta?.key === undefined || replayedReminders.has(entry)) continue;
+  const snapReminders = new Set(snap.reminders);
+  for (const entry of pending.reminders) {
+    if (snapReminders.has(entry)) continue;
     if (entry.message.role !== 'system' && entry.message.role !== 'user') continue;
-    replayedReminders.add(entry);
-    deps.actor.send({ type: 'input.remind', key: entry.meta.key, entry: entry as SystemEntry | UserEntry });
+    deps.actor.send({ type: 'input.remind', entry: entry as SystemEntry | UserEntry });
   }
 }
 

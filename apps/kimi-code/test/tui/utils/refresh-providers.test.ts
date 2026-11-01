@@ -658,6 +658,7 @@ describe('refreshAllProviderModels', () => {
           provider: providerId,
           model: modelId,
           maxContextSize: 262144,
+          maxOutputSize: 262144,
           capabilities: richCapabilities,
           displayName: 'Reasoner Pro',
         },

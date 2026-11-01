@@ -25,7 +25,7 @@ import type {
   AddAdditionalDirInput,
   AddAdditionalDirResult,
   AgentCommandInfo,
-  AgentRuntimeBinding,
+  AgentEnvironmentBinding,
   AppMcpServerInspection,
   BackgroundTaskInfo,
   ConfigDiagnostics,
@@ -71,6 +71,8 @@ import type {
   RefreshProviderModelsResponse,
   SessionSummary,
   SessionSummaryPage,
+  SessionEnvironmentsInfo,
+  SessionEnvironmentState,
   SkillSummary,
   PluginCommandDef,
   SuggestFilesInput,
@@ -78,6 +80,7 @@ import type {
   Unsubscribe,
   UploadFileOptions,
   WorkspaceTrustInfo,
+  WorkspaceTrustInfoOptions,
 } from '#/types';
 
 const MAIN_AGENT_ID = 'main';
@@ -108,6 +111,15 @@ export interface ReloadSessionRpcInput extends SessionIdRpcInput {
 
 export interface SetSessionModelRpcInput extends SessionIdRpcInput {
   readonly model: string;
+}
+
+export interface SetSessionModelOverrideRpcInput extends SessionIdRpcInput {
+  readonly kind: SessionModelOverrideKind;
+  readonly alias: string | null;
+}
+
+export interface GetSessionModelOverrideRpcInput extends SessionIdRpcInput {
+  readonly kind: SessionModelOverrideKind;
 }
 
 export interface SetSessionModelRpcResult {
@@ -166,19 +178,6 @@ export interface RunCommandRpcInput extends SessionIdRpcInput {
   readonly args?: string | undefined;
 }
 
-export interface SwitchSessionRuntimeRpcInput extends SessionIdRpcInput {
-  readonly runtimeId: string;
-}
-
-export interface SetSessionModelOverrideRpcInput extends SessionIdRpcInput {
-  readonly kind: SessionModelOverrideKind;
-  readonly alias: string | null;
-}
-
-export interface GetSessionModelOverrideRpcInput extends SessionIdRpcInput {
-  readonly kind: SessionModelOverrideKind;
-}
-
 export interface ReconnectMcpServerRpcInput extends SessionIdRpcInput {
   readonly name: string;
   readonly config?: McpServerConfig;
@@ -233,7 +232,17 @@ export abstract class SDKRpcClientBase {
 
   abstract listWorkspaceSkills(workDir: string): Promise<readonly SkillSummary[]>;
 
-  abstract getWorkspaceTrustInfo(workDir: string): Promise<WorkspaceTrustInfo>;
+  async getWorkspaceAdditionalDirs(_workDir: string): Promise<readonly string[]> {
+    throw new KimiError(
+      ErrorCodes.NOT_IMPLEMENTED,
+      'Workspace additional directories are not implemented for this engine',
+    );
+  }
+
+  abstract getWorkspaceTrustInfo(
+    workDir: string,
+    options?: WorkspaceTrustInfoOptions,
+  ): Promise<WorkspaceTrustInfo>;
 
   abstract trustWorkspace(workDir: string): Promise<void>;
 
@@ -270,6 +279,10 @@ export abstract class SDKRpcClientBase {
   abstract uploadFile(data: Uint8Array, options: UploadFileOptions): Promise<FileMeta>;
 
   abstract deleteFile(fileId: string): Promise<void>;
+
+  async attachFile(_input: { sessionId: string; data: Uint8Array; options: Pick<UploadFileOptions, 'name' | 'mimeType'> }): Promise<string> {
+    throw new Error('Session attachments are unavailable on this engine.');
+  }
 
   abstract listGlobalMcpServers(options?: {
     readonly cwd?: string;
@@ -540,9 +553,15 @@ abstract setThinking(input: SetSessionThinkingRpcInput): Promise<void>;
 
   abstract runCommand(input: RunCommandRpcInput): Promise<void>;
 
-  abstract getRuntime(input: SessionIdRpcInput): Promise<AgentRuntimeBinding>;
+  async resolveSessionEnvironment(options: Pick<CreateSessionOptions, 'workDir' | 'environmentId' | 'environmentCwd'>): Promise<AgentEnvironmentBinding> {
+    throw new Error(`Environment resolution is unavailable on this engine for ${options.workDir}.`);
+  }
 
-  abstract switchRuntime(input: SwitchSessionRuntimeRpcInput): Promise<AgentRuntimeBinding>;
+  abstract getEnvironment(input: SessionIdRpcInput): Promise<AgentEnvironmentBinding>;
+
+  abstract listEnvironments(input: SessionIdRpcInput): Promise<SessionEnvironmentsInfo>;
+
+  abstract getEnvironmentState(input: SessionIdRpcInput): Promise<SessionEnvironmentState>;
 
   onEvent(listener: (event: Event) => void): Unsubscribe {
     this.eventListeners.add(listener);

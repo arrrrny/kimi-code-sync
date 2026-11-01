@@ -267,7 +267,6 @@ describe('AgentDateChangeService', () => {
     context.append({
       role: 'user',
       content: [{ type: 'text', text: 'older metadata reminder' }],
-      toolCalls: [],
       origin: {
         kind: 'injection',
         variant: 'date_change',
@@ -294,7 +293,6 @@ describe('AgentDateChangeService', () => {
     context.append({
       role: 'user',
       content: [{ type: 'text', text: 'first turn' }],
-      toolCalls: [],
       origin: { kind: 'user' },
     });
     await runWillBeginStepHooks(loop);
@@ -306,7 +304,6 @@ describe('AgentDateChangeService', () => {
     context.append({
       role: 'user',
       content: [{ type: 'text', text: 'replacement turn' }],
-      toolCalls: [],
       origin: { kind: 'user' },
     });
 
@@ -324,7 +321,6 @@ describe('AgentDateChangeService', () => {
     context.append({
       role: 'user',
       content: [{ type: 'text', text: 'first turn' }],
-      toolCalls: [],
       origin: { kind: 'user' },
     });
     await runWillBeginStepHooks(loop);
@@ -336,7 +332,6 @@ describe('AgentDateChangeService', () => {
     context.append({
       role: 'user',
       content: [{ type: 'text', text: 'replacement turn' }],
-      toolCalls: [],
       origin: { kind: 'user' },
     });
 
@@ -435,5 +430,31 @@ describe('AgentDateChangeService', () => {
     await runWillBeginStepHooks(loop);
 
     expect(dateReminders(context)).toHaveLength(2);
+  });
+
+  it('labels the disclosure and change reminders with the local client timezone', async () => {
+    updateSystemPrompt(
+      profile,
+      'You are a deterministic test agent.',
+      ctx.get(ISessionContext).cwd,
+    );
+    await runWillBeginStepHooks(loop);
+
+    const initial = dateReminders(context);
+    expect(initial).toHaveLength(1);
+    const initialText = messageText(initial[0] as ContextMessage);
+    expect(initialText).toContain('2026-07-29');
+    expect(initialText).toContain(TEST_TIME_ZONE);
+    expect(initialText).toContain('local client');
+
+    clock.set('2026-07-30T04:00:00.000Z');
+    await runWillBeginStepHooks(loop);
+
+    const reminders = dateReminders(context);
+    expect(reminders).toHaveLength(2);
+    const changeText = messageText(reminders[1] as ContextMessage);
+    expect(changeText).toContain('2026-07-30');
+    expect(changeText).toContain(TEST_TIME_ZONE);
+    expect(changeText).toContain('local client');
   });
 });

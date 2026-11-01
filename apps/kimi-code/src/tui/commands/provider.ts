@@ -13,7 +13,7 @@ import {
   type ThinkingEffort,
 } from '@moonshot-ai/kimi-code-sdk';
 
-import { createKimiCodeUserAgent } from '#/cli/version';
+import { createKimiCodeUserAgent } from '#/cli/host-identity';
 import { fetchCatalogOrBuiltIn } from '#/utils/catalog-fetch';
 import { refreshKimiRegion } from '#/utils/region';
 import { ChoicePickerComponent } from '../components/dialogs/choice-picker';
@@ -543,8 +543,8 @@ async function handleCatalogProviderAdd(host: SlashCommandHost): Promise<void> {
     );
   }
 
-  // Build a merged model dictionary that includes existing models plus the
-  // newly-persisted provider's models, so the tabbed selector shows every
+  // The config's model table already holds the newly-persisted provider's
+  // models next to the existing ones, so the tabbed selector shows every
   // provider's tab (the new provider's tab starts active via initialTabId).
   // The v1 runtime may carry the synthesized `__secondary__` derived entry —
   // never selectable in a picker.

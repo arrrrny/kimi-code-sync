@@ -6,8 +6,8 @@ import { isError2 } from '#/_base/errors/errors';
 import { IConfigService } from '#/app/config/config';
 import { ConfigErrors } from '#/app/config/errors';
 import { UNKNOWN_CAPABILITY } from '#/llm-adapter/contract/capability';
-import { emptyUsage } from '#human/llm/usage';
-import type { LlmRequestConfig, LlmRequester } from '#human/llm/requester/requester';
+import { emptyUsage } from '#human/llm-requester/usage';
+import type { LlmRequestConfig, LlmRequester } from '#human/llm-requester/requester';
 import { IProtocolAdapterRegistry } from '#/llm-adapter/protocol/protocol';
 import '#/llm-adapter/protocol/protocolAdapterRegistry';
 import {
@@ -26,6 +26,10 @@ import {
   toProtocolProvider,
 } from '#/llm-adapter/model/catalog';
 import { ModelCatalog } from '#/llm-adapter/model/catalog-service';
+import { ProtocolAdapterRegistry } from '#/llm-adapter/protocol/protocolAdapterRegistry';
+import { contentsOf } from '#human/llm/requester';
+import { generateModel } from '#/llm-adapter/model/generate';
+import { coreRequesterFromA } from '../../harness/scripted-generate';
 import { ProviderCatalogRuntimeService } from '#/llm-adapter/model/catalog-runtime';
 import '#/llm-adapter/model/errors';
 import { IHostRequestHeaders } from '#/llm-adapter/model/host-request-headers';
@@ -687,22 +691,6 @@ function proxyCatalog(sections: Record<string, unknown>): {
       throw new Error('not exercised');
     },
     resolveCapability: () => UNKNOWN_CAPABILITY,
-    resolve: (model: Model) => ({
-      requester,
-      protocol: 'openai',
-      model: {
-        provider: 'fake',
-        model: model.name,
-        capability: {
-          image_in: false,
-          video_in: false,
-          audio_in: false,
-          thinking: false,
-          tool_use: true,
-        },
-        proxyUrl: model.proxyUrl,
-      },
-    }),
   } as unknown as IProtocolAdapterRegistry;
   const catalog = new ModelCatalog(
     new ProviderCatalogRuntimeService(models, providers),
@@ -713,6 +701,41 @@ function proxyCatalog(sections: Record<string, unknown>): {
     { headers: {}, thirdPartyHeaders: {} },
   );
   return { host, catalog, providers, requests };
+}
+
+function endpointCredentialsOf(catalog: ModelCatalog, id: string) {
+  const initialized = new ProtocolAdapterRegistry().request(catalog.get(id));
+  const endpoint = contentsOf(initialized).endpoint;
+  if (endpoint?.credentials === undefined) throw new Error('endpoint has no credentials');
+  return endpoint.credentials;
+}
+
+async function driveRequest(
+  catalog: ModelCatalog,
+  requests: LlmRequestConfig[],
+  id: string,
+): Promise<unknown[]> {
+  const fake: LlmRequester = {
+    generate: (config, _content, control) => {
+      requests.push(config);
+      control.onEvent?.({ type: 'llm.streaming.part', part: { type: 'text', text: 'ok' } });
+      control.onEvent?.({
+        type: 'llm.streaming.finish',
+        finish: { finishReason: 'completed', rawFinishReason: 'stop' },
+      });
+      control.onEvent?.({ type: 'llm.done' });
+      return Promise.resolve();
+    },
+  };
+  const requester = coreRequesterFromA(
+    new ProtocolAdapterRegistry().request(catalog.get(id)),
+    fake,
+  );
+  const events: unknown[] = [];
+  for await (const event of generateModel(requester, REQUEST_INPUT, undefined, {})) {
+    events.push(event);
+  }
+  return events;
 }
 
 async function drain(stream: AsyncIterable<unknown>): Promise<unknown[]> {
@@ -727,9 +750,8 @@ describe('per-key proxy cascade on the request path', () => {
     try {
       expect(catalog.get('m1').proxyUrl).toBe('http://provider.example.test:8080');
 
-      await drain(catalog.getRequester('m1').request(REQUEST_INPUT));
-
-      expect(requests[0]?.model.proxyUrl).toBe('http://key1.example.test:8081');
+      const credential = await endpointCredentialsOf(catalog, 'm1').resolve();
+      expect(credential?.proxyUrl).toBe('http://key1.example.test:8081');
     } finally {
       host.dispose();
     }
@@ -740,9 +762,8 @@ describe('per-key proxy cascade on the request path', () => {
     try {
       await providers.setActiveApiKey('kilo', 'key2');
 
-      await drain(catalog.getRequester('m1').request(REQUEST_INPUT));
-
-      expect(requests[0]?.model.proxyUrl).toBe('http://provider.example.test:8080');
+      const credential = await endpointCredentialsOf(catalog, 'm1').resolve();
+      expect(credential?.proxyUrl).toBe('http://provider.example.test:8080');
     } finally {
       host.dispose();
     }
@@ -763,9 +784,8 @@ describe('per-key proxy cascade on the request path', () => {
     try {
       expect(catalog.get('m1').proxyUrl).toBeUndefined();
 
-      await drain(catalog.getRequester('m1').request(REQUEST_INPUT));
-
-      expect(requests[0]?.model.proxyUrl).toBeUndefined();
+      const credential = await endpointCredentialsOf(catalog, 'm1').resolve();
+      expect(credential?.proxyUrl).toBeUndefined();
     } finally {
       host.dispose();
     }
@@ -774,13 +794,13 @@ describe('per-key proxy cascade on the request path', () => {
   it('carries the active key proxy for every model bound to the provider', async () => {
     const { host, catalog, providers, requests } = proxyCatalog(proxySections);
     try {
-      await drain(catalog.getRequester('m2').request(REQUEST_INPUT));
-      expect(requests[0]?.model.proxyUrl).toBe('http://key1.example.test:8081');
+      let credential = await endpointCredentialsOf(catalog, 'm2').resolve();
+      expect(credential?.proxyUrl).toBe('http://key1.example.test:8081');
 
       await providers.setActiveApiKey('kilo', 'key3');
 
-      await drain(catalog.getRequester('m2').request(REQUEST_INPUT));
-      expect(requests[1]?.model.proxyUrl).toBe('http://key3.example.test:8083');
+      credential = await endpointCredentialsOf(catalog, 'm2').resolve();
+      expect(credential?.proxyUrl).toBe('http://key3.example.test:8083');
     } finally {
       host.dispose();
     }
@@ -788,14 +808,11 @@ describe('per-key proxy cascade on the request path', () => {
 });
 
 describe('ModelCatalog caching and config-event invalidation', () => {
-  it('caches per id; getRequester returns the cached pair', () => {
+  it('caches per id and returns the same model metadata', () => {
     const { host, catalog } = createHost(kimiSections);
     try {
       const model = catalog.get('k1');
       expect(catalog.get('k1')).toBe(model);
-      const requester = catalog.getRequester('k1');
-      expect(catalog.getRequester('k1')).toBe(requester);
-      expect(requester.model).toBe(model);
     } finally {
       host.dispose();
     }
@@ -874,9 +891,9 @@ describe('headers merge order', () => {
   });
 });
 
-describe('ModelCatalog ping', () => {
+describe('direct generate', () => {
   it('returns the streamed text and usage on a live success', async () => {
-    const { host, models, providers } = createHost(kimiSections, stubModelOAuthTokens());
+    const { host, catalog } = createHost(kimiSections, stubModelOAuthTokens());
     try {
       const fakeRequester: LlmRequester = {
         generate: (_config, _content, control) => {
@@ -893,50 +910,38 @@ describe('ModelCatalog ping', () => {
           return Promise.resolve();
         },
       };
-      const registry = {
-        _serviceBrand: undefined,
-        supportedProtocols: () => [],
-        resolveAdapterIdentity: () => {
-          throw new Error('not exercised');
-        },
-        resolveProviderBaseId: () => {
-          throw new Error('not exercised');
-        },
-        resolveCapability: () => UNKNOWN_CAPABILITY,
-        resolve: (model: Model) => ({
-          requester: fakeRequester,
-          protocol: 'openai',
-          model: {
-            provider: 'fake',
-            model: model.name,
-            capability: {
-              image_in: false,
-              video_in: false,
-              audio_in: false,
-              thinking: false,
-              tool_use: true,
-            },
-          },
-        }),
-      } as unknown as IProtocolAdapterRegistry;
-      const catalog = new ModelCatalog(
-        new ProviderCatalogRuntimeService(models, providers),
-        providers,
-        models,
-        stubModelOAuthTokens(),
-        registry,
-        { headers: {}, thirdPartyHeaders: {} },
+      const model = catalog.get('k1');
+      const requester = coreRequesterFromA(
+        new ProtocolAdapterRegistry().request(model, { maxCompletionTokens: 512 }),
+        fakeRequester,
       );
-      const result = await catalog.ping('k1');
-      expect(result).toMatchObject({ ok: true, text: 'pong', finishReason: 'completed' });
-      expect(result.usage).toEqual(emptyUsage());
-      expect(result.durationMs).toBeGreaterThanOrEqual(0);
+      const events = [];
+      for await (const event of generateModel(
+        requester,
+        {
+          systemPrompt: 'You are a connectivity probe. Answer with the single word "pong".',
+          tools: [],
+          messages: [{ role: 'user', content: [{ type: 'text', text: 'ping' }] }],
+        },
+        undefined,
+        { maxCompletionTokens: 512 },
+      )) {
+        events.push(event);
+      }
+      expect(events.find((event) => event.type === 'part')).toMatchObject({
+        part: { type: 'text', text: 'pong' },
+      });
+      expect(events.find((event) => event.type === 'usage')).toMatchObject({ usage: emptyUsage() });
+      expect(events.find((event) => event.type === 'finish')).toMatchObject({
+        providerFinishReason: 'completed',
+        id: 'msg-1',
+      });
     } finally {
       host.dispose();
     }
   });
 
-  it('returns ok:false with the translated error when the wire fails', async () => {
+  it('surfaces the translated error when the wire fails', async () => {
     const { host, catalog } = createHost({
       models: {
         flat: {
@@ -949,9 +954,21 @@ describe('ModelCatalog ping', () => {
       },
     });
     try {
-      const result = await catalog.ping('flat');
-      expect(result.ok).toBe(false);
-      expect(result.error).toBeTruthy();
+      const model = catalog.get('flat');
+      const failure = await (async () => {
+        try {
+          for await (const _event of generateModel(
+            new ProtocolAdapterRegistry().request(model),
+            { systemPrompt: 'ping', tools: [], messages: [] },
+            undefined,
+          )) {
+          }
+          return undefined;
+        } catch (error) {
+          return error;
+        }
+      })();
+      expect(failure).toBeTruthy();
     } finally {
       host.dispose();
     }
@@ -960,7 +977,7 @@ describe('ModelCatalog ping', () => {
   it('rejects with config.invalid for unknown models', async () => {
     const { host, catalog } = createHost(kimiSections);
     try {
-      await expect(catalog.ping('nope')).rejects.toThrowError(
+      expect(() => catalog.get('nope')).toThrowError(
         expect.objectContaining({ code: ConfigErrors.codes.CONFIG_INVALID }),
       );
     } finally {

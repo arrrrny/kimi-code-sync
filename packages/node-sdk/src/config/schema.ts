@@ -1,4 +1,5 @@
 import { parsePattern } from '@moonshot-ai/agent-core-v2/agent/permissionRules/matchesRule';
+import { EnvironmentsSectionSchema } from '@moonshot-ai/agent-core-v2/remote/declaration/remoteEnvironmentDeclaration';
 import {
   COMPACTION_TRIGGER_RATIO_MAX,
   COMPACTION_TRIGGER_RATIO_MIN,
@@ -116,11 +117,11 @@ export const ModelAliasSchema = ModelAliasBaseSchema.extend({
 
 export type ModelAlias = z.infer<typeof ModelAliasSchema>;
 
-export const SecondaryModelConfigSchema = ModelAliasOverrideSchema.extend({
+export const SecondaryModelConfigSchema = z.object({
   model: z.string().min(1).optional(),
   defaultModel: z.string().min(1).optional(),
   models: z.record(z.string(), z.string()).optional(),
-  force: z.boolean().optional(),
+  defaultEffort: z.string().optional(),
 });
 
 export type SecondaryModelConfig = z.infer<typeof SecondaryModelConfigSchema>;
@@ -252,6 +253,10 @@ export const ExperimentalConfigSchema = z.record(z.string(), z.boolean());
 
 export type ExperimentalConfig = z.infer<typeof ExperimentalConfigSchema>;
 
+export const EnvironmentsConfigSchema = EnvironmentsSectionSchema;
+
+export type EnvironmentsConfig = z.infer<typeof EnvironmentsConfigSchema>;
+
 export const HookDefSchema = z
   .object({
     event: z.enum(HOOK_EVENT_TYPES),
@@ -293,7 +298,6 @@ export const McpServerStdioConfigSchema = z.object({
   args: z.array(z.string()).optional(),
   env: StringRecordSchema.optional(),
   cwd: z.string().optional(),
-  executor: z.enum(['local']).optional(),
   ...McpServerCommonFields,
 });
 
@@ -369,6 +373,7 @@ export const KimiConfigSchema = z.object({
   image: ImageConfigSchema.optional(),
   modelCatalog: ModelCatalogConfigSchema.optional(),
   experimental: ExperimentalConfigSchema.optional(),
+  environments: EnvironmentsConfigSchema.optional(),
   telemetry: z.boolean().optional(),
   disableFeedbackSurvey: z.boolean().optional(),
   raw: z.record(z.string(), z.unknown()).optional(),
@@ -428,6 +433,7 @@ export const KimiConfigPatchSchema = z
     image: ImageConfigPatchSchema.optional(),
     modelCatalog: ModelCatalogConfigPatchSchema.optional(),
     experimental: ExperimentalConfigPatchSchema.optional(),
+    environments: EnvironmentsConfigSchema.optional(),
     telemetry: z.boolean().optional(),
     disableFeedbackSurvey: z.boolean().optional(),
   })

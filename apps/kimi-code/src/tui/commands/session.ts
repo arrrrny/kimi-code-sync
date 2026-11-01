@@ -70,7 +70,7 @@ export async function handleForkCommand(host: SlashCommandHost, args: string): P
       await forked.close();
     } catch (error) {
       const msg = formatErrorMessage(error);
-      host.showError(`Session forked (${forkId}), but failed to release its runtime: ${msg}`);
+      host.showError(`Session forked (${forkId}), but failed to release its environment: ${msg}`);
       return;
     }
   } catch (error) {

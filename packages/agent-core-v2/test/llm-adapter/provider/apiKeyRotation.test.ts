@@ -173,7 +173,7 @@ describe('keyed credential provider rotation apply', () => {
       controller?.rotate('key2'),
     ]);
 
-    expect(outcomes.map((outcome) => outcome?.outcome)).toEqual([
+    expect(outcomes.map((outcome) => outcome?.['outcome'])).toEqual([
       'rotated',
       'already-advanced',
     ]);

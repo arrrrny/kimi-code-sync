@@ -746,12 +746,12 @@ export async function handleSecondaryModelCommand(host: SlashCommandHost, args: 
   const alias = args.trim();
   await refreshModelsForPicker(host);
   const models = pickerModelsForHost(host);
-  // The pool reserves `primary` as the symbolic "caller's own model" choice —
-  // a user alias with that name can never be the subagent default.
+  // The pool reserves `primary` for Tower spawn's symbolic "tower's own model"
+  // choice — a user alias with that name can never be the subagent default.
   delete models[PRIMARY_SUBAGENT_MODEL_CHOICE];
   if (alias === PRIMARY_SUBAGENT_MODEL_CHOICE) {
     host.showError(
-      `"${PRIMARY_SUBAGENT_MODEL_CHOICE}" is reserved by the subagent model pool (it always binds the caller's own model) — rename the [models] alias to use it here.`,
+      `"${PRIMARY_SUBAGENT_MODEL_CHOICE}" is reserved by the subagent model pool — rename the [models] alias to use it here.`,
     );
     return;
   }
@@ -1409,9 +1409,7 @@ async function applyEditorChoice(host: SlashCommandHost, value: string): Promise
 
 /**
  * The models a picker may offer: the user's configured aliases with
- * host-effective provider resolution applied, minus the synthesized
- * `__secondary__` derived entry — a runtime artifact of the v1 engine's
- * `[secondary_model]` recipe that must never be selectable as a model.
+ * host-effective provider resolution applied.
  */
 function pickerModelsForHost(host: SlashCommandHost): Record<string, ModelAlias> {
   return Object.fromEntries(

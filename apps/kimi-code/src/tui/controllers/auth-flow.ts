@@ -14,7 +14,7 @@ import {
   matchedModelSwitchRule,
 } from '../commands/config';
 import type { SlashCommandHost } from '../commands/dispatch';
-import { createKimiCodeUserAgent } from '#/cli/version';
+import { createKimiCodeUserAgent } from '#/cli/host-identity';
 import { OAUTH_LOGIN_REQUIRED_STARTUP_NOTICE } from '../constant/kimi-tui';
 import { refreshEffortSwitchConfig } from '#/utils/effort-switch-config';
 import { refreshModelSwitchConfirmConfig } from '#/utils/model-switch-confirm-config';

@@ -4,8 +4,8 @@ import { createActor, emit, setup } from '#human/xstate2';
 import type {
   AgentLLMRequestPartHandler,
   AgentLLMRequestTask,
-  IAgentLLMRequesterService,
-} from '#/agent/llmRequester/llmRequester';
+  LoopRequester,
+} from '#/agent/loop/requesterContract';
 import {
   machineEngineAttachBundle,
   type CreateMachineEngineOptions,
@@ -13,11 +13,12 @@ import {
 import type { IAgentToolExecutorService } from '#/agent/toolExecutor/toolExecutor';
 import { APIProviderRateLimitError } from '#/llm-adapter/contract/errors';
 import type { LLMRequestTrace } from '#/llm-adapter/contract/request-trace';
-import { UNKNOWN_CAPABILITY } from '#human/llm/capability';
+import { UNKNOWN_CAPABILITY } from '#human/llm-requester/capability';
 import { memoryJournal } from '#human/eventStore/journal';
-import type { LlmModel } from '#human/llm/model';
-import type { LlmCredentialProvider, LlmKeyRotationController } from '#human/llm/requester/requester';
-import type { LlmRecovery } from '#human/llm/requester/recovery';
+import type { LlmModel } from '#human/llm-requester/model';
+import type { LlmCredentialProvider } from '#human/llm-requester/requester';
+import type { LlmKeyRotationController, LlmKeyRotationOutcome } from '#human/llm/request';
+import type { LlmRecovery } from '#human/llm-requester/recovery';
 import type { TurnEvent, TurnInput, TurnLlmEvent } from '#human/agent/turn';
 
 const model: LlmModel = { provider: 'test', model: 'test-model', capability: UNKNOWN_CAPABILITY };
@@ -26,10 +27,10 @@ type FailureStep = 'rate_limit' | 'ok';
 
 type RecoveringEvent = Extract<TurnLlmEvent, { type: 'llm.recovering' }>;
 
-function createRequesterService(steps: readonly FailureStep[]): IAgentLLMRequesterService {
+function createRequesterService(steps: readonly FailureStep[]): LoopRequester {
   let index = 0;
   return {
-    start: (_overrides: unknown, onPart: AgentLLMRequestPartHandler): AgentLLMRequestTask => {
+    start: (_overrides: unknown, onPart?: AgentLLMRequestPartHandler): AgentLLMRequestTask => {
       const step = steps[Math.min(index, steps.length - 1)];
       index += 1;
       if (step === 'rate_limit') {
@@ -38,7 +39,7 @@ function createRequesterService(steps: readonly FailureStep[]): IAgentLLMRequest
           result: Promise.reject(new APIProviderRateLimitError('rate limited')),
         } as unknown as AgentLLMRequestTask;
       }
-      void onPart({ type: 'text', text: 'done' });
+      void onPart?.({ type: 'text', text: 'done' });
       return {
         trace: {} as LLMRequestTrace,
         result: Promise.resolve({
@@ -48,7 +49,7 @@ function createRequesterService(steps: readonly FailureStep[]): IAgentLLMRequest
         }),
       } as unknown as AgentLLMRequestTask;
     },
-  } as unknown as IAgentLLMRequesterService;
+  } as unknown as LoopRequester;
 }
 
 function createToolExecutor(): IAgentToolExecutorService {
@@ -66,7 +67,7 @@ function keyedProvider(args: {
     providerName: 'kilo',
     keyCount: args.keyCount,
     plan: () => ({ keyId: 'key2', name: 'personal' }),
-    rotate: (keyId) => {
+    rotate: (keyId: string | undefined): Promise<LlmKeyRotationOutcome> => {
       args.onRotate(keyId);
       if (args.failRotate === true) {
         return Promise.reject(new Error('config.toml is read-only'));

@@ -80,7 +80,6 @@
         ./packages/tree-sitter-bash
         ./apps/kimi-code
         ./apps/vscode
-        ./apps/kimi-inspect
         ./apps/vis
         ./apps/vis/server
         ./apps/vis/web
@@ -160,7 +159,7 @@
               inherit (finalAttrs) pname version src pnpmWorkspaces;
               inherit pnpm;
               fetcherVersion = 3;
-              hash = "sha256-c1PBSpHoJFB0KcvQLNMreuTVkfrHZJQaj1Hy5n4ngNg=";
+              hash = "sha256-IVwThDnQmE7gWtwPk7v6HU8h15MPqCxxDV0/PS9qM9A=";
             };
 
             nativeBuildInputs = [
