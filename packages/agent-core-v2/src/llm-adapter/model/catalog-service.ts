@@ -10,9 +10,7 @@ import { ScopeActivation, registerScopedService } from '#/_base/di/scope';
 import { Error2 } from '#/_base/errors/errors';
 
 import type { CatalogModel, CatalogProviderInfo } from '#human/provider-catalog/catalog';
-import {
-  createKeyedCredentialProvider,
-} from '../provider/apiKeyRotation';
+import { createKeyedCredentialProvider } from '../provider/apiKeyRotation';
 import {
   createOAuthCredentialProvider,
   createStaticCredentialProvider,

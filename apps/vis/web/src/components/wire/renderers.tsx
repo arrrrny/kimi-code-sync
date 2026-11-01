@@ -1574,6 +1574,7 @@ export const WIRE_RENDERERS: RendererMap = {
     }),
   },
 
+
   'staleGuard.recorded': {
     tone: 'meta',
     label: 'stale',
