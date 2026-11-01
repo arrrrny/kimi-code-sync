@@ -690,22 +690,6 @@ function proxyCatalog(sections: Record<string, unknown>): {
       throw new Error('not exercised');
     },
     resolveCapability: () => UNKNOWN_CAPABILITY,
-    resolve: (model: Model) => ({
-      requester,
-      protocol: 'openai',
-      model: {
-        provider: 'fake',
-        model: model.name,
-        capability: {
-          image_in: false,
-          video_in: false,
-          audio_in: false,
-          thinking: false,
-          tool_use: true,
-        },
-        proxyUrl: model.proxyUrl,
-      },
-    }),
   } as unknown as IProtocolAdapterRegistry;
   const catalog = new ModelCatalog(
     new ProviderCatalogRuntimeService(models, providers),
@@ -716,6 +700,34 @@ function proxyCatalog(sections: Record<string, unknown>): {
     { headers: {}, thirdPartyHeaders: {} },
   );
   return { host, catalog, providers, requests };
+}
+
+async function driveRequest(
+  catalog: ModelCatalog,
+  requests: LlmRequestConfig[],
+  id: string,
+): Promise<unknown[]> {
+  const fake: LlmRequester = {
+    generate: (config, _content, control) => {
+      requests.push(config);
+      control.onEvent?.({ type: 'llm.streaming.part', part: { type: 'text', text: 'ok' } });
+      control.onEvent?.({
+        type: 'llm.streaming.finish',
+        finish: { finishReason: 'completed', rawFinishReason: 'stop' },
+      });
+      control.onEvent?.({ type: 'llm.done' });
+      return Promise.resolve();
+    },
+  };
+  const requester = coreRequesterFromA(
+    new ProtocolAdapterRegistry().request(catalog.get(id)),
+    fake,
+  );
+  const events: unknown[] = [];
+  for await (const event of generateModel(requester, REQUEST_INPUT, undefined, {})) {
+    events.push(event);
+  }
+  return events;
 }
 
 async function drain(stream: AsyncIterable<unknown>): Promise<unknown[]> {
@@ -730,9 +742,10 @@ describe('per-key proxy cascade on the request path', () => {
     try {
       expect(catalog.get('m1').proxyUrl).toBe('http://provider.example.test:8080');
 
-      await drain(catalog.getRequester('m1').request(REQUEST_INPUT));
+      await driveRequest(catalog, requests, 'm1');
 
-      expect(requests[0]?.model.proxyUrl).toBe('http://key1.example.test:8081');
+      const credential = await requests[0]?.credentialProvider?.resolve();
+      expect(credential?.proxyUrl).toBe('http://key1.example.test:8081');
     } finally {
       host.dispose();
     }
@@ -743,9 +756,10 @@ describe('per-key proxy cascade on the request path', () => {
     try {
       await providers.setActiveApiKey('kilo', 'key2');
 
-      await drain(catalog.getRequester('m1').request(REQUEST_INPUT));
+      await driveRequest(catalog, requests, 'm1');
 
-      expect(requests[0]?.model.proxyUrl).toBe('http://provider.example.test:8080');
+      const credential = await requests[0]?.credentialProvider?.resolve();
+      expect(credential?.proxyUrl).toBe('http://provider.example.test:8080');
     } finally {
       host.dispose();
     }
@@ -766,9 +780,10 @@ describe('per-key proxy cascade on the request path', () => {
     try {
       expect(catalog.get('m1').proxyUrl).toBeUndefined();
 
-      await drain(catalog.getRequester('m1').request(REQUEST_INPUT));
+      await driveRequest(catalog, requests, 'm1');
 
-      expect(requests[0]?.model.proxyUrl).toBeUndefined();
+      const credential = await requests[0]?.credentialProvider?.resolve();
+      expect(credential?.proxyUrl).toBeUndefined();
     } finally {
       host.dispose();
     }
@@ -777,13 +792,15 @@ describe('per-key proxy cascade on the request path', () => {
   it('carries the active key proxy for every model bound to the provider', async () => {
     const { host, catalog, providers, requests } = proxyCatalog(proxySections);
     try {
-      await drain(catalog.getRequester('m2').request(REQUEST_INPUT));
-      expect(requests[0]?.model.proxyUrl).toBe('http://key1.example.test:8081');
+      await driveRequest(catalog, requests, 'm2');
+      let credential = await requests[0]?.credentialProvider?.resolve();
+      expect(credential?.proxyUrl).toBe('http://key1.example.test:8081');
 
       await providers.setActiveApiKey('kilo', 'key3');
 
-      await drain(catalog.getRequester('m2').request(REQUEST_INPUT));
-      expect(requests[1]?.model.proxyUrl).toBe('http://key3.example.test:8083');
+      await driveRequest(catalog, requests, 'm2');
+      credential = await requests[1]?.credentialProvider?.resolve();
+      expect(credential?.proxyUrl).toBe('http://key3.example.test:8083');
     } finally {
       host.dispose();
     }

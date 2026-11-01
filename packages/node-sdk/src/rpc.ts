@@ -113,6 +113,15 @@ export interface SetSessionModelRpcInput extends SessionIdRpcInput {
   readonly model: string;
 }
 
+export interface SetSessionModelOverrideRpcInput extends SessionIdRpcInput {
+  readonly kind: SessionModelOverrideKind;
+  readonly alias: string | null;
+}
+
+export interface GetSessionModelOverrideRpcInput extends SessionIdRpcInput {
+  readonly kind: SessionModelOverrideKind;
+}
+
 export interface SetSessionModelRpcResult {
   readonly model: string;
   readonly providerName?: string | undefined;

@@ -1065,7 +1065,7 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
         customInstruction: data.instruction,
       });
       const runRequest = async () => {
-        const handoffRequest = this.llmRequester.start(
+        const handoffRequest = this.loopService.requester.start(
           {
             messages: [...history, createUserMessage(handoffInstruction)],
             maxOutputSize,
@@ -1083,7 +1083,7 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
         return handoffRequest.result;
       };
       const finish = await runWithCredentialRecovery(
-        this.llmRequester.currentCredentialProvider(),
+        this.loopService.requester.currentCredentialProvider(),
         runRequest,
         signal,
       );

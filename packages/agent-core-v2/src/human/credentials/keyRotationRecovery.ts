@@ -1,6 +1,6 @@
-import type { LlmRemoteErrorMessage } from '#/llm/errors';
-import type { LlmRecovery, LlmRecoveryContext, LlmRecoveryRecord } from '#/llm/requester/recovery';
-import type { LlmKeyRotationController } from '#/llm/requester/requester';
+import type { LlmRemoteErrorMessage } from '#/llm/response';
+import type { LlmRecovery, LlmRecoveryContext, LlmRecoveryRecord } from '#/llm-requester/recovery';
+import type { LlmKeyRotationController } from '#/llm/request';
 
 export const API_KEY_ROTATION_STRATEGY = 'api_key_rotation';
 

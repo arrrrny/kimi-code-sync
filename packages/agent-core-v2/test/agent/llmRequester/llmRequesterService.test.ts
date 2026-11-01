@@ -1149,7 +1149,7 @@ describe('AgentLoopRequester media recovery prefix parity', () => {
     const TERMINAL_400 = new APIStatusError(400, 'endpoint broken');
     const inputs: ModelRequestInput[] = [];
     const accepting = createRequester({ value: 0 }, null);
-    const requester: ModelRequester = {
+    const requester: ModelEventRequester = {
       model: accepting.model,
       request: async function* (input, signal, params) {
         inputs.push(input);
@@ -1159,7 +1159,7 @@ describe('AgentLoopRequester media recovery prefix parity', () => {
         yield* accepting.request(input, signal, params);
       },
     };
-    const { service } = createService(requester, undefined, {
+    const { service } = createService(requester, {
       fallbackFlag: true,
       fallbackConfig: { model: 'fallback-alias' },
     });
@@ -1778,7 +1778,7 @@ describe('AgentLLMRequesterService terminal-error fallback', () => {
   it('retries on the configured fallback model after a terminal 400', async () => {
     const calls = { value: 0 };
     const requester = createRequester(calls, new APIStatusError(400, 'endpoint broken'));
-    const { service, events } = createService(requester, undefined, {
+    const { service, events } = createService(requester, {
       fallbackFlag: true,
       fallbackConfig: { model: 'fallback-alias' },
     });
@@ -1798,7 +1798,7 @@ describe('AgentLLMRequesterService terminal-error fallback', () => {
   it('propagates the terminal error when the fallback binding does not change the model', async () => {
     const calls = { value: 0 };
     const requester = createRequester(calls, new APIStatusError(400, 'endpoint broken'));
-    const { service, events } = createService(requester, undefined, {
+    const { service, events } = createService(requester, {
       sessionModelOverrides: { fallback: 'm' },
     });
 
@@ -1810,7 +1810,7 @@ describe('AgentLLMRequesterService terminal-error fallback', () => {
   it('retries on the inherited fallback override after a terminal 400', async () => {
     const calls = { value: 0 };
     const requester = createRequester(calls, new APIStatusError(400, 'endpoint broken'));
-    const { service } = createService(requester, undefined, {
+    const { service } = createService(requester, {
       sessionModelOverrides: { fallback: 'inherited-fallback' },
     });
 
@@ -1823,7 +1823,7 @@ describe('AgentLLMRequesterService terminal-error fallback', () => {
   it('drops the active fallback when the profile model is rebound', async () => {
     const calls = { value: 0 };
     const requester = createRequester(calls, new APIStatusError(400, 'endpoint broken'));
-    const { service, setModelAlias } = createService(requester, undefined, {
+    const { service, setModelAlias } = createService(requester, {
       fallbackFlag: true,
       fallbackConfig: { model: 'fallback-alias' },
     });
@@ -1920,9 +1920,7 @@ describe('turn machine stream state across service-internal retries', () => {
 describe('AgentLLMRequesterService request kind records', () => {
   it('records a full_compaction_handoff operation request as kind compaction', async () => {
     const calls = { value: 0 };
-    const { service, dispatcher, records } = createService(createRequester(calls), {
-      project: (messages: readonly ContextMessage[]) => messages,
-    });
+    const { service, dispatcher, records } = createService(createRequester(calls));
 
     await service.request({ source: { type: 'operation', requestKind: 'full_compaction_handoff' } });
     await dispatcher.flush();
@@ -1934,9 +1932,7 @@ describe('AgentLLMRequesterService request kind records', () => {
 
   it('still records a plain operation request as kind loop', async () => {
     const calls = { value: 0 };
-    const { service, dispatcher, records } = createService(createRequester(calls), {
-      project: (messages: readonly ContextMessage[]) => messages,
-    });
+    const { service, dispatcher, records } = createService(createRequester(calls));
 
     await service.request({ source: { type: 'operation', requestKind: 'something_else' } });
     await dispatcher.flush();

@@ -26,6 +26,8 @@ export class StubConfigService implements IConfigService {
     }
   }
 
+  assertValid(_domain: string): void {}
+
   get<T = unknown>(domain: string): T {
     return this._values.get(domain) as T;
   }

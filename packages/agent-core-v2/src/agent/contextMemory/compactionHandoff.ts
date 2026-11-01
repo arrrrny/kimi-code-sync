@@ -157,7 +157,6 @@ export function createCompactionContinuationMessage(handoffPath?: string): Conte
   return {
     role: 'user',
     content: [{ type: 'text', text: buildCompactionContinuationText(handoffPath) }],
-    toolCalls: [],
     origin: { kind: 'injection', variant: COMPACTION_CONTINUATION_VARIANT },
   };
 }

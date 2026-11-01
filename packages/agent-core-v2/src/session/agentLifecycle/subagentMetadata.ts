@@ -69,7 +69,6 @@ function firstNonEmpty(...values: readonly (string | undefined)[]): string | und
 }
 
 const SUBAGENT_MODEL_SOURCES: readonly SubagentModelSource[] = [
-  'forced',
   'primary_override',
   'inherited',
   'secondary_pool',

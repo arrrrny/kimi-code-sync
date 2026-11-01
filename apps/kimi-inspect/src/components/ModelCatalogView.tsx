@@ -14,11 +14,10 @@
 
 import { IAgentProfileService } from '@moonshot-ai/agent-core-v2/agent/profile/profile';
 import { ISessionManager } from '@moonshot-ai/agent-core-v2/app/sessionManager/sessionManager';
-import type { TokenUsage } from '@moonshot-ai/agent-core-v2/human/llm/usage';
+import type { TokenUsage } from '@moonshot-ai/agent-core-v2/human/llm-requester/usage';
 import {
   IModelCatalog,
   type ModelCatalogItem,
-  type ModelPingResult,
   type ProviderCatalogItem,
 } from '@moonshot-ai/agent-core-v2/llm-adapter/model/catalog';
 import { IModelService } from '@moonshot-ai/agent-core-v2/llm-adapter/model/model';
@@ -294,25 +293,8 @@ function ModelSection({
 }) {
   const { klient, baseUrl, config } = useConnection();
   const { item, provider } = entry;
-  const [ping, setPing] = useState<
-    | { readonly status: 'idle' | 'running' }
-    | { readonly status: 'done'; readonly result: ModelPingResult }
-  >({ status: 'idle' });
   const [creating, setCreating] = useState(false);
   const [sessionError, setSessionError] = useState<unknown>(null);
-
-  const runPing = async () => {
-    setPing({ status: 'running' });
-    try {
-      const result = await klient.core(IModelCatalog).ping(item.model);
-      setPing({ status: 'done', result });
-    } catch (error) {
-      setPing({
-        status: 'done',
-        result: { ok: false, durationMs: 0, error: errorMessage(error) },
-      });
-    }
-  };
 
   // Session creation itself is v1 REST (klient is v2-only); resume + model
   // selection then go through the channel layer before opening the chat tab.
@@ -352,9 +334,6 @@ function ModelSection({
         <span className="font-mono text-[12px] font-semibold text-neutral-100">{item.model}</span>
         {provider?.default_model === item.model ? <Badge tone="sky">default</Badge> : null}
         <span className="text-[10px] text-neutral-600">{provider?.id ?? '(no provider)'}</span>
-        <ActionButton disabled={ping.status === 'running'} onClick={runPing}>
-          {ping.status === 'running' ? 'pinging…' : 'Ping'}
-        </ActionButton>
         <ActionButton disabled={creating} onClick={createSession}>
           {creating ? 'creating…' : '+ Session'}
         </ActionButton>
@@ -369,29 +348,6 @@ function ModelSection({
           {formatContextSize(item.max_context_size)}
         </span>
       </header>
-      {ping.status === 'done' ? (
-        <div className="mb-1 flex flex-wrap items-center gap-2 border border-neutral-800/60 bg-neutral-900/50 px-2 py-1">
-          {ping.result.ok ? (
-            <>
-              <Badge tone="green">pong · {ping.result.durationMs}ms</Badge>
-              {ping.result.text !== undefined && ping.result.text !== '' ? (
-                <span className="text-[11px] text-neutral-300">{ping.result.text}</span>
-              ) : null}
-              {ping.result.usage !== undefined ? (
-                <span className="text-[10px] text-neutral-600">{usageLine(ping.result.usage)}</span>
-              ) : null}
-              {ping.result.finishReason !== undefined ? (
-                <span className="text-[10px] text-neutral-600">{ping.result.finishReason}</span>
-              ) : null}
-            </>
-          ) : (
-            <>
-              <Badge tone="red">ping failed · {ping.result.durationMs}ms</Badge>
-              <span className="text-[11px] text-red-400">{ping.result.error}</span>
-            </>
-          )}
-        </div>
-      ) : null}
       {sessionError !== null ? <ErrorLine error={sessionError} /> : null}
     </section>
   );

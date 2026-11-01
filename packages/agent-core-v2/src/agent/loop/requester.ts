@@ -335,11 +335,10 @@ export class AgentLoopRequester implements LoopRequester {
     onAttemptRetry: (() => void) | undefined,
   ): Promise<AgentLLMRequestFinish> {
     let request = this.resolveRequest(overrides);
-    this.toolCallIdNormalizer.seedFrom(this.context.get());
     let cacheProbeReported = false;
-    const mediaPolicy = this.mediaPolicyFactory?.(request.model, request.request);
-    const recoveredMedia = this.recoveredMedia(request);
-    const recoveryLedger =
+    let mediaPolicy = this.mediaPolicyFactory?.(request.model, request.request);
+    let recoveredMedia = this.recoveredMedia(request);
+    let recoveryLedger =
       recoveredMedia === undefined
         ? createRecoveryLedger()
         : mediaPolicy === undefined
@@ -553,12 +552,17 @@ export class AgentLoopRequester implements LoopRequester {
           this.activateFallback('terminal-error')
         ) {
           request = this.resolveRequest(overrides);
-          mediaStrippedThisRequest = false;
+          mediaPolicy = this.mediaPolicyFactory?.(request.model, request.request);
+          recoveredMedia = this.recoveredMedia(request);
+          recoveryLedger =
+            recoveredMedia === undefined
+              ? createRecoveryLedger()
+              : mediaPolicy === undefined
+                ? recoveredMedia.fork()
+                : await mediaPolicy.refreshRecovery(recoveredMedia, request.messages);
           previousMediaCount = undefined;
-          previousMediaPolicy = undefined;
-          mediaPaths = undefined;
+          previousMediaRecovery = undefined;
           onAttemptRetry?.();
-          policy = undefined;
           infiniteRetryAttempt = 0;
           continue;
         }

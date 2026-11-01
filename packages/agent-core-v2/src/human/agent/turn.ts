@@ -659,9 +659,6 @@ export function createTurnMachine(
               guard: ({ event }) => event.proposal !== undefined,
               target: 'applyingRecovery',
               actions: [
-                ({ context }) => {
-                  context.accumulator.rollback();
-                },
                 assign(({ event }) => ({
                   pendingRecovery: {
                     proposal: event.proposal as LlmRecoveryProposal & LlmRecoveryRecord,

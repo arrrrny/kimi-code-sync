@@ -20,7 +20,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { serviceByName } from '../channel';
 import { useConnection } from '../connection';
 import { type AnyService } from '../panels';
-import { fetchAgentRuntimeBinding } from '../snapshots/api';
+import { fetchAgentEnvironmentBinding } from '../snapshots/api';
 import { fetchTranscriptPlan, type TranscriptPlanInfo } from '../transcript/api';
 import { ActionButton, Badge, ErrorLine } from '../ui';
 import { ScopePanels } from './ServicePanels';
@@ -60,7 +60,7 @@ export function Inspector({
   const effectiveAgent = agentIds.includes(agentId) ? agentId : agentIds[0]!;
   const runtimeBinding = useQuery({
     queryKey: ['agent-runtime-binding', klient.baseUrl, sessionId, effectiveAgent],
-    queryFn: () => fetchAgentRuntimeBinding(klient, sessionId as string, effectiveAgent),
+    queryFn: () => fetchAgentEnvironmentBinding(klient, sessionId as string, effectiveAgent),
     enabled: sessionId !== null && ready,
     refetchInterval: 1_000,
   });
@@ -148,16 +148,16 @@ export function Inspector({
                 ) : null}
               </div>
               <div className="grid grid-cols-[80px_minmax(0,1fr)] gap-1 font-mono">
-                <span className="text-neutral-600">workspace</span>
-                <span className="break-all text-neutral-300">{runtimeBinding.data?.binding.workspaceId ?? 'loading…'}</span>
-                <span className="text-neutral-600">runtime</span>
-                <span className="break-all text-neutral-300">{runtimeBinding.data?.binding.runtimeId ?? 'loading…'}</span>
+                <span className="text-neutral-600">environment</span>
+                <span className="break-all text-neutral-300">{runtimeBinding.data?.binding.environmentId ?? 'loading…'}</span>
+                <span className="text-neutral-600">cwd</span>
+                <span className="break-all text-neutral-300">{runtimeBinding.data?.binding.cwd ?? '—'}</span>
                 <span className="text-neutral-600">generation</span>
-                <span className="break-all text-neutral-300">{runtimeBinding.data?.runtime?.generation ?? 'unavailable'}</span>
+                <span className="break-all text-neutral-300">{runtimeBinding.data?.environment?.generation ?? 'unavailable'}</span>
                 <span className="text-neutral-600">status</span>
-                <span className="text-neutral-300">{runtimeBinding.data?.runtime?.status ?? 'unavailable'}</span>
+                <span className="text-neutral-300">{runtimeBinding.data?.environment?.status ?? 'unavailable'}</span>
                 <span className="text-neutral-600">capabilities</span>
-                <span className="text-neutral-300">{runtimeBinding.data?.runtime?.capabilities.join(', ') ?? 'none'}</span>
+                <span className="text-neutral-300">{runtimeBinding.data?.environment?.capabilities.join(', ') ?? 'none'}</span>
               </div>
               {runtimeBinding.isError ? <ErrorLine error={runtimeBinding.error} /> : null}
             </div>

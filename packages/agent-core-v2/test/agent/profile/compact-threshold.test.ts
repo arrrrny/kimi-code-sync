@@ -84,15 +84,6 @@ function createModelCatalogStub(model: Model): IModelCatalog {
       if (id !== model.id) throw new Error(`Unknown model: ${String(id)}`);
       return model;
     },
-    getRequester: () => {
-      throw new Error('not exercised');
-    },
-    generate: () => {
-      throw new Error('not exercised');
-    },
-    ping: () => {
-      throw new Error('not exercised');
-    },
     findByName: () => [],
     listModels: () => {
       throw new Error('not exercised');

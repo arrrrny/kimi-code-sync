@@ -47,7 +47,10 @@ packages/agent-core-v2/src/agent/fullCompaction/fullCompactionService.ts :: comp
 packages/agent-core-v2/src/agent/fullCompaction/compactionOps.ts        :: model_display
 
 # --- substitute-model on rate limit ---
-packages/agent-core-v2/src/agent/llmRequester/llmRequesterService.ts    :: substituteModelActiveKey
+# Upstream's 2026-10 restructure moved llmRequesterService.ts to loop/requester.ts;
+# the fallback/substitute cascade state keys moved with it.
+packages/agent-core-v2/src/agent/loop/requester.ts                       :: substituteModelActiveKey
+packages/agent-core-v2/src/agent/loop/requester.ts                       :: activateFallback
 packages/agent-core-v2/src/session/substitute/flag.ts                   :: substitute
 
 # --- session-list command (PR #41 group) ---
@@ -71,15 +74,14 @@ packages/agent-core-v2/src/app/telemetry/forkEvents.ts                  :: forkT
 # --- x-opencode-session header in agent-core-v2 (OpenCode Go session affinity) ---
 # Ported from packages/agent-core-v2/src/kosong/* to packages/agent-core-v2/src/human/llm/requester/bases/* in sync 2026-09-07,
 # then consolidated into the shared protocol/session-headers.ts helper.
-packages/agent-core-v2/src/human/llm/model.ts                          :: proxyUrl
+packages/agent-core-v2/src/human/llm-requester/model.ts                :: proxyUrl
 packages/agent-core-v2/src/human/llm/protocol/session-headers.ts        :: x-opencode-session
-packages/agent-core-v2/src/human/llm/requester/bases/openai/requester.ts :: buildProxyDispatcher
-packages/agent-core-v2/src/human/llm/requester/bases/openai-responses/requester.ts :: buildProxyDispatcher
-packages/agent-core-v2/src/human/llm/requester/bases/anthropic/requester.ts :: buildProxyDispatcher
-packages/agent-core-v2/test/human/llm/requester/bases/x-opencode-session.test.ts :: x-opencode-session
+# Upstream's 2026-10 restructure deleted requester/bases/*; the fork's per-key
+# proxy support (buildProxyDispatcher) was ported into the shared endpoint resolver.
+packages/agent-core-v2/src/human/llm/endpoint.ts                        :: buildProxyFetch
+packages/agent-core-v2/test/human/llm/x-opencode-session.test.ts       :: x-opencode-session
 
 # --- fallback cascade terminal-400 extension (bug fallback-model-skipped) ---
-packages/agent-core-v2/src/agent/llmRequester/llmRequesterService.ts :: activateFallback
 packages/agent-core-v2/src/llm-adapter/contract/errors.ts           :: isTerminalProviderApiError
 
 # --- /refresh-catalog live models.dev enrichment (OpenAI-compatible providers) ---
@@ -101,9 +103,9 @@ packages/agent-core-v2/src/app/subscription/subscription.ts          :: SUBSCRIP
 # and the `/provider` TUI entry points.
 packages/agent-core-v2/src/llm-adapter/provider/apiKeyRotation.ts      :: createKeyedCredentialProvider
 packages/agent-core-v2/src/human/credentials/keyRotationRecovery.ts    :: API_KEY_ROTATION_STRATEGY
-packages/agent-core-v2/src/human/llm/requester/requester.ts            :: LlmKeyRotationController
-packages/agent-core-v2/src/human/llm/requester/recovery.ts             :: readonly detail?: string
-packages/agent-core-v2/src/human/llm/requester/actor.ts                :: detail?: string
+packages/agent-core-v2/src/human/llm/request.ts                        :: LlmKeyRotationController
+packages/agent-core-v2/src/human/llm-requester/recovery.ts             :: readonly detail?: string
+packages/agent-core-v2/src/human/llm-requester/actor.ts                :: detail?: string
 packages/agent-core-v2/src/human/agent/turn.ts                         :: applyRecoveryActor
 packages/agent-core-v2/src/agent/loop/machine/engine.ts                :: keyRotationRecovery
 packages/agent-core-v2/src/agent/loop/loopService.ts                   :: api-key-rotation
@@ -131,7 +133,7 @@ packages/agent-core-v2/src/agent/fullCompaction/handoff-instruction.md          
 packages/agent-core-v2/src/app/telemetry/events.ts                                     :: handoff_generated
 packages/agent-core-v2/src/agent/contextMemory/contextEvents.ts                        :: handoffPath
 packages/agent-core-v2/test/agent/fullCompaction/handoffDocument.test.ts               :: AgentHandoffDocumentService
-packages/kap-server/src/protocol/events-zod.ts                                         :: handoffPath
+packages/agent-core-v2/src/agent/fullCompaction/types.ts                              :: handoffPath
 packages/klient/src/contract/agent/events.ts                                           :: handoffPath
 apps/kimi-code/src/tui/components/dialogs/compaction.ts                                :: Handoff saved:
 
