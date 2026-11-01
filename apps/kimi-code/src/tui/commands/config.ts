@@ -1,6 +1,7 @@
 import {
   ErrorCodes,
   PRIMARY_SUBAGENT_MODEL_CHOICE,
+  SECONDARY_DERIVED_MODEL_ALIAS,
   type ExperimentalFeatureState,
   type ModelAlias,
   type PermissionMode,
@@ -1412,10 +1413,9 @@ async function applyEditorChoice(host: SlashCommandHost, value: string): Promise
  */
 function pickerModelsForHost(host: SlashCommandHost): Record<string, ModelAlias> {
   return Object.fromEntries(
-    Object.entries(host.state.appState.availableModels).map(([alias, model]) => [
-      alias,
-      effectiveModelForHost(host, model),
-    ]),
+    Object.entries(host.state.appState.availableModels)
+      .filter(([alias]) => alias !== SECONDARY_DERIVED_MODEL_ALIAS)
+      .map(([alias, model]) => [alias, effectiveModelForHost(host, model)]),
   );
 }
 

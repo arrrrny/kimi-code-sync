@@ -29,6 +29,11 @@ apps/kimi-code/test/tui/commands/fallback-model.test.ts                :: fallba
 apps/kimi-code/src/tui/commands/registry.ts                             :: squeeze-model-secondary
 apps/kimi-code/src/tui/commands/config.ts                               :: Squeeze model
 apps/kimi-code/test/tui/commands/squeeze-model.test.ts                 :: squeeze-model
+# Pickers must exclude the synthesized `__secondary__` derived entry — the
+# sentinel-exclusion filter was silently dropped by a clean merge once (sync
+# 2026-11-01) even though the file's other markers still resolved.
+apps/kimi-code/src/tui/commands/config.ts                               :: alias !== SECONDARY_DERIVED_MODEL_ALIAS
+apps/kimi-code/src/tui/commands/provider.ts                             :: delete mergedModels[SECONDARY_DERIVED_MODEL_ALIAS]
 
 # --- /fork-session alias + /fork-and-switch (PR #38) ---
 apps/kimi-code/src/tui/commands/registry.ts                             :: fork-and-switch
