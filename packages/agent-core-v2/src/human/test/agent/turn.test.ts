@@ -18,7 +18,7 @@ import type {
   LlmKeyRotationController,
   LlmRequester,
 } from '#/llm-requester/requester';
-import { keyRotationRecovery } from '#human/credentials/keyRotationRecovery';
+import { keyRotationRecovery } from '#/credentials/keyRotationRecovery';
 import type { LlmRetryOptions } from '#/llm-requester/retry';
 import {
   createTurnMachine,

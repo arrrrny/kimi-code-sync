@@ -27,6 +27,7 @@ import {
 } from '#/llm-adapter/model/catalog';
 import { ModelCatalog } from '#/llm-adapter/model/catalog-service';
 import { ProtocolAdapterRegistry } from '#/llm-adapter/protocol/protocolAdapterRegistry';
+import { contentsOf } from '#human/llm/requester';
 import { generateModel } from '#/llm-adapter/model/generate';
 import { coreRequesterFromA } from '../../harness/scripted-generate';
 import { ProviderCatalogRuntimeService } from '#/llm-adapter/model/catalog-runtime';
@@ -702,6 +703,13 @@ function proxyCatalog(sections: Record<string, unknown>): {
   return { host, catalog, providers, requests };
 }
 
+function endpointCredentialsOf(catalog: ModelCatalog, id: string) {
+  const initialized = new ProtocolAdapterRegistry().request(catalog.get(id));
+  const endpoint = contentsOf(initialized).endpoint;
+  if (endpoint?.credentials === undefined) throw new Error('endpoint has no credentials');
+  return endpoint.credentials;
+}
+
 async function driveRequest(
   catalog: ModelCatalog,
   requests: LlmRequestConfig[],
@@ -742,9 +750,7 @@ describe('per-key proxy cascade on the request path', () => {
     try {
       expect(catalog.get('m1').proxyUrl).toBe('http://provider.example.test:8080');
 
-      await driveRequest(catalog, requests, 'm1');
-
-      const credential = await requests[0]?.credentialProvider?.resolve();
+      const credential = await endpointCredentialsOf(catalog, 'm1').resolve();
       expect(credential?.proxyUrl).toBe('http://key1.example.test:8081');
     } finally {
       host.dispose();
@@ -756,9 +762,7 @@ describe('per-key proxy cascade on the request path', () => {
     try {
       await providers.setActiveApiKey('kilo', 'key2');
 
-      await driveRequest(catalog, requests, 'm1');
-
-      const credential = await requests[0]?.credentialProvider?.resolve();
+      const credential = await endpointCredentialsOf(catalog, 'm1').resolve();
       expect(credential?.proxyUrl).toBe('http://provider.example.test:8080');
     } finally {
       host.dispose();
@@ -780,9 +784,7 @@ describe('per-key proxy cascade on the request path', () => {
     try {
       expect(catalog.get('m1').proxyUrl).toBeUndefined();
 
-      await driveRequest(catalog, requests, 'm1');
-
-      const credential = await requests[0]?.credentialProvider?.resolve();
+      const credential = await endpointCredentialsOf(catalog, 'm1').resolve();
       expect(credential?.proxyUrl).toBeUndefined();
     } finally {
       host.dispose();
@@ -792,14 +794,12 @@ describe('per-key proxy cascade on the request path', () => {
   it('carries the active key proxy for every model bound to the provider', async () => {
     const { host, catalog, providers, requests } = proxyCatalog(proxySections);
     try {
-      await driveRequest(catalog, requests, 'm2');
-      let credential = await requests[0]?.credentialProvider?.resolve();
+      let credential = await endpointCredentialsOf(catalog, 'm2').resolve();
       expect(credential?.proxyUrl).toBe('http://key1.example.test:8081');
 
       await providers.setActiveApiKey('kilo', 'key3');
 
-      await driveRequest(catalog, requests, 'm2');
-      credential = await requests[1]?.credentialProvider?.resolve();
+      credential = await endpointCredentialsOf(catalog, 'm2').resolve();
       expect(credential?.proxyUrl).toBe('http://key3.example.test:8083');
     } finally {
       host.dispose();

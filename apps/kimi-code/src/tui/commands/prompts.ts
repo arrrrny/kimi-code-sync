@@ -157,6 +157,8 @@ export function promptSshPassword(host: SlashCommandHost, environmentId: string)
       resolve(undefined);
     });
   }).finally(releaseAuthBlock);
+}
+
 export function promptKeyName(
   host: SlashCommandHost,
   title: string = 'Enter a name for this API key',

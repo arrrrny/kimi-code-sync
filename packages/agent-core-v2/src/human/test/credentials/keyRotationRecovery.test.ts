@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { keyRotationRecovery } from '#/credentials/keyRotationRecovery';
-import type { LlmRemoteErrorMessage } from '#/llm/errors';
-import type { LlmRecoveryContext, LlmRecoveryRecord } from '#/llm/requester/recovery';
+import type { LlmRemoteErrorMessage } from '#/llm/response';
+import type { LlmRecoveryContext, LlmRecoveryRecord } from '#/llm-requester/recovery';
 import type {
   LlmCredentialProvider,
   LlmKeyRotationController,
-} from '#/llm/requester/requester';
+} from '#human/llm/request';
 
 const NEXT_KEY = { keyId: 'key2', name: 'personal' };
 
