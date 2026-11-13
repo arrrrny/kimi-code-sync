@@ -2334,8 +2334,11 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
       facade.getUsage(),
     ]);
     const profileService = agent.accessor.get(IAgentProfileService);
-    const profile = profileService.data();
-    const capability = profile.modelCapabilities;
+    // The model binding lives on the loop service (the profile adapter applies
+    // `setModel`/`setThinking` there); the profile service carries the fork's
+    // compaction-ratio overrides and capability snapshot.
+    const profile = agent.accessor.get(IAgentLoopService).data();
+    const capability = profile.modelCapabilities ?? profileService.data().modelCapabilities;
     const maxContextTokens = capability.max_input_tokens ?? capability.max_context_tokens;
     const contextTokens = context.tokenCount;
     // Deliberately unclamped, same as the base class (>100% is the documented
@@ -2383,7 +2386,7 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
    */
   override async getModelAlias(input: SessionIdRpcInput): Promise<string | undefined> {
     const agent = await this.agentScope(input.sessionId);
-    return agent.accessor.get(IAgentProfileService).data().modelAlias;
+    return agent.accessor.get(IAgentLoopService).data().modelAlias;
   }
 
   /**

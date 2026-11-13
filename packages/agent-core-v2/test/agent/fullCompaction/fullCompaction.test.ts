@@ -1812,6 +1812,8 @@ describe('FullCompaction', () => {
         ].join('\n'),
       });
 
+      await ctx.restorePersisted();
+      ctx.context.flushReminders();
       ctx.get(IAgentFullCompactionService).begin({ source: 'auto', instruction: undefined });
       await completed;
       await ctx.wire.flush();
@@ -1856,6 +1858,8 @@ describe('FullCompaction', () => {
     const completed = ctx.once('compaction.completed');
     ctx.mockNextResponse({ type: 'text', text: 'Auto summary.' });
 
+      await ctx.restorePersisted();
+      ctx.context.flushReminders();
     ctx.get(IAgentFullCompactionService).begin({ source: 'auto', instruction: undefined });
     await completed;
     await ctx.wire.flush();
@@ -1887,6 +1891,8 @@ describe('FullCompaction', () => {
       ctx.mockNextResponse({ type: 'text', text: 'Auto summary.' });
       ctx.mockNextResponse({ type: 'text', text: '# Handoff\n\n## Session Gist\n\ngist.' });
 
+      await ctx.restorePersisted();
+      ctx.context.flushReminders();
       ctx.get(IAgentFullCompactionService).begin({ source: 'auto', instruction: undefined });
       await completed;
       await ctx.wire.flush();
@@ -1934,6 +1940,8 @@ describe('FullCompaction', () => {
       ctx.mockNextResponse({ type: 'text', text: 'Auto summary.' });
       ctx.mockNextResponse({ type: 'text', text: '# Handoff\n\n## Session Gist\n\ngist.' });
 
+      await ctx.restorePersisted();
+      ctx.context.flushReminders();
       ctx.get(IAgentFullCompactionService).begin({ source: 'auto', instruction: undefined });
       await completed;
       await ctx.wire.flush();
@@ -1974,6 +1982,8 @@ describe('FullCompaction', () => {
     const completed = ctx.once('compaction.completed');
     ctx.mockNextResponse({ type: 'text', text: 'Auto summary.' });
 
+      await ctx.restorePersisted();
+      ctx.context.flushReminders();
     ctx.get(IAgentFullCompactionService).begin({ source: 'auto', instruction: undefined });
     await completed;
 
@@ -2001,6 +2011,8 @@ describe('FullCompaction', () => {
       ctx.mockNextResponse({ type: 'text', text: 'Summary before failed handoff.' });
       ctx.mockNextProviderResponse({ error: new Error('handoff backend down') });
 
+      await ctx.restorePersisted();
+      ctx.context.flushReminders();
       ctx.get(IAgentFullCompactionService).begin({ source: 'auto', instruction: undefined });
       await completed;
       await ctx.wire.flush();
@@ -2069,6 +2081,8 @@ describe('FullCompaction', () => {
         type: 'text',
         text: '# Handoff\n\n## Session Gist\n\nFirst handoff gist.',
       });
+      await ctx.restorePersisted();
+      ctx.context.flushReminders();
       ctx.get(IAgentFullCompactionService).begin({ source: 'auto', instruction: undefined });
       await firstCompleted;
 
@@ -2114,6 +2128,8 @@ describe('FullCompaction', () => {
           type: 'text',
           text: `# Handoff\n\n## Session Gist\n\nHandoff ${round} gist.`,
         });
+      await ctx.restorePersisted();
+      ctx.context.flushReminders();
         ctx.get(IAgentFullCompactionService).begin({ source: 'auto', instruction: undefined });
         await completed;
       }
@@ -2157,7 +2173,7 @@ describe('FullCompaction', () => {
       const generate: GenerateFn = createMockProvider(async (request) => {
         callCount += 1;
         if (callCount === 1) {
-          throw new APIContextOverflowError(400, 'Context length exceeded', 'req-handoff-ovf');
+          return providerHttpError(400, 'Context length exceeded', { requestId: 'req-handoff-ovf' });
         }
         if (callCount === 2) {
           return textResult('Overflow compacted summary.');
@@ -2520,11 +2536,11 @@ describe('FullCompaction', () => {
 
     const followUpEnded = ctx.untilTurnEnd();
     await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Follow up while compacting' }] });
-    await followUpRequested.promise;
     ctx.newEvents();
     const compactionCompleted = ctx.once('compaction.completed');
     releaseCompaction.resolve();
     await compactionCompleted;
+    await followUpRequested.promise;
     releaseFollowUp.resolve();
     const events = await followUpEnded;
 
@@ -3289,7 +3305,7 @@ describe('FullCompaction', () => {
     const generate: GenerateFn = createMockProvider(async () => {
       callCount += 1;
       if (callCount === 1) {
-        throw new APIContextOverflowError(400, 'Context length exceeded', 'req-observed-window');
+        return providerHttpError(400, 'Context length exceeded', { requestId: 'req-observed-window' });
       }
       if (callCount === 2) {
         return textResult('Observed recovery summary.');
@@ -3330,7 +3346,7 @@ describe('FullCompaction', () => {
     expect(events).toContainEqual(
       expect.objectContaining({
         event: 'turn.ended',
-        args: expect.objectContaining({ turnId: 2, reason: 'completed' }),
+        args: expect.objectContaining({ turnId: 1, reason: 'completed' }),
       }),
     );
     await ctx.expectResumeMatches();

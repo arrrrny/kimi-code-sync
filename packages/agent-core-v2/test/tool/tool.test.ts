@@ -27,6 +27,7 @@ import { IAgentEnvironmentBindingService } from '#/agent/environmentBinding/envi
 import { ToolAccesses, type ExecutableTool } from '#/tool/toolContract';
 import { IAgentToolRegistryService } from '#/agent/toolRegistry/toolRegistry';
 import { IAgentLoopService } from '#/agent/loop/loop';
+import { IAgentProfileService } from '#/agent/profile/profile';
 import { agentContextOf, IAgentScopeContext } from '#/agent/scopeContext/scopeContext';
 import { IAgentUserToolService, type UserToolRegistration } from '#/agent/userTool/userTool';
 import { IAgentSwarmService } from '#/features/swarm/agent/swarm';
@@ -287,6 +288,14 @@ function createAgentLifecycleStub(options: AgentLifecycleStubOptions = {}): Agen
             agentId,
             agentContext: contextFor(agentId),
             scope: (subKey?: string) => subKey ?? '',
+          } as never;
+        }
+        if (serviceId === IAgentProfileService) {
+          return {
+            _serviceBrand: undefined,
+            data: () => ({ profileName: profileByAgentId.get(agentId) }),
+            getSessionModelOverride: () => undefined,
+            setSessionModelOverride: () => {},
           } as never;
         }
         if (serviceId === IAgentLoopService) {
@@ -2401,7 +2410,7 @@ describe('Agent tool execution contract', () => {
     );
   });
 
-  it('accepts a pool that gained a "primary" key through a runtime config edit', async () => {
+  it('rejects a pool that gained the reserved "primary" key through a runtime config edit', async () => {
     const lifecycle = createAgentLifecycleStub({ createAgentIds: ['agent-child'] });
     const context = createAgentToolContext(
       lifecycle,
@@ -2417,7 +2426,7 @@ describe('Agent tool execution contract', () => {
     );
     await (context.get(IConfigService) as StubConfigService).replace(SECONDARY_MODEL_SECTION, {
       defaultModel: 'primary',
-      models: { primary: 'ordinary alias' },
+      models: { primary: 'reserved word' },
     });
 
     const result = await executeAgentTool(context, {
@@ -2425,12 +2434,9 @@ describe('Agent tool execution contract', () => {
       description: 'Find cause',
     });
 
-    expect(result.isError).toBeFalsy();
-    expect(lifecycle.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        binding: expect.objectContaining({ model: 'primary' }),
-      }),
-    );
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain('[secondary_model.models] key "primary" is reserved');
+    expect(lifecycle.create).not.toHaveBeenCalled();
   });
 
   it('points at the [secondary_model.models] config when the bound alias stops resolving', async () => {

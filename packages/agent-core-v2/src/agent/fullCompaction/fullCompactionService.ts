@@ -1056,6 +1056,7 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
           appendedInjectionCount: compacted.appendedInjectionCount,
           droppedCount: dropped,
           wireLines,
+          ...(handoff !== undefined ? { handoffPath: handoff.path } : {}),
         }));
         this.tokenCounting.rebase(this.agent.agentContext, {
           length: compacted.messages.length,
@@ -1067,6 +1068,8 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
       }
       const { messages: _messages, ...result } = compacted;
       void _messages;
+      const resultWithHandoff: typeof result & { handoffPath?: string } = result;
+      if (handoff !== undefined) resultWithHandoff.handoffPath = handoff.path;
 
       const properties: CompactionFinishedEvent = {
         turn_id: active.originTurnId,
@@ -1086,7 +1089,7 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
         ...usageTelemetry(attempt.usage),
       };
       this.telemetry.track2('compaction_finished', properties);
-      return result;
+      return resultWithHandoff;
     } catch (error) {
       if (
         isAbortError(error) ||

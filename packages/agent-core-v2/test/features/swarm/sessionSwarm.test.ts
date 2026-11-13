@@ -2556,7 +2556,7 @@ function agentHandle(
       get: ((serviceId: unknown) => {
         const service = services.get(serviceId);
         if (service !== undefined) return service;
-        if (serviceId === IAgentLoopService) return profile;
+        if (serviceId === IAgentProfileService || serviceId === IAgentLoopService) return profile;
         if (serviceId === IAgentEnvironmentBindingService) {
           return {
             _serviceBrand: undefined,

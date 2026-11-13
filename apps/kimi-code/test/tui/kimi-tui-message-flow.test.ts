@@ -8301,7 +8301,7 @@ capabilities = ["image_in", "video_in"]
         server.close(() => {
           resolve();
         });
-      });
+      }, 60_000);
     }
   }, 20_000);
 

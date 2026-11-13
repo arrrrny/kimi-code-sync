@@ -54,6 +54,7 @@ import type { ExecutableToolContext } from '#/tool/toolContract';
 import { IAgentToolRegistryService } from '#/agent/toolRegistry/toolRegistry';
 import { AgentToolRegistryService } from '#/agent/toolRegistry/toolRegistryService';
 import { IAgentLoopService } from '#/agent/loop/loop';
+import { IAgentProfileService } from '#/agent/profile/profile';
 import { IConfigService } from '#/app/config/config';
 import { normalizeAgentProfile, type AgentProfile } from '#/app/agentProfileCatalog/agentProfileCatalog';
 import { ISessionAgentProfileCatalog } from '#/session/sessionAgentProfileCatalog/sessionAgentProfileCatalog';
@@ -193,11 +194,11 @@ function stubCallerProfile(
     readonly modelAlias?: string;
     readonly thinkingLevel?: string;
   },
-): IAgentLoopService {
+): IAgentLoopService & IAgentProfileService {
   return {
     _serviceBrand: undefined,
     data: () => data ?? { profileName: undefined },
-  } as unknown as IAgentLoopService;
+  } as unknown as IAgentLoopService & IAgentProfileService;
 }
 
 const SWARM_MODEL_ALIASES: ReadonlySet<string> = new Set([
@@ -210,7 +211,7 @@ const SWARM_MODEL_ALIASES: ReadonlySet<string> = new Set([
 function realSubagents(
   catalog: ISessionAgentProfileCatalog,
   config: IConfigService,
-  callerProfile: IAgentLoopService,
+  callerProfile: IAgentProfileService,
 ): ISessionSubagentService {
   const caller = {
     _serviceBrand: undefined,
@@ -223,13 +224,13 @@ function realSubagents(
       };
     },
     getSessionModelOverride: () => undefined,
-  } as unknown as IAgentLoopService;
+  } as unknown as IAgentProfileService;
   const callerHandle = {
     id: 'main',
     kind: LifecycleScope.Agent,
     accessor: {
       get: (serviceId: unknown) =>
-        serviceId === IAgentLoopService ? caller : undefined,
+        serviceId === IAgentProfileService || serviceId === IAgentLoopService ? caller : undefined,
     },
     dispose: () => {},
   } as unknown as IAgentScopeHandle;
@@ -859,6 +860,7 @@ describe('AgentSwarmTool', () => {
     );
 
     const result = await executeTool(tool, context(input));
+    console.log('DBG-SWARM', JSON.stringify(result).slice(0, 500));
 
     expect(swarmMode.enter).not.toHaveBeenCalled();
     expect(host.swarmService.run).toHaveBeenCalledTimes(1);
