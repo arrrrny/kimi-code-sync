@@ -17,6 +17,7 @@ function rotationFailed(appliedRecoveries: readonly LlmRecoveryRecord[]): boolea
 }
 
 function isAuthRejection(error: LlmRemoteErrorMessage): boolean {
+  if (error.kind === 'auth') return true;
   return error.kind === 'status' && (error.statusCode === 401 || error.statusCode === 403);
 }
 

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createActor, emit, setup } from '#human/xstate2';
 
 import type {
+  AgentLLMRequestOverrides,
   AgentLLMRequestPartHandler,
   AgentLLMRequestTask,
   LoopRequester,
@@ -9,6 +10,7 @@ import type {
 import {
   machineEngineAttachBundle,
   type CreateMachineEngineOptions,
+  type MachineEngineEvent,
 } from '#/agent/loop/machine/engine';
 import type { IAgentToolExecutorService } from '#/agent/toolExecutor/toolExecutor';
 import { APIProviderRateLimitError, APIStatusError } from '#/llm-adapter/contract/errors';
@@ -72,7 +74,10 @@ function createCountingRequester(
 ): LoopRequester {
   const inner = createRequesterService(steps);
   return {
-    start: (overrides: unknown, onPart?: AgentLLMRequestPartHandler): AgentLLMRequestTask => {
+    start: (
+      overrides?: AgentLLMRequestOverrides,
+      onPart?: AgentLLMRequestPartHandler,
+    ): AgentLLMRequestTask => {
       requests.push(`request:${String(requests.length + 1)}`);
       return inner.start(overrides, onPart);
     },
@@ -127,7 +132,14 @@ function fallbackChain(applied: string[]): LlmRecovery {
 }
 
 function startEngineTurnActor(options: CreateMachineEngineOptions, turnInput: Partial<TurnInput>) {
-  const bundle = machineEngineAttachBundle(options);
+  const events: MachineEngineEvent[] = [];
+  const bundle = machineEngineAttachBundle({
+    ...options,
+    onEvent: (event) => {
+      events.push(event);
+      options.onEvent?.(event);
+    },
+  });
   const harness = setup({
     types: {
       input: {} as TurnInput,
@@ -160,7 +172,7 @@ function startEngineTurnActor(options: CreateMachineEngineOptions, turnInput: Pa
   });
   actor.on('llm.recovering', (event) => recovering.push(event));
   actor.start();
-  return { actor, recovering };
+  return { actor, recovering, events };
 }
 
 async function advanceTurn(actor: { getSnapshot(): unknown }): Promise<void> {
@@ -210,9 +222,9 @@ describe('machine engine api key rotation precedence', () => {
     expect(recovering.map((event) => event.strategy)).toEqual(['api_key_rotation']);
   });
 
-  it('stays silent about exhaustion when the step only holds a rotation that failed to apply', async () => {
+  it('announces a rotation that failed to apply without reporting the cycle as exhausted', async () => {
     const applied: string[] = [];
-    const { actor, recovering } = startEngineTurnActor(
+    const { actor, recovering, events } = startEngineTurnActor(
       {
         model,
         llmRequester: createRequesterService(['unauthorized']),
@@ -237,6 +249,7 @@ describe('machine engine api key rotation precedence', () => {
 
     expect(recovering.map((event) => event.action)).toEqual(['key2']);
     expect(recovering[0]?.detail).toContain('could not be applied: config.toml is read-only');
+    expect(events.filter((event) => event.type === 'recovering' && event.action === 'exhausted')).toEqual([]);
   });
 
   it('rotates to the next key when the provider reports the token is invalid', async () => {

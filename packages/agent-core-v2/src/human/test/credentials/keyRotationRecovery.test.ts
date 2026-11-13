@@ -52,6 +52,10 @@ function statusError(statusCode: number, kind: 'status' | 'rate_limit' = 'status
   };
 }
 
+function authKindError(statusCode: number): LlmRemoteErrorMessage {
+  return { ...statusFields(), kind: 'auth', message: `auth ${statusCode}`, statusCode };
+}
+
 const refused = statusError(403);
 const rateLimited = statusError(429, 'rate_limit');
 
@@ -93,6 +97,19 @@ describe('keyRotationRecovery qualification', () => {
     expect(keyRotationRecovery.propose(context({ error: statusError(401) }))).toMatchObject({
       strategy: 'api_key_rotation',
       action: NEXT_KEY.keyId,
+    });
+  });
+
+  it('proposes on an auth-kind 401', () => {
+    expect(keyRotationRecovery.propose(context({ error: authKindError(401) }))).toMatchObject({
+      strategy: 'api_key_rotation',
+      action: NEXT_KEY.keyId,
+    });
+  });
+
+  it('proposes on an auth-kind 403', () => {
+    expect(keyRotationRecovery.propose(context({ error: authKindError(403) }))).toMatchObject({
+      strategy: 'api_key_rotation',
     });
   });
 
@@ -159,7 +176,7 @@ function statusFields(): {
   retryAfterMs: null;
   headers: null;
 } {
-  return { statusCode: 429, requestId: null, retryAfterMs: null, headers: null };
+  return { statusCode: 500, requestId: null, retryAfterMs: null, headers: null };
 }
 
 describe('keyRotationRecovery cycle bound', () => {
