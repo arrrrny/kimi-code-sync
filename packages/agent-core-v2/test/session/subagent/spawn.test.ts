@@ -16,6 +16,7 @@ import {
   normalizeAgentProfile,
   type AgentProfile,
 } from '#/app/agentProfileCatalog/agentProfileCatalog';
+import { IAgentLoopService } from '#/agent/loop/loop';
 import { IAgentProfileService } from '#/agent/profile/profile';
 import type { ProfileData } from '#/agent/profile/profile';
 import { IAgentPermissionModeService } from '#/agent/permissionMode/permissionMode';
@@ -114,7 +115,7 @@ describe('SessionSubagentService planSpawn and spawn', () => {
       kind: LifecycleScope.Agent,
       accessor: {
         get: (serviceId: unknown) => {
-          if (serviceId === IAgentProfileService) return profile;
+          if (serviceId === IAgentProfileService || serviceId === IAgentLoopService) return profile;
           if (serviceId === IAgentPermissionModeService) return createdPermissionMode;
           if (serviceId === IAgentUserToolService) return createdUserTools;
           if (serviceId === IAgentReminderService) return createdReminder;
@@ -169,7 +170,9 @@ describe('SessionSubagentService planSpawn and spawn', () => {
       kind: LifecycleScope.Agent,
       accessor: {
         get: (serviceId: unknown) => {
-          if (serviceId === IAgentProfileService) return profileServiceStub(callerData, callerOverrides);
+          if (serviceId === IAgentProfileService || serviceId === IAgentLoopService) {
+            return profileServiceStub(callerData, callerOverrides);
+          }
           if (serviceId === IAgentPermissionModeService) return callerPermissionMode;
           if (serviceId === IAgentUserToolService) return callerUserTools;
           if (serviceId === IAgentEnvironmentService) {

@@ -149,6 +149,20 @@ export class ProtocolAdapterRegistry implements IProtocolAdapterRegistry {
     const endpoint: LlmEndpoint = {
       ...base.endpoint,
       ...model.endpoint,
+      credentials:
+        model.endpoint.credentials === undefined
+          ? undefined
+          : {
+              resolve: async () => {
+                const credential = await model.endpoint.credentials?.resolve();
+                const proxyUrl = credential?.proxyUrl ?? model.endpoint.proxyUrl;
+                if (credential === undefined && proxyUrl === undefined) return undefined;
+                return { ...credential, proxyUrl };
+              },
+              canRecover: (error) => model.endpoint.credentials?.canRecover?.(error) === true,
+              invalidate: () => model.endpoint.credentials?.invalidate?.(),
+              rotation: () => model.endpoint.credentials?.rotation?.(),
+            },
       fetch:
         protocolBase.usesEndpointFetch === false
           ? undefined

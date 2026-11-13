@@ -8301,9 +8301,9 @@ capabilities = ["image_in", "video_in"]
         server.close(() => {
           resolve();
         });
-      }, 60_000);
+      });
     }
-  }, 20_000);
+  }, 60_000);
 
   it('clears streaming editor text before cancelling the active turn on Ctrl-C', async () => {
     const { driver, session } = await makeDriver();

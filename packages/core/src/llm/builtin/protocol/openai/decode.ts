@@ -11,7 +11,7 @@ import {
 } from 'openai';
 
 import { headersToRecord, parseRetryAfterMs } from '#/llm/protocol/kit/http';
-import { isAbortError, toLlmErrorMessage } from '#/llm/protocol/errors';
+import { errorStatusCode, isAbortError, statusErrorInCauseChain, toLlmErrorMessage } from '#/llm/protocol/errors';
 import {
   isTransientHttpStatus,
   toLlmStatusErrorMessage,
@@ -403,6 +403,8 @@ export function decodeError(error: unknown, source?: 'stream'): LlmRemoteErrorMe
     return { kind: 'timeout', message: error.message, retryable: true };
   }
   if (error instanceof RawOpenAISDKConnectionError) {
+    const statusCause = statusErrorInCauseChain(error.cause);
+    if (statusCause !== undefined) return toLlmErrorMessage(statusCause);
     const cause = error.cause;
     return {
       kind: 'connection',
@@ -476,6 +478,9 @@ export function decodeError(error: unknown, source?: 'stream'): LlmRemoteErrorMe
   }
   if (error instanceof RawOpenAISDKError) {
     return { kind: 'provider', message: `Error: ${error.message}`, retryable: true };
+  }
+  if (errorStatusCode(error) !== undefined) {
+    return toLlmErrorMessage(error);
   }
   if (error instanceof Error) {
     return toLlmTransportErrorMessage(error.message);

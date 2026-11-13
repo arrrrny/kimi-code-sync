@@ -18,6 +18,7 @@ import {
   type LlmRecoveryEntry,
   type LlmRecoveryMemory,
   type LlmRecoveryRecord,
+  exhaustedRecovery,
 } from './recovery';
 import type { LlmResolver } from './resolver';
 import {
@@ -294,6 +295,31 @@ async function runAttempts(
       continue;
     }
 
+    const exhausted = exhaustedRecovery(listOf(policy.recoveries), {
+      error: result.error,
+      request: recoveryRequest,
+      appliedRecoveries: ledger.applied,
+      endpoint: recoveryRequest.endpoint,
+      attempt,
+      maxAttempts,
+    });
+    if (exhausted !== undefined) {
+      onEvent?.({
+        type: 'llm.retrying',
+        reason: 'recovery',
+        strategy: exhausted.strategy,
+        action: exhausted.action,
+        detail: exhausted.detail,
+        error: result.error,
+        message: result.message,
+        usage: result.usage,
+        headers: result.headers,
+        finish: result.finish,
+        messageId: result.messageId,
+        requestId: result.requestId,
+        timing: result.timing,
+      });
+    }
     return result;
   }
 
