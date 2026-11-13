@@ -1,12 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import type { LlmRecoveryContext, LlmRecoveryRecord } from '@moonshot-ai/core/llm/policy/recovery';
+import type { LlmCredentialProvider, LlmKeyRotationController } from '@moonshot-ai/core/llm/request';
+import type { LlmRemoteErrorMessage } from '@moonshot-ai/core/llm/response';
 import { keyRotationRecovery } from '#/credentials/keyRotationRecovery';
-import type { LlmRemoteErrorMessage } from '#/llm/response';
-import type { LlmRecoveryContext, LlmRecoveryRecord } from '#/llm-requester/recovery';
-import type {
-  LlmCredentialProvider,
-  LlmKeyRotationController,
-} from '#human/llm/request';
 
 const NEXT_KEY = { keyId: 'key2', name: 'personal' };
 
@@ -33,11 +30,11 @@ function context(args: {
 }): LlmRecoveryContext {
   return {
     error: args.error,
-    messages: [],
+    request: {} as LlmRecoveryContext['request'],
     appliedRecoveries: args.appliedRecoveries ?? [],
     attempt: args.attempt ?? 1,
     maxAttempts: args.maxAttempts ?? 10,
-    credentialProvider: rotationProvider(args.rotation ?? controller()),
+    endpoint: { credentials: rotationProvider(args.rotation ?? controller()) },
   };
 }
 
@@ -50,6 +47,10 @@ function statusError(statusCode: number, kind: 'status' | 'rate_limit' = 'status
     retryAfterMs: null,
     headers: null,
   };
+}
+
+function authKindError(statusCode: number): LlmRemoteErrorMessage {
+  return { ...statusFields(), kind: 'auth', message: `auth ${statusCode}`, statusCode };
 }
 
 const refused = statusError(403);
@@ -81,8 +82,48 @@ describe('keyRotationRecovery qualification', () => {
     ).toMatchObject({ strategy: 'api_key_rotation' });
   });
 
-  it('declines for a 401', () => {
-    expect(keyRotationRecovery.propose(context({ error: statusError(401) }))).toBeUndefined();
+  it('proposes on a 401 at the last allowed attempt', () => {
+    expect(
+      keyRotationRecovery.propose(
+        context({ error: statusError(401), attempt: 10, maxAttempts: 10 }),
+      ),
+    ).toMatchObject({ strategy: 'api_key_rotation' });
+  });
+
+  it('proposes on a 401 at the first attempt', () => {
+    expect(keyRotationRecovery.propose(context({ error: statusError(401) }))).toMatchObject({
+      strategy: 'api_key_rotation',
+      action: NEXT_KEY.keyId,
+    });
+  });
+
+  it('proposes on an auth-kind 401', () => {
+    expect(keyRotationRecovery.propose(context({ error: authKindError(401) }))).toMatchObject({
+      strategy: 'api_key_rotation',
+      action: NEXT_KEY.keyId,
+    });
+  });
+
+  it('proposes on an auth-kind 403', () => {
+    expect(keyRotationRecovery.propose(context({ error: authKindError(403) }))).toMatchObject({
+      strategy: 'api_key_rotation',
+    });
+  });
+
+  it('declines for a non-auth 4xx status', () => {
+    expect(keyRotationRecovery.propose(context({ error: statusError(402) }))).toBeUndefined();
+  });
+
+  it('keeps the rate-limit rotation while a 401 rotates on the first attempt', () => {
+    expect(
+      keyRotationRecovery.propose(context({ error: rateLimited, attempt: 9, maxAttempts: 10 })),
+    ).toBeUndefined();
+    expect(
+      keyRotationRecovery.propose(context({ error: rateLimited, attempt: 10, maxAttempts: 10 })),
+    ).toMatchObject({ strategy: 'api_key_rotation' });
+    expect(keyRotationRecovery.propose(context({ error: statusError(401) }))).toMatchObject({
+      strategy: 'api_key_rotation',
+    });
   });
 
   it('declines for a quota-exhausted failure', () => {
@@ -108,6 +149,22 @@ describe('keyRotationRecovery qualification', () => {
       ),
     ).toBeUndefined();
   });
+
+  it('declines a 401 once keyCount - 1 rotations were applied to this step', () => {
+    expect(
+      keyRotationRecovery.propose(
+        context({ error: statusError(401), appliedRecoveries: rotationRecords(2) }),
+      ),
+    ).toBeUndefined();
+  });
+
+  it('still proposes a 401 while only keyCount - 2 rotations were applied to this step', () => {
+    expect(
+      keyRotationRecovery.propose(
+        context({ error: statusError(401), appliedRecoveries: rotationRecords(1) }),
+      ),
+    ).toMatchObject({ strategy: 'api_key_rotation' });
+  });
 });
 
 function statusFields(): {
@@ -116,14 +173,14 @@ function statusFields(): {
   retryAfterMs: null;
   headers: null;
 } {
-  return { statusCode: 429, requestId: null, retryAfterMs: null, headers: null };
+  return { statusCode: 500, requestId: null, retryAfterMs: null, headers: null };
 }
 
 describe('keyRotationRecovery cycle bound', () => {
   it('declines when the credential provider exposes no rotation controller', () => {
     const ctx = context({ error: refused });
     expect(
-      keyRotationRecovery.propose({ ...ctx, credentialProvider: { resolve: () => undefined } }),
+      keyRotationRecovery.propose({ ...ctx, endpoint: { credentials: { resolve: () => undefined } } }),
     ).toBeUndefined();
   });
 
@@ -158,9 +215,11 @@ describe('keyRotationRecovery cycle bound', () => {
 });
 
 describe('keyRotationRecovery exhaustion', () => {
-  it('reports the provider and the key count once every key was tried', () => {
+  it('reports the provider and the key count once every key was tried on a 401', () => {
     expect(
-      keyRotationRecovery.exhausted?.(context({ error: refused, appliedRecoveries: rotationRecords(2) })),
+      keyRotationRecovery.exhausted?.(
+        context({ error: statusError(401), appliedRecoveries: rotationRecords(2) }),
+      ),
     ).toEqual({
       strategy: 'api_key_rotation',
       action: 'exhausted',
@@ -171,21 +230,21 @@ describe('keyRotationRecovery exhaustion', () => {
   it('stays silent while a key is still untried in this step', () => {
     expect(
       keyRotationRecovery.exhausted?.(
-        context({ error: refused, appliedRecoveries: rotationRecords(1) }),
+        context({ error: statusError(401), appliedRecoveries: rotationRecords(1) }),
       ),
     ).toBeUndefined();
   });
 
   it('stays silent when no rotation was applied to this step', () => {
     expect(
-      keyRotationRecovery.exhausted?.(context({ error: refused })),
+      keyRotationRecovery.exhausted?.(context({ error: statusError(401) })),
     ).toBeUndefined();
   });
 
   it('stays silent for a failure that never qualified for rotation', () => {
     expect(
       keyRotationRecovery.exhausted?.(
-        context({ error: statusError(401), appliedRecoveries: rotationRecords(2) }),
+        context({ error: statusError(402), appliedRecoveries: rotationRecords(2) }),
       ),
     ).toBeUndefined();
   });
@@ -205,7 +264,7 @@ describe('keyRotationRecovery exhaustion', () => {
   it('stays silent when the credential provider exposes no rotation controller', () => {
     const ctx = context({ error: refused, appliedRecoveries: rotationRecords(2) });
     expect(
-      keyRotationRecovery.exhausted?.({ ...ctx, credentialProvider: { resolve: () => undefined } }),
+      keyRotationRecovery.exhausted?.({ ...ctx, endpoint: { credentials: { resolve: () => undefined } } }),
     ).toBeUndefined();
   });
 
@@ -238,6 +297,12 @@ describe('keyRotationRecovery proposal', () => {
 
   it('names the provider and the target key without the key value', () => {
     const proposal = keyRotationRecovery.propose(context({ error: refused }));
+    expect(proposal?.detail).toBe('kilo → personal (key2)');
+    expect(proposal?.detail).not.toContain('sk-');
+  });
+
+  it('names the provider and the target key without the key value for a 401', () => {
+    const proposal = keyRotationRecovery.propose(context({ error: statusError(401) }));
     expect(proposal?.detail).toBe('kilo → personal (key2)');
     expect(proposal?.detail).not.toContain('sk-');
   });

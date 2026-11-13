@@ -2917,4 +2917,89 @@ describe('Agent loop api key rotation notice', () => {
       await ctx.dispose();
     }
   });
+
+  it('rotates to the next key when the provider reports the token is invalid', async () => {
+    const maxAttemptsPerStep = 3;
+    const ctx = createTestAgent({
+      initialConfig: {
+        loopControl: { maxAttemptsPerStep },
+        providers: {
+          'test-provider': {
+            type: 'kimi',
+            apiKey: 'sk-legacy-key',
+            baseUrl: 'https://api.example.test/v1',
+            rotateKeys: true,
+            activeApiKeyId: 'k1',
+            apiKeys: {
+              k1: { key: 'sk-live-SECRET-ONE', name: 'primary' },
+              k2: { key: 'sk-live-SECRET-TWO', name: 'personal' },
+              k3: { key: 'sk-live-SECRET-THREE', name: 'backup' },
+            },
+          },
+        },
+      },
+    } as unknown as TestAgentOptions);
+    try {
+      await ctx.restorePersisted();
+      const warnings: WarningIssued[] = [];
+      const subscription = ctx.get(IEventBus).subscribe((event) => {
+        if (event instanceof WarningIssued) warnings.push(event);
+      });
+      ctx.mockNextProviderResponse(providerHttpError(401, 'invalid authentication token'));
+      ctx.mockNextResponse({ type: 'text', text: 'answered on the next key' });
+
+      await ctx.rpc.prompt({ input: [{ type: 'text', text: 'hello' }] });
+      await ctx.untilTurnEnd();
+      subscription.dispose();
+
+      const rotations = warnings.filter((warning) => warning.code === 'api-key-rotation');
+      expect(rotations).toHaveLength(1);
+      expect(rotations[0]?.message).toContain('personal');
+      expect(rotations[0]?.message).toContain('k2');
+      expect(rotations[0]?.message).not.toContain('sk-live-SECRET-ONE');
+      expect(rotations[0]?.message).not.toContain('sk-live-SECRET-TWO');
+    } finally {
+      await ctx.dispose();
+    }
+  });
+
+  it('does not rotate a rejected credential when the provider has rotation turned off', async () => {
+    const maxAttemptsPerStep = 3;
+    const ctx = createTestAgent({
+      initialConfig: {
+        loopControl: { maxAttemptsPerStep },
+        providers: {
+          'test-provider': {
+            type: 'kimi',
+            apiKey: 'sk-legacy-key',
+            baseUrl: 'https://api.example.test/v1',
+            rotateKeys: false,
+            activeApiKeyId: 'k1',
+            apiKeys: {
+              k1: { key: 'sk-live-SECRET-ONE', name: 'primary' },
+              k2: { key: 'sk-live-SECRET-TWO', name: 'personal' },
+            },
+          },
+        },
+      },
+    } as unknown as TestAgentOptions);
+    try {
+      await ctx.restorePersisted();
+      const warnings: WarningIssued[] = [];
+      const subscription = ctx.get(IEventBus).subscribe((event) => {
+        if (event instanceof WarningIssued) warnings.push(event);
+      });
+      for (let i = 0; i < maxAttemptsPerStep; i += 1) {
+        ctx.mockNextProviderResponse(providerHttpError(401, 'invalid authentication token'));
+      }
+
+      await ctx.rpc.prompt({ input: [{ type: 'text', text: 'hello' }] });
+      await ctx.untilTurnEnd();
+      subscription.dispose();
+
+      expect(warnings.filter((warning) => warning.code === 'api-key-rotation')).toHaveLength(0);
+    } finally {
+      await ctx.dispose();
+    }
+  });
 });

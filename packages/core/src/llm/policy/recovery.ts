@@ -17,6 +17,8 @@ export interface LlmRecoveryContext {
   readonly request: LlmRequest;
   readonly appliedRecoveries: readonly LlmRecoveryRecord[];
   readonly endpoint?: LlmEndpoint;
+  readonly attempt: number;
+  readonly maxAttempts: number;
 }
 
 export type LlmRequestRewrite = (request: LlmRequest) => LlmRequest;

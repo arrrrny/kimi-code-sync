@@ -234,6 +234,8 @@ async function runAttempts(
       request: recoveryRequest,
       appliedRecoveries: ledger.applied,
       endpoint: recoveryRequest.endpoint,
+      attempt,
+      maxAttempts,
     });
     if (proposal !== undefined) {
       const failure = await applyRecovery(proposal);

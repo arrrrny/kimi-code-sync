@@ -36,6 +36,7 @@ import { getProviderDefinition } from '#/llm-adapter/provider/provider-definitio
 import { ISessionRequestAttributionService } from '#/session/requestAttribution/requestAttribution';
 import { IBootstrapService } from '#/app/bootstrap/bootstrap';
 import { credentialRecovery } from '@moonshot-ai/core/llm/policy/credentials';
+import { keyRotationRecovery } from '#human/credentials/keyRotationRecovery';
 import { IAgentToolExecutorService } from '#/agent/toolExecutor/toolExecutor';
 import { agentTaskInfo } from '#/agent/task/handler';
 import { IAgentTaskHistoryService } from '#/agent/task/taskService';
@@ -663,6 +664,7 @@ export class AgentLoopService extends Disposable implements IAgentLoopService {
       },
       recoveries: [
         credentialRecovery,
+        keyRotationRecovery,
         createStructureRecovery(this.projector),
         mediaPolicy.recovery,
       ],
