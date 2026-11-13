@@ -1,5 +1,9 @@
-import type { LlmCredential, LlmCredentialProvider } from '#human/llm-requester/requester';
-import type { LlmKeyRotationController, LlmKeyRotationOutcome } from '#human/llm/request';
+import type {
+  LlmCredential,
+  LlmCredentialProvider,
+  LlmKeyRotationController,
+  LlmKeyRotationOutcome,
+} from '@moonshot-ai/core/llm/request';
 
 import { nonEmpty } from '../model/model-auth';
 

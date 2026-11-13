@@ -52,10 +52,11 @@ packages/agent-core-v2/src/agent/fullCompaction/fullCompactionService.ts :: comp
 packages/agent-core-v2/src/agent/fullCompaction/compactionOps.ts        :: model_display
 
 # --- substitute-model on rate limit ---
-# Upstream's 2026-10 restructure moved llmRequesterService.ts to loop/requester.ts;
-# the fallback/substitute cascade state keys moved with it.
-packages/agent-core-v2/src/agent/loop/requester.ts                       :: substituteModelActiveKey
-packages/agent-core-v2/src/agent/loop/requester.ts                       :: activateFallback
+# Upstream's 2026-11 restructure split the cascade out of loop/requester.ts
+# into the session/substitute + session/fallback domains; the cascade state
+# keys moved with it.
+packages/agent-core-v2/src/session/substitute/state.ts                  :: substituteModelActiveKey
+packages/agent-core-v2/src/session/fallback/state.ts                    :: fallbackModelActiveKey
 packages/agent-core-v2/src/session/substitute/flag.ts                   :: substitute
 
 # --- session-list command (PR #41 group) ---
@@ -77,14 +78,16 @@ packages/agent-core-v2/src/agent/fullCompaction/squeezeForkOps.ts       :: Squee
 packages/agent-core-v2/src/agent/fullCompaction/squeezeCascade.ts       :: resolveSqueezeModelAliasWithCascade
 packages/agent-core-v2/src/app/telemetry/forkEvents.ts                  :: forkTelemetryEventDefinitions
 # --- x-opencode-session header in agent-core-v2 (OpenCode Go session affinity) ---
-# Ported from packages/agent-core-v2/src/kosong/* to packages/agent-core-v2/src/human/llm/requester/bases/* in sync 2026-09-07,
-# then consolidated into the shared protocol/session-headers.ts helper.
-packages/agent-core-v2/src/human/llm-requester/model.ts                :: proxyUrl
-packages/agent-core-v2/src/human/llm/protocol/session-headers.ts        :: x-opencode-session
+# Ported from packages/agent-core-v2/src/kosong/* to requester/bases/* in sync 2026-09-07,
+# then consolidated into the shared protocol/session-headers.ts helper, and moved
+# into packages/core with the 2026-11 restructure.
+packages/core/src/llm/protocol/session-headers.ts                     :: x-opencode-session
 # Upstream's 2026-10 restructure deleted requester/bases/*; the fork's per-key
-# proxy support (buildProxyDispatcher) was ported into the shared endpoint resolver.
-packages/agent-core-v2/src/human/llm/endpoint.ts                        :: buildProxyFetch
-packages/agent-core-v2/test/human/llm/x-opencode-session.test.ts       :: x-opencode-session
+# proxy support (buildProxyFetch) was ported into the shared endpoint resolver,
+# which moved to packages/core with the 2026-11 restructure.
+packages/core/src/llm/endpoint.ts                                     :: buildProxyFetch
+packages/core/src/llm/request.ts                                      :: proxyUrl
+packages/core/test/llm/protocol/x-opencode-session.test.ts            :: x-opencode-session
 
 # --- fallback cascade terminal-400 extension (bug fallback-model-skipped) ---
 packages/agent-core-v2/src/llm-adapter/contract/errors.ts           :: isTerminalProviderApiError
@@ -108,13 +111,11 @@ packages/agent-core-v2/src/app/subscription/subscription.ts          :: SUBSCRIP
 # and the `/provider` TUI entry points.
 packages/agent-core-v2/src/llm-adapter/provider/apiKeyRotation.ts      :: createKeyedCredentialProvider
 packages/agent-core-v2/src/human/credentials/keyRotationRecovery.ts    :: API_KEY_ROTATION_STRATEGY
-packages/agent-core-v2/src/human/llm/request.ts                        :: LlmKeyRotationController
-packages/agent-core-v2/src/human/llm-requester/recovery.ts             :: readonly detail?: string
-packages/agent-core-v2/src/human/llm-requester/actor.ts                :: detail?: string
-packages/agent-core-v2/src/human/agent/turn.ts                         :: applyRecoveryActor
-packages/agent-core-v2/src/agent/loop/machine/engine.ts                :: keyRotationRecovery
-packages/agent-core-v2/src/agent/loop/loopService.ts                   :: api-key-rotation
-packages/agent-core-v2/src/human/credentials/credentials.ts            :: credential.proxyUrl
+packages/core/src/llm/request.ts                                      :: LlmKeyRotationController
+packages/core/src/llm/policy/recovery.ts                              :: readonly detail?: string
+packages/agent-core-v2/src/agent/loop/turnProjection.ts                :: keyRotationRecovery
+packages/agent-core-v2/src/agent/loop/turnProjection.ts                :: api-key-rotation
+packages/core/src/llm/endpoint.ts                                     :: credential?.proxyUrl
 packages/agent-core-v2/src/app/kosongConfig/configSection.ts           :: apiKeyEntryFromToml
 packages/agent-core-v2/src/llm-adapter/provider/provider.ts            :: rotateKeys
 packages/agent-core-v2/src/llm-adapter/provider/provider-service.ts    :: setActiveApiKey
@@ -132,7 +133,7 @@ packages/agent-core-v2/test/llm-adapter/provider/apiKeyRotation.test.ts       ::
 # file upstream also edits; the auth-rejection predicate and its acceptance tests are the
 # markers a clean merge must not silently drop.
 packages/agent-core-v2/src/human/credentials/keyRotationRecovery.ts    :: isAuthRejection
-packages/agent-core-v2/test/agent/loop/machineEngineRecovery.test.ts   :: rotates to the next key when the provider reports the token is invalid
+packages/agent-core-v2/test/agent/loop/loop.test.ts                    :: rotates to the next key when the provider reports the token is invalid
 packages/agent-core-v2/src/human/test/credentials/keyRotationRecovery.test.ts :: keyRotationRecovery
 
 # --- auto-compact handoff document (spec 832) ---

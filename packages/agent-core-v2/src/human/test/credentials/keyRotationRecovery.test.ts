@@ -1,12 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import type { LlmRecoveryContext, LlmRecoveryRecord } from '@moonshot-ai/core/llm/policy/recovery';
+import type { LlmCredentialProvider, LlmKeyRotationController } from '@moonshot-ai/core/llm/request';
+import type { LlmRemoteErrorMessage } from '@moonshot-ai/core/llm/response';
 import { keyRotationRecovery } from '#/credentials/keyRotationRecovery';
-import type { LlmRemoteErrorMessage } from '#/llm/response';
-import type { LlmRecoveryContext, LlmRecoveryRecord } from '#/llm-requester/recovery';
-import type {
-  LlmCredentialProvider,
-  LlmKeyRotationController,
-} from '#human/llm/request';
 
 const NEXT_KEY = { keyId: 'key2', name: 'personal' };
 
@@ -33,11 +30,11 @@ function context(args: {
 }): LlmRecoveryContext {
   return {
     error: args.error,
-    messages: [],
+    request: {} as LlmRecoveryContext['request'],
     appliedRecoveries: args.appliedRecoveries ?? [],
     attempt: args.attempt ?? 1,
     maxAttempts: args.maxAttempts ?? 10,
-    credentialProvider: rotationProvider(args.rotation ?? controller()),
+    endpoint: { credentials: rotationProvider(args.rotation ?? controller()) },
   };
 }
 
@@ -183,7 +180,7 @@ describe('keyRotationRecovery cycle bound', () => {
   it('declines when the credential provider exposes no rotation controller', () => {
     const ctx = context({ error: refused });
     expect(
-      keyRotationRecovery.propose({ ...ctx, credentialProvider: { resolve: () => undefined } }),
+      keyRotationRecovery.propose({ ...ctx, endpoint: { credentials: { resolve: () => undefined } } }),
     ).toBeUndefined();
   });
 
@@ -267,7 +264,7 @@ describe('keyRotationRecovery exhaustion', () => {
   it('stays silent when the credential provider exposes no rotation controller', () => {
     const ctx = context({ error: refused, appliedRecoveries: rotationRecords(2) });
     expect(
-      keyRotationRecovery.exhausted?.({ ...ctx, credentialProvider: { resolve: () => undefined } }),
+      keyRotationRecovery.exhausted?.({ ...ctx, endpoint: { credentials: { resolve: () => undefined } } }),
     ).toBeUndefined();
   });
 

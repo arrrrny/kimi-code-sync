@@ -1,28 +1,29 @@
+import { providerHttpError } from '../../harness/index';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { appendContext, compactContext } from '../contextMemory/stubs';
 
 import { type IDisposable } from '#/_base/di/lifecycle';
 import {
   resetUnexpectedErrorHandler,
   setUnexpectedErrorHandler,
 } from '#/_base/errors/unexpectedError';
-import { IAgentContextMemoryService } from '#/agent/contextMemory/contextMemory';
 import { IAgentConversationUndoParticipantRegistry } from '#/agent/contextMemory/conversationUndoParticipants';
 import { IAgentChangeNotifierService } from '#/agent/changeNotifier/changeNotifier';
 import {
   ChangeNotifierSnapshotEvent,
   changeNotifierSnapshotKey,
 } from '#/agent/changeNotifier/changeNotifierOps';
-import { ContextApplyCompaction } from '#/agent/contextMemory/contextEvents';
-import { isPromptOwnedInjection, isUndoAnchor } from '#/agent/contextMemory/conversationTime';
+import { ContextApplyCompaction, ContextClear } from '#/agent/contextMemory/contextEvents';
+import { isUndoAnchorTurnPrompt } from '#/agent/undo/turnUndo';
 import { userPromptSubmitHookPart } from '#/agent/contextMemory/hookParts';
-import type { ContextMessage, PromptOrigin, TaskOrigin } from '#/agent/contextMemory/types';
+import type { ContextMessage, PromptOrigin } from '#/agent/contextMemory/types';
 import { IAgentFullCompactionService } from '#/agent/fullCompaction/fullCompaction';
 import { IAgentLoopService } from '#/agent/loop/loop';
-import { turnKey } from '#/agent/loop/turnOps';
+import { turnKey, type TurnPrompt } from '#/agent/loop/turnOps';
 import { IAgentPlanService } from '#/features/plan/plan';
 import { planKey } from '#/features/plan/planOps';
-import { IAgentTaskService, type AgentTask } from '#/agent/task/task';
-import { taskNotificationDeliveryKey } from '#/agent/task/taskService';
+import { IAgentTaskService } from '#/agent/task/task';
+import { installControlledTask, startControlledTaskInLoop } from '../task/stubs';
 import { IAgentConversationUndoService } from '#/agent/undo/undo';
 import { ContextUndone } from '#/agent/undo/undoService';
 import { AgentStatusUpdated } from '#/agent/usage/usageEvents';
@@ -44,7 +45,7 @@ import {
   execEnvServices,
   telemetryServices,
   InMemoryWireRecordPersistence,
-  requesterFromGenerateFn,
+  createMockProvider,
   type TestAgentOptions,
   type TestAgentContext,
 } from '../../harness';
@@ -65,14 +66,15 @@ describe('AgentConversationUndoService', () => {
     }
   });
 
-  async function setup(options: TestAgentOptions = {}) {
+  async function setup(options: TestAgentOptions = {}, beforeStart?: (ctx: TestAgentContext) => void) {
     records = [];
     ctx = createTestAgent(
       options,
       telemetryServices(recordingTelemetry(records)),
       execEnvServices({ hostFs: createFakeHostFs({ mkdir: async () => {} }) }),
     );
-    ctx.get(IAgentContextMemoryService);
+    ctx.get(IAgentLoopService);
+    beforeStart?.(ctx);
     await ctx.restorePersisted();
     return ctx;
   }
@@ -102,7 +104,7 @@ describe('AgentConversationUndoService', () => {
       id: 'test.notification',
       reconcileAfterUndo: async () => {
         await Promise.resolve();
-        ctx.context.append({
+        appendContext(ctx.context,{
           role: 'user',
           content: [{ type: 'text', text: 'restored notification' }],
           origin: { kind: 'task', taskId: 'task-1', status: 'completed', notificationId: 'notification-1' },
@@ -118,10 +120,12 @@ describe('AgentConversationUndoService', () => {
   it('exposes availability from context history', async () => {
     await setup();
     const undo = ctx.get(IAgentConversationUndoService);
+    await ctx.get(IWireService).drainPersisted();
     expect(undo.availability()).toEqual({ maxTurns: 0, stoppedAtCompaction: false });
 
     ctx.appendTurnExchange('u1', 'a1');
     ctx.appendTurnExchange('u2', 'a2');
+    await ctx.get(IWireService).drainPersisted();
     expect(undo.availability()).toEqual({ maxTurns: 2, stoppedAtCompaction: false });
   });
 
@@ -151,14 +155,14 @@ describe('AgentConversationUndoService', () => {
   ])('rejects invalid undo count %s without mutating history', async (count) => {
     await setup();
     ctx.appendTurnExchange('u1', 'a1');
-    const history = ctx.context.get();
+    const history = ctx.context.history();
 
     await expect(ctx.get(IAgentConversationUndoService).undo(count)).rejects.toMatchObject({
       code: ErrorCodes.REQUEST_INVALID,
       details: { field: 'count' },
     });
 
-    expect(ctx.context.get()).toBe(history);
+    expect(ctx.context.history()).toBe(history);
   });
 
   it('returns session.busy for an active turn without cancelling it', async () => {
@@ -179,11 +183,12 @@ describe('AgentConversationUndoService', () => {
     });
     ctx.mockNextResponse({ type: 'text', text: 'system result' });
     const turn = submitPromptTurn(loop, {
-      message: { role: 'user', content: [{ type: 'text', text: 'system work' }] },
-      meta: { origin: { kind: 'system_trigger', name: 'test' } as PromptOrigin },
+      role: 'user',
+      content: [{ type: 'text', text: 'system work' }],
+      attributes: { origin: { kind: 'system_trigger', name: 'test' } as PromptOrigin },
     }).turn;
     await didStart;
-    const history = ctx.context.get();
+    const history = ctx.context.history();
 
     await expect(ctx.get(IAgentConversationUndoService).undo(1)).rejects.toMatchObject({
       code: ErrorCodes.SESSION_BUSY,
@@ -192,7 +197,7 @@ describe('AgentConversationUndoService', () => {
     expect(turn.state).toBe('running');
     expect(turn.signal.aborted).toBe(false);
     expect(loop.snapshot().state).toBe('running');
-    expect(ctx.context.get()).toBe(history);
+    expect(ctx.context.history()).toBe(history);
 
     hook.dispose();
     release();
@@ -202,7 +207,7 @@ describe('AgentConversationUndoService', () => {
   it('returns session.busy for active compaction without cancelling it', async () => {
     await setup();
     ctx.appendTurnExchange('u1', 'a1');
-    const history = ctx.context.get();
+    const history = ctx.context.history();
     const compaction = ctx.get(IAgentFullCompactionService);
     const abortController = new AbortController();
     const active = vi.spyOn(compaction, 'compacting', 'get').mockReturnValue({
@@ -218,7 +223,7 @@ describe('AgentConversationUndoService', () => {
         details: { reason: 'compaction' },
       });
       expect(abortController.signal.aborted).toBe(false);
-      expect(ctx.context.get()).toBe(history);
+      expect(ctx.context.history()).toBe(history);
     } finally {
       active.mockRestore();
     }
@@ -228,14 +233,16 @@ describe('AgentConversationUndoService', () => {
     await setup();
     const undo = ctx.get(IAgentConversationUndoService);
     ctx.appendTurnExchange('u1', 'a1');
-    ctx.get(IAgentContextMemoryService).applyCompaction({
+    const compacted = compactContext(ctx.get(IAgentLoopService), {
       summary: 'summary of u1',
       compactedCount: 2,
       tokensBefore: 100,
       tokensAfter: 10,
     });
+    await ctx.dispatcher.dispatch(new ContextApplyCompaction({ agentId: 'main', ...compacted }));
     ctx.appendTurnExchange('u2', 'a2');
 
+    await ctx.get(IWireService).drainPersisted();
     expect(undo.availability()).toEqual({ maxTurns: 1, stoppedAtCompaction: true });
     await expect(undo.undo(2)).rejects.toMatchObject({
       code: ErrorCodes.SESSION_UNDO_UNAVAILABLE,
@@ -243,7 +250,7 @@ describe('AgentConversationUndoService', () => {
     });
 
     await undo.undo(1);
-    const history = ctx.context.get();
+    const history = ctx.context.history();
     expect(history.map((m) => m.role)).toEqual(['user', 'user', 'user']);
     expect(history[1]?.origin?.kind).toBe('compaction_summary');
     expect(history[2]?.origin).toEqual({ kind: 'injection', variant: 'compaction_continuation' });
@@ -257,17 +264,32 @@ describe('AgentConversationUndoService', () => {
     await ctx.dispatcher.dispatch(
       new ContextApplyCompaction({ agentId: 'main', summary: 'legacy summary', compactedCount: 2 }),
     );
-    expect(ctx.context.get().map((m) => m.role)).toEqual(['user', 'user', 'assistant']);
+    compactContext(ctx.get(IAgentLoopService), {
+      summary: 'legacy summary',
+      compactedCount: 2,
+      tokensBefore: 0,
+      legacyTail: true,
+    });
+    expect(ctx.context.history().map((m) => m.role)).toEqual(['user', 'user', 'assistant']);
 
     await expect(undo.undo(1)).rejects.toMatchObject({
       code: ErrorCodes.SESSION_UNDO_UNAVAILABLE,
       details: { reason: 'compaction_boundary', requestedCount: 1, undoableCount: 0 },
     });
-    expect(ctx.context.get().map((m) => m.role)).toEqual(['user', 'user', 'assistant']);
+    expect(ctx.context.history().map((m) => m.role)).toEqual(['user', 'user', 'assistant']);
   });
 
   it('cuts before the anchor that survives a legacy unpaired undo', async () => {
     records = [];
+    const turnPrompt = (text: string): WireRecord => ({
+      type: 'turn.prompt',
+      agentId: 'main',
+      input: [{ type: 'text', text }],
+      origin: { kind: 'user' },
+      promptId: text,
+      trigger: 'normal',
+      time: 1,
+    });
     const prompt = (text: string): WireRecord => ({
       type: 'context.append_message',
       agentId: 'main',
@@ -291,11 +313,14 @@ describe('AgentConversationUndoService', () => {
     });
     const persistence = new InMemoryWireRecordPersistence([
       { type: 'metadata', protocol_version: WIRE_PROTOCOL_VERSION, created_at: 1 },
+      turnPrompt('u1'),
       prompt('u1'),
       reply('a1'),
+      turnPrompt('u2'),
       prompt('u2'),
       reply('a2'),
       { type: 'context.undo', agentId: 'main', count: 1, time: 2 },
+      turnPrompt('u3'),
       prompt('u3'),
       reply('a3'),
     ] as WireRecord[]);
@@ -304,22 +329,22 @@ describe('AgentConversationUndoService', () => {
       telemetryServices(recordingTelemetry(records)),
       execEnvServices({ hostFs: createFakeHostFs({ mkdir: async () => {} }) }),
     );
-    ctx.get(IAgentContextMemoryService);
+    ctx.get(IAgentLoopService);
     await ctx.restorePersisted();
     expect(
-      ctx.context.get().map((m) => m.content.map((p) => (p.type === 'text' ? p.text : '')).join('')),
+      ctx.context.history().map((m) => m.content.map((p) => (p.type === 'text' ? p.text : '')).join('')),
     ).toEqual(['u1', 'a1', 'u3', 'a3']);
 
     await ctx.get(IAgentConversationUndoService).undo(2);
 
-    expect(ctx.context.get()).toEqual([]);
+    expect(ctx.context.history()).toEqual([]);
     const persisted = await ctx.persistedWireRecords();
     const edgeIndex = persisted.findIndex((record) => record.type === 'agent.switched');
     expect(persisted[edgeIndex]).toMatchObject({
       branch: 'b1',
       base: { branch: 'main', line: 1 },
       turns: 2,
-      legacyUndoLine: 10,
+      legacyUndoLine: 13,
     });
     expect(persisted[edgeIndex + 1]).toMatchObject({ type: 'context.undo', count: 2 });
     expect(persisted[edgeIndex + 2]).toMatchObject({ type: 'context.undone', turns: 2 });
@@ -394,7 +419,8 @@ describe('AgentConversationUndoService', () => {
     );
     expect(ctx.agentState.get(changeNotifierSnapshotKey).subagentNames).toEqual(['default']);
 
-    ctx.get(IAgentContextMemoryService).clear();
+    await dispatcher.dispatch(new ContextClear({ agentId: 'main' }));
+    ctx.get(IAgentLoopService).replaceHistory([], 'context.clear');
     await ctx.get(IWireService).flush();
 
     expect(ctx.agentState.get(changeNotifierSnapshotKey)).toEqual({});
@@ -418,6 +444,12 @@ describe('AgentConversationUndoService', () => {
     await dispatcher.dispatch(
       new ContextApplyCompaction({ agentId: 'main', summary: 'summary', compactedCount: 1 }),
     );
+    compactContext(ctx.get(IAgentLoopService), {
+      summary: 'summary',
+      compactedCount: 1,
+      tokensBefore: 0,
+      legacyTail: true,
+    });
 
     expect(ctx.agentState.get(changeNotifierSnapshotKey)).toEqual({});
   });
@@ -427,19 +459,20 @@ describe('AgentConversationUndoService', () => {
     async (mode) => {
       const imageCounts: number[] = [];
       await setup({
-        generate: requesterFromGenerateFn(async (_provider, _system, _tools, history) => {
+        generate: createMockProvider(async (request, _signal) => {
+          const history = [...request.content.messages];
           const images = history
             .flatMap((message) => message.content)
             .filter((part) => part.type === 'image_url');
           imageCounts.push(images.length);
           if (mode === 'degraded' && images.length > 3) {
-            throw new APIRequestTooLargeError(413, 'Request Entity Too Large');
+            return providerHttpError(413, 'Request Entity Too Large')
           }
           if (
             mode === 'stripped' &&
             images.some((part) => part.imageUrl.url.endsWith('/1-0.png'))
           ) {
-            throw new APIStatusError(400, 'unsupported image format');
+            return providerHttpError(400, 'unsupported image format')
           }
           return {
             id: 'media-response',
@@ -453,41 +486,39 @@ describe('AgentConversationUndoService', () => {
       ctx.configure({
         modelCapabilities: {
           image_in: true, video_in: false, audio_in: false,
-          thinking: false, tool_use: true, max_context_tokens: 128_000,
+          thinking: false, tool_use: true, maxContextSize: 128_000,
         },
       });
       const runTurn = async (count: number) => {
         const { turn } = submitPromptTurn(ctx.get(IAgentLoopService), {
-          message: {
-            role: 'user',
-            content: [
-              { type: 'text', text: 'describe the images' },
-              ...Array.from({ length: count }, (_, index) => ({
-                type: 'image_url' as const,
-                imageUrl: {
-                  url: `https://example.test/${imageCounts.length}-${index}.png`,
-                },
-              })),
-            ],
-          },
-          meta: { origin: { kind: 'user' } },
+          role: 'user',
+          content: [
+            { type: 'text', text: 'describe the images' },
+            ...Array.from({ length: count }, (_, index) => ({
+              type: 'image_url' as const,
+              imageUrl: {
+                url: `https://example.test/${imageCounts.length}-${index}.png`,
+              },
+            })),
+          ],
+          attributes: { origin: { kind: 'user' } },
         });
         await expect(turn.result).resolves.toMatchObject({ type: 'completed' });
         return turn.id;
       };
-      const revision = ctx.context.prefixRevision();
+      const revision = ctx.context.historyRevision();
       const originalCount = mode === 'degraded' ? 3 : 1;
       const recoveredCount = mode === 'degraded' ? 2 : 0;
       expect(await runTurn(originalCount)).toBe(0);
       expect(await runTurn(1)).toBe(1);
       expect(imageCounts).toEqual([originalCount, originalCount + 1, recoveredCount]);
-      expect(ctx.context.prefixRevision()).toBe(revision);
+      expect(ctx.context.historyRevision()).toBe(revision);
 
       await ctx.get(IAgentConversationUndoService).undo(1);
       expect(await runTurn(0)).toBe(2);
 
       expect(imageCounts).toEqual([originalCount, originalCount + 1, recoveredCount, originalCount]);
-      expect(ctx.context.prefixRevision()).toBeGreaterThan(revision);
+      expect(ctx.context.historyRevision()).toBeGreaterThan(revision);
     },
   );
 
@@ -501,8 +532,9 @@ describe('AgentConversationUndoService', () => {
     ): Promise<number | undefined> => {
       target.mockNextResponse({ type: 'text', text: `answer to ${text}` });
       const { turn } = submitPromptTurn(target.get(IAgentLoopService), {
-        message: { role: 'user', content: [{ type: 'text', text }] },
-        meta: { origin: { kind: 'user' } },
+        role: 'user',
+        content: [{ type: 'text', text }],
+        attributes: { origin: { kind: 'user' } },
       });
       await expect(turn.result).resolves.toMatchObject({ type: 'completed' });
       return turn.id;
@@ -524,7 +556,7 @@ describe('AgentConversationUndoService', () => {
     ).toEqual([0, 1, 2]);
     expect(
       persisted
-        .filter((record) => record.type === 'agent.turn.started')
+        .filter((record) => record.type === 'turn.prompt')
         .map((record) => record['turnId']),
     ).toEqual([0, 1, 2]);
 
@@ -534,14 +566,14 @@ describe('AgentConversationUndoService', () => {
       execEnvServices({ hostFs: createFakeHostFs({ mkdir: async () => {} }) }),
     );
     try {
-      resumed.get(IAgentContextMemoryService);
+      resumed.get(IAgentLoopService);
       await resumed.restorePersisted();
       expect(resumed.agentState.get(turnKey).nextTurnId).toBe(3);
       await expect(runTurn(resumed, 'u4')).resolves.toBe(3);
       const repersisted = await resumed.persistedWireRecords();
       expect(
         repersisted
-          .filter((record) => record.type === 'agent.turn.started')
+          .filter((record) => record.type === 'turn.prompt')
           .map((record) => record['turnId']),
       ).toEqual([0, 1, 2, 3]);
     } finally {
@@ -556,15 +588,17 @@ describe('AgentConversationUndoService', () => {
 
     ctx.mockNextResponse({ type: 'text', text: 'a1' });
     const userTurn = submitPromptTurn(loop, {
-      message: { role: 'user', content: [{ type: 'text', text: 'u1' }] },
-      meta: { origin: { kind: 'user' } },
+      role: 'user',
+      content: [{ type: 'text', text: 'u1' }],
+      attributes: { origin: { kind: 'user' } },
     }).turn;
     await expect(userTurn.result).resolves.toMatchObject({ type: 'completed' });
 
     ctx.mockNextResponse({ type: 'text', text: 'cron done' });
     const cronTurn = submitPromptTurn(loop, {
-      message: { role: 'user', content: [{ type: 'text', text: 'cron work' }] },
-      meta: { origin: {
+      role: 'user',
+      content: [{ type: 'text', text: 'cron work' }],
+      attributes: { origin: {
         kind: 'cron_job',
         jobId: 'j1',
         cron: '0 9 * * *',
@@ -583,12 +617,12 @@ describe('AgentConversationUndoService', () => {
       await undo.undo(1);
       expect(fromTurnId).toBe(userTurn.id);
       expect(ctx.agentState.get(turnKey).anchorTurnIds).toEqual([]);
-      expect(ctx.context.get()).toHaveLength(0);
+      expect(ctx.context.history()).toHaveLength(0);
     } finally {
       subscription.dispose();
     }
 
-    ctx.get(IAgentContextMemoryService).append(
+    appendContext(ctx.get(IAgentLoopService),
       {
         role: 'user',
         content: [{ type: 'text', text: 'u2' }],
@@ -601,16 +635,10 @@ describe('AgentConversationUndoService', () => {
       },
     );
 
-    let absentTurnId: number | undefined = Number.NaN;
-    const second = ctx.get(IEventBus).subscribe(ContextUndone, (event) => {
-      absentTurnId = event.fromTurnId;
+    await expect(undo.undo(1)).rejects.toMatchObject({
+      code: ErrorCodes.SESSION_UNDO_UNAVAILABLE,
+      details: { reason: 'empty', requestedCount: 1, undoableCount: 0 },
     });
-    try {
-      await undo.undo(1);
-      expect(absentTurnId).toBeUndefined();
-    } finally {
-      second.dispose();
-    }
   });
 
   it('flushes state reconciliation before publishing undo', async () => {
@@ -692,9 +720,9 @@ describe('AgentConversationUndoService', () => {
       try {
         await expect(ctx.get(IAgentConversationUndoService).undo(1)).rejects.toBe(storageError);
         if (failureCall === 1) {
-          expect(ctx.context.get().map((message) => message.role)).toEqual(['user', 'assistant']);
+          expect(ctx.context.history().map((message) => message.role)).toEqual(['user', 'assistant']);
         } else {
-          expect(ctx.context.get()).toEqual([]);
+          expect(ctx.context.history()).toEqual([]);
         }
         expect(reconciled).toEqual(expectedReconciled);
         expect(undone).toEqual([]);
@@ -742,13 +770,13 @@ describe('AgentConversationUndoService', () => {
     await Promise.resolve();
 
     expect(calls).toBe(1);
-    expect(ctx.context.get().map((message) => message.role)).toEqual(['user', 'assistant']);
+    expect(ctx.context.history().map((message) => message.role)).toEqual(['user', 'assistant']);
     releaseFirst();
     await Promise.all([first, second]);
 
     expect(calls).toBe(2);
     expect(maxActive).toBe(1);
-    expect(ctx.context.get()).toEqual([]);
+    expect(ctx.context.history()).toEqual([]);
   });
 
   it('publishes context.undone and tracks conversation_undo', async () => {
@@ -770,7 +798,7 @@ describe('AgentConversationUndoService', () => {
         provider_type: 'kimi',
       },
     });
-    expect(ctx.context.get().map((m) => m.role)).toEqual(['user', 'assistant']);
+    expect(ctx.context.history().map((m) => m.role)).toEqual(['user', 'assistant']);
   });
 
   it('reconciles lastPrompt after undo', async () => {
@@ -783,7 +811,7 @@ describe('AgentConversationUndoService', () => {
     await ctx.get(IAgentConversationUndoService).undo(1);
     await expect(metadata.read()).resolves.toMatchObject({ lastPrompt: undefined });
 
-    ctx.context.append({
+    appendContext(ctx.context,{
       role: 'user',
       content: [
         userPromptSubmitHookPart('<hook_result hook_event="UserPromptSubmit">\nhook note\n</hook_result>'),
@@ -810,17 +838,14 @@ describe('AgentConversationUndoService', () => {
       activePromptId: undefined,
       queue: [
         {
-          message: {
-            role: 'user',
-            content: [
-              userPromptSubmitHookPart('<hook_result hook_event="UserPromptSubmit">\nhook note\n</hook_result>'),
-              { type: 'text', text: 'queued prompt' },
-            ],
-          },
-          meta: {
+          role: 'user',
+          content: [
+            userPromptSubmitHookPart('<hook_result hook_event="UserPromptSubmit">\nhook note\n</hook_result>'),
+            { type: 'text', text: 'queued prompt' },
+          ],
+          attributes: {
             promptId: 'queued',
             origin: { kind: 'user', clientMetadata: displayText === undefined ? undefined : [{ display_text: displayText }] } as PromptOrigin,
-            tracked: true,
             createdAt: new Date(0).toISOString(),
             userMessageId: 'queued',
           },
@@ -856,7 +881,7 @@ describe('AgentConversationUndoService', () => {
     try {
       await expect(ctx.get(IAgentConversationUndoService).undo(1)).resolves.toBe(1);
 
-      expect(ctx.context.get().map((message) => message.role)).toEqual(['user', 'assistant']);
+      expect(ctx.context.history().map((message) => message.role)).toEqual(['user', 'assistant']);
       expect(undone).toEqual([1]);
       expect(records).toContainEqual({
         event: 'conversation_undo',
@@ -875,41 +900,39 @@ describe('AgentConversationUndoService', () => {
     }
   });
 
-  it('re-delivers wait-reported task notifications after conversation undo', async () => {
-    await setup();
+  it('does not re-deliver task notifications removed by conversation undo without wait suppression', async () => {
+    await setup({}, installControlledTask);
     const undo = ctx.get(IAgentConversationUndoService);
     const tasks = ctx.get(IAgentTaskService);
     ctx.appendTurnExchange('u1', 'a1');
 
-    const completingTask = (output: string): AgentTask => ({
-      idPrefix: 'test',
-      kind: 'process',
-      description: 'fake process task',
-      start: async (sink) => {
-        sink.appendOutput(output);
-        await sink.settle({ status: 'completed' });
-      },
-      toInfo: (base) => ({ ...base, kind: 'process', command: 'echo', pid: 0, exitCode: null }),
-    });
-
-    const taskA = tasks.registerTask(completingTask('a\n'));
-    const taskB = tasks.registerTask(completingTask('b\n'));
-    tasks.markTasksDeliveredViaWait([
-      { taskId: taskA, status: 'completed' },
-      { taskId: taskB, status: 'completed' },
-    ]);
+    const controlledA = await startControlledTaskInLoop(ctx, { description: 'task A' });
+    const controlledB = await startControlledTaskInLoop(ctx, { description: 'task B' });
+    const controlledC = await startControlledTaskInLoop(ctx, { description: 'task C' });
+    const taskA = controlledA.handler.taskId;
+    const taskB = controlledB.handler.taskId;
+    const taskC = controlledC.handler.taskId;
+    ctx.mockNextResponse({ type: 'text', text: 'completion ack' });
+    controlledA.resolve('a\n');
+    controlledB.resolve('b\n');
     await tasks.wait(taskA, 1000);
     await tasks.wait(taskB, 1000);
+    await vi.waitFor(() => {
+      const delivered = ctx.context.history().filter((message) => message.origin?.kind === 'task');
+      expect(delivered.map((message) => message.origin?.kind === 'task' ? message.origin.taskId : undefined).toSorted()).toEqual(
+        [taskA, taskB].toSorted(),
+      );
+    });
 
-    expect(ctx.context.get().some((message) => message.origin?.kind === 'task')).toBe(false);
-    expect(ctx.agentState.get(taskNotificationDeliveryKey)).toHaveLength(2);
+    const resetting = undo.undo(1);
+    controlledC.resolve('c\n');
+    await resetting;
+    await tasks.wait(taskC, 1000);
 
-    await undo.undo(1);
-
-    const redelivered = ctx.context.get().filter((message) => message.origin?.kind === 'task');
-    expect(redelivered.map((message) => (message.origin as TaskOrigin).taskId).toSorted()).toEqual(
-      [taskA, taskB].toSorted(),
-    );
+    await vi.waitFor(() => {
+      const delivered = ctx.context.history().filter((message) => message.origin?.kind === 'task');
+      expect(delivered.map((message) => message.origin?.kind === 'task' ? message.origin.taskId : undefined)).toEqual([taskC]);
+    });
   });
 
   it('registers a participant that late-attaches inside the undo rerun window', async () => {
@@ -992,7 +1015,7 @@ describe('AgentConversationUndoService', () => {
     try {
       await expect(ctx.get(IAgentConversationUndoService).undo(1)).resolves.toBe(1);
 
-      expect(ctx.context.get()).toEqual([]);
+      expect(ctx.context.history()).toEqual([]);
       expect(ctx.dispatcher.restorePhase).toBe('ready');
       const persisted = await ctx.persistedWireRecords();
       expect(persisted.filter((record) => record.type === 'agent.switched')).toHaveLength(1);
@@ -1010,7 +1033,7 @@ describe('AgentConversationUndoService', () => {
       telemetryServices(recordingTelemetry(records)),
       execEnvServices({ hostFs: createFakeHostFs({ mkdir: async () => {} }) }),
     );
-    ctx.get(IAgentContextMemoryService);
+    ctx.get(IAgentLoopService);
     await ctx.restorePersisted();
 
     ctx.appendTurnExchange('u1', 'a1');
@@ -1030,18 +1053,24 @@ describe('AgentConversationUndoService', () => {
     });
     await ctx.get(IAgentConversationUndoService).undo(1);
 
-    expect(ctx.context.get().map(messageText)).toEqual(['user:u1', 'assistant:a1']);
+    expect(ctx.context.history().map(messageText)).toEqual(['user:u1', 'assistant:a1']);
     expect(ctx.get(IAgentTodoService).get().map((item) => item.title)).toEqual(['kept']);
     const afterNew = await ctx.persistedWireRecords();
     const legacyAfterNew = legacyWireFold(afterNew);
     expect(legacyAfterNew.context).toEqual(['user:u1', 'assistant:a1']);
     expect(legacyAfterNew.todo).toEqual(['kept']);
-    expect(legacyAfterNew.skippedUnknownTypes).toEqual([
-      'human.agent.turn.ended',
-      'agent.switched',
-    ]);
+    expect(legacyAfterNew.skippedUnknownTypes).toEqual(['human.agent.turn.ended', 'agent.switched']);
 
     persistence.records.push(
+      {
+        type: 'turn.prompt',
+        agentId: 'main',
+        input: [{ type: 'text', text: 'u3' }],
+        origin: { kind: 'user' },
+        promptId: 'u3',
+        trigger: 'normal',
+        time: 199,
+      },
       {
         type: 'context.append_message',
         agentId: 'main',
@@ -1065,10 +1094,7 @@ describe('AgentConversationUndoService', () => {
     const legacyFinal = legacyWireFold(finalRecords);
     expect(legacyFinal.context).toEqual(['user:u1', 'assistant:a1']);
     expect(legacyFinal.todo).toEqual(['kept']);
-    expect(legacyFinal.skippedUnknownTypes).toEqual([
-      'human.agent.turn.ended',
-      'agent.switched',
-    ]);
+    expect(legacyFinal.skippedUnknownTypes).toEqual(['human.agent.turn.ended', 'agent.switched']);
 
     const reopened = createTestAgent(
       { autoConfigure: false, persistence: new InMemoryWireRecordPersistence(finalRecords) },
@@ -1076,9 +1102,9 @@ describe('AgentConversationUndoService', () => {
       execEnvServices({ hostFs: createFakeHostFs({ mkdir: async () => {} }) }),
     );
     try {
-      reopened.get(IAgentContextMemoryService);
+      reopened.get(IAgentLoopService);
       await reopened.restorePersisted();
-      expect(reopened.context.get().map(messageText)).toEqual(legacyFinal.context);
+      expect(reopened.context.history().map(messageText)).toEqual(legacyFinal.context);
       expect(reopened.get(IAgentTodoService).get().map((item) => item.title)).toEqual(
         legacyFinal.todo,
       );
@@ -1143,9 +1169,9 @@ describe('AgentConversationUndoService', () => {
       telemetryServices(recordingTelemetry([])),
       execEnvServices({ hostFs: createFakeHostFs({ mkdir: async () => {} }) }),
     );
-    ctx.get(IAgentContextMemoryService);
+    ctx.get(IAgentLoopService);
     await ctx.restorePersisted();
-    expect(ctx.context.get().map(messageText)).toEqual(['user:u1', 'assistant:a1']);
+    expect(ctx.context.history().map(messageText)).toEqual(['user:u1', 'assistant:a1']);
   });
 });
 
@@ -1161,26 +1187,17 @@ function legacyWireFold(records: readonly WireRecord[]): {
   readonly skippedUnknownTypes: readonly string[];
 } {
   const transcript: ContextMessage[] = [];
+  const turnStarts: number[] = [];
   const todoCheckpoints: string[][] = [];
   let todo: string[] = [];
   const skippedUnknownTypes: string[] = [];
   let clearFloor = 0;
   const applyUndo = (count: number): void => {
-    let removedUserCount = 0;
-    for (let i = transcript.length - 1; i >= clearFloor; i--) {
-      const message = transcript[i]!;
-      if (message.origin?.kind === 'injection') continue;
-      if (message.origin?.kind === 'compaction_summary') break;
-      transcript.splice(i, 1);
-      if (!isUndoAnchor(message)) continue;
-      removedUserCount++;
-      while (i > clearFloor && isPromptOwnedInjection(transcript[i - 1]!, message)) {
-        transcript.splice(i - 1, 1);
-        i--;
-      }
-      if (removedUserCount >= count) break;
-    }
-    const targetIndex = todoCheckpoints.length - count;
+    const targetIndex = turnStarts.length - count;
+    const cutIndex = turnStarts[targetIndex];
+    if (cutIndex === undefined) return;
+    transcript.splice(cutIndex);
+    turnStarts.length = targetIndex;
     const target = todoCheckpoints[targetIndex];
     if (target === undefined) return;
     todo = [...target];
@@ -1190,10 +1207,21 @@ function legacyWireFold(records: readonly WireRecord[]): {
     switch (record.type) {
       case 'metadata':
         break;
+      case 'turn.prompt': {
+        if (!isUndoAnchorTurnPrompt(record as unknown as TurnPrompt)) break;
+        let cutIndex = transcript.length;
+        const promptId = record['promptId'];
+        while (cutIndex > clearFloor) {
+          const origin = transcript[cutIndex - 1]!.origin;
+          if (origin?.kind !== 'injection' || origin.ownerPromptId !== promptId) break;
+          cutIndex--;
+        }
+        turnStarts.push(cutIndex);
+        todoCheckpoints.push([...todo]);
+        break;
+      }
       case 'context.append_message': {
-        const message = record['message'] as ContextMessage;
-        transcript.push(message);
-        if (isUndoAnchor(message)) todoCheckpoints.push([...todo]);
+        transcript.push(record['message'] as ContextMessage);
         break;
       }
       case 'context.undo': {
@@ -1203,6 +1231,7 @@ function legacyWireFold(records: readonly WireRecord[]): {
       }
       case 'context.clear':
         clearFloor = transcript.length;
+        turnStarts.length = 0;
         todoCheckpoints.length = 0;
         break;
       case 'tools.update_store': {

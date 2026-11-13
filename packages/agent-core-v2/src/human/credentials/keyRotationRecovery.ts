@@ -1,6 +1,6 @@
-import type { LlmRemoteErrorMessage } from '#/llm/response';
-import type { LlmRecovery, LlmRecoveryContext, LlmRecoveryRecord } from '#/llm-requester/recovery';
-import type { LlmKeyRotationController } from '#/llm/request';
+import type { LlmRecovery, LlmRecoveryContext, LlmRecoveryRecord } from '@moonshot-ai/core/llm/policy/recovery';
+import type { LlmKeyRotationController } from '@moonshot-ai/core/llm/request';
+import type { LlmErrorMessage } from '@moonshot-ai/core/llm/response';
 
 export const API_KEY_ROTATION_STRATEGY = 'api_key_rotation';
 
@@ -16,18 +16,18 @@ function rotationFailed(appliedRecoveries: readonly LlmRecoveryRecord[]): boolea
   );
 }
 
-function isAuthRejection(error: LlmRemoteErrorMessage): boolean {
+function isAuthRejection(error: LlmErrorMessage): boolean {
   if (error.kind === 'auth') return true;
   return error.kind === 'status' && (error.statusCode === 401 || error.statusCode === 403);
 }
 
-function qualifies(error: LlmRemoteErrorMessage, attempt: number, maxAttempts: number): boolean {
+function qualifies(error: LlmErrorMessage, attempt: number, maxAttempts: number): boolean {
   if (isAuthRejection(error)) return true;
   return error.kind === 'rate_limit' && attempt >= maxAttempts;
 }
 
 function eligible(ctx: LlmRecoveryContext): LlmKeyRotationController | undefined {
-  const controller = ctx.credentialProvider?.rotation?.();
+  const controller = ctx.endpoint?.credentials?.rotation?.();
   if (controller === undefined) return undefined;
   return qualifies(ctx.error, ctx.attempt, ctx.maxAttempts) ? controller : undefined;
 }

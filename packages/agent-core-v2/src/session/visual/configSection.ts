@@ -13,7 +13,7 @@ import {
 } from '#/app/kosongConfig/visualModelOverlay';
 import { type VisualModelConfig } from '#/app/kosongConfig/configSection';
 import type { IConfigService } from '#/app/config/config';
-import type { ModelCapability } from '#/llm-adapter/contract/capability';
+import { fromLlmModelSpec, type ModelCapability } from '#/llm-adapter/contract/capability';
 import type { IModelCatalog } from '#/llm-adapter/model/catalog';
 
 import { VISUAL_MODEL_FLAG_ID } from './flag';
@@ -105,7 +105,7 @@ function resolvedCapabilities(
   model: string,
 ): ModelCapability | undefined {
   try {
-    return modelCatalog.get(model).capabilities;
+    return fromLlmModelSpec(modelCatalog.get(model).spec);
   } catch {
     return undefined;
   }

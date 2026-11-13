@@ -1,21 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  applyCredential,
-  credentialsRecovery,
   createOAuthCredentialProvider,
   createStaticCredentialProvider,
 } from '#/credentials/credentials';
-import type { LlmModel } from '#/llm-requester/model';
-import type { LlmRecoveryContext, LlmRecoveryRecord } from '#/llm-requester/recovery';
-import type { LlmCredentialProvider } from '#/llm-requester/requester';
-
-const MODEL: LlmModel = {
-  provider: 'fake',
-  model: 'fake-model',
-  apiKey: 'base-key',
-  defaultHeaders: { 'x-base': '1' },
-};
 
 describe('createStaticCredentialProvider', () => {
   it('resolves the static api key and never recovers', async () => {
@@ -102,106 +90,5 @@ describe('createOAuthCredentialProvider', () => {
   it('resolves undefined when the token source has no token', async () => {
     const provider = createOAuthCredentialProvider(() => Promise.resolve(undefined));
     await expect(provider.resolve()).resolves.toBeUndefined();
-  });
-});
-
-describe('applyCredential', () => {
-  it('returns the model unchanged when the credential is undefined', () => {
-    expect(applyCredential(MODEL, undefined)).toBe(MODEL);
-  });
-
-  it('overrides the api key and merges headers', () => {
-    const applied = applyCredential(MODEL, { apiKey: 'fresh', headers: { 'x-auth': 't' } });
-    expect(applied.apiKey).toBe('fresh');
-    expect(applied.defaultHeaders).toEqual({ 'x-base': '1', 'x-auth': 't' });
-  });
-
-  it('keeps the model api key when the credential carries none', () => {
-    const applied = applyCredential(MODEL, { headers: { 'x-auth': 't' } });
-    expect(applied.apiKey).toBe('base-key');
-  });
-
-  it('overrides the model proxy with the credential proxy', () => {
-    const model = { ...MODEL, proxyUrl: 'http://127.0.0.1:8080' };
-    const applied = applyCredential(model, { apiKey: 'fresh', proxyUrl: 'http://127.0.0.1:8081' });
-    expect(applied.proxyUrl).toBe('http://127.0.0.1:8081');
-  });
-
-  it('keeps the model proxy when the credential carries none', () => {
-    const model = { ...MODEL, proxyUrl: 'http://127.0.0.1:8080' };
-    expect(applyCredential(model, { apiKey: 'fresh' }).proxyUrl).toBe('http://127.0.0.1:8080');
-  });
-
-  it('leaves the attempt without a proxy when neither declares one', () => {
-    expect(applyCredential(MODEL, { apiKey: 'fresh' }).proxyUrl).toBeUndefined();
-  });
-});
-
-function recoveryContext(
-  error: unknown,
-  appliedRecoveries: readonly LlmRecoveryRecord[] = [],
-  credentialProvider?: LlmCredentialProvider,
-): LlmRecoveryContext {
-  return {
-    error: error as LlmRecoveryContext['error'],
-    messages: [],
-    appliedRecoveries,
-    attempt: 1,
-    maxAttempts: 10,
-    credentialProvider,
-  };
-}
-
-const unauthorized = Object.assign(new Error('unauthorized'), { status: 401 });
-const forbidden = Object.assign(new Error('forbidden'), { status: 403 });
-
-describe('credentialsRecovery', () => {
-  it('proposes a credentials refresh on a recoverable error', () => {
-    const provider = createOAuthCredentialProvider(() => Promise.resolve('tok'));
-    expect(credentialsRecovery.propose(recoveryContext(unauthorized, [], provider))).toEqual({
-      strategy: 'credentials',
-      action: 'refresh',
-      beforeNextAttempt: expect.any(Function),
-    });
-  });
-
-  it('invalidates the credentials before the next attempt', async () => {
-    let invalidations = 0;
-    const provider: LlmCredentialProvider = {
-      resolve: () => ({ apiKey: 'tok' }),
-      canRecover: () => true,
-      invalidate: () => {
-        invalidations += 1;
-      },
-    };
-    const proposal = credentialsRecovery.propose(recoveryContext(unauthorized, [], provider));
-    await proposal?.beforeNextAttempt?.();
-    expect(invalidations).toBe(1);
-  });
-
-  it('does not propose when the strategy was already applied', () => {
-    const provider = createOAuthCredentialProvider(() => Promise.resolve('tok'));
-    const applied: LlmRecoveryRecord[] = [{ strategy: 'credentials', action: 'refresh' }];
-    expect(
-      credentialsRecovery.propose(recoveryContext(unauthorized, applied, provider)),
-    ).toBeUndefined();
-  });
-
-  it('does not propose without recoverable credentials', () => {
-    expect(credentialsRecovery.propose(recoveryContext(unauthorized))).toBeUndefined();
-    expect(
-      credentialsRecovery.propose(
-        recoveryContext(unauthorized, [], createStaticCredentialProvider('sk-1')),
-      ),
-    ).toBeUndefined();
-    expect(
-      credentialsRecovery.propose(
-        recoveryContext(
-          forbidden,
-          [],
-          createOAuthCredentialProvider(() => Promise.resolve('tok')),
-        ),
-      ),
-    ).toBeUndefined();
   });
 });

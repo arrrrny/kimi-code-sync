@@ -57,21 +57,24 @@ function createConfigStub(): IConfigService {
 function createTestModel(): Model {
   return {
     id: MOCK_MODEL,
-    name: 'kimi-for-coding',
     aliases: [],
     protocol: 'openai',
-    baseUrl: 'https://example.test/v1',
-    headers: {},
-    capabilities: {
-      image_in: false,
-      video_in: false,
-      audio_in: false,
-      thinking: true,
-      tool_use: false,
-      max_context_tokens: 1000,
+    spec: {
+      provider: 'kimi',
+      name: 'kimi-for-coding',
+      capability: {
+        image_in: false,
+        video_in: false,
+        audio_in: false,
+        thinking: true,
+        tool_use: false,
+      },
+      thinking: {
+        alwaysThinking: false,
+      },
+      maxContextSize: 1000,
     },
-    maxContextSize: 1000,
-    alwaysThinking: false,
+    endpoint: { baseUrl: 'https://example.test/v1', headers: {} },
     providerType: 'kimi',
     providerName: 'kimi',
   };
@@ -256,7 +259,7 @@ describe('AgentProfileService.setCompactionTriggerRatio', () => {
 
 describe('AgentProfileService compaction trigger ratio precedence', () => {
   beforeEach(() => {
-    svc.update({ modelAlias: MOCK_MODEL });
+    svc.applyBindingSnapshot({ modelAlias: MOCK_MODEL, thinkingLevel: 'off', systemPrompt: '' });
   });
 
   it('uses the config value when no override is set', () => {
