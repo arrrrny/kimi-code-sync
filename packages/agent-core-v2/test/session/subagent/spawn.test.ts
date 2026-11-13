@@ -16,13 +16,13 @@ import {
   normalizeAgentProfile,
   type AgentProfile,
 } from '#/app/agentProfileCatalog/agentProfileCatalog';
-import { IAgentProfileService, type ProfileData } from '#/agent/profile/profile';
+import { IAgentProfileService } from '#/agent/profile/profile';
+import type { ProfileData } from '#/agent/profile/profile';
 import { IAgentPermissionModeService } from '#/agent/permissionMode/permissionMode';
 import { IAgentUserToolService } from '#/agent/userTool/userTool';
 import { IAgentEnvironmentService } from '#/agent/environmentBinding/agentEnvironment';
 import { IAgentEnvironmentBindingService } from '#/agent/environmentBinding/environmentBinding';
 import { Error2, ErrorCodes, isError2 } from '#/errors';
-import { UNKNOWN_CAPABILITY } from '#/llm-adapter/contract/capability';
 import { IModelCatalog, type Model } from '#/llm-adapter/model/catalog';
 import { FakeEnvironment } from '#/environment/fakeEnvironment';
 import type { EnvironmentBinding, EnvironmentLease } from '#/environment/environment';
@@ -393,9 +393,12 @@ describe('SessionSubagentService planSpawn and spawn', () => {
   it('prefers [secondary_model].default_effort over the bound model default_effort', async () => {
     modelIds.add('provider/fast');
     modelMeta.set('provider/fast', {
-      capabilities: { ...UNKNOWN_CAPABILITY, thinking: true },
-      supportEfforts: ['low', 'high', 'max'],
-      defaultEffort: 'high',
+      spec: {
+        provider: 'test',
+        name: 'provider/fast',
+        capability: { thinking: true },
+        thinking: { supportEfforts: ['low', 'high', 'max'], defaultEffort: 'high' },
+      },
     });
     const svc = service(
       {
@@ -415,9 +418,12 @@ describe('SessionSubagentService planSpawn and spawn', () => {
   it('falls back to the bound model default_effort when the section declares none', async () => {
     modelIds.add('provider/fast');
     modelMeta.set('provider/fast', {
-      capabilities: { ...UNKNOWN_CAPABILITY, thinking: true },
-      supportEfforts: ['low', 'high', 'max'],
-      defaultEffort: 'max',
+      spec: {
+        provider: 'test',
+        name: 'provider/fast',
+        capability: { thinking: true },
+        thinking: { supportEfforts: ['low', 'high', 'max'], defaultEffort: 'max' },
+      },
     });
     const svc = service(
       {
@@ -436,9 +442,12 @@ describe('SessionSubagentService planSpawn and spawn', () => {
   it('leaves thinking unset for global resolution when thinking is disabled', async () => {
     modelIds.add('provider/fast');
     modelMeta.set('provider/fast', {
-      capabilities: { ...UNKNOWN_CAPABILITY, thinking: true },
-      supportEfforts: ['low', 'high', 'max'],
-      defaultEffort: 'max',
+      spec: {
+        provider: 'test',
+        name: 'provider/fast',
+        capability: { thinking: true },
+        thinking: { supportEfforts: ['low', 'high', 'max'], defaultEffort: 'max' },
+      },
     });
     const svc = service(
       {
@@ -458,9 +467,12 @@ describe('SessionSubagentService planSpawn and spawn', () => {
   it('leaves the subagent thinking unset when the bound model declares no valid default_effort', async () => {
     modelIds.add('provider/fast');
     modelMeta.set('provider/fast', {
-      capabilities: { ...UNKNOWN_CAPABILITY, thinking: true },
-      supportEfforts: ['low', 'high'],
-      defaultEffort: 'max',
+      spec: {
+        provider: 'test',
+        name: 'provider/fast',
+        capability: { thinking: true },
+        thinking: { supportEfforts: ['low', 'high'], defaultEffort: 'max' },
+      },
     });
     const svc = service(
       {

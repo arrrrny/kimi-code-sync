@@ -1,6 +1,6 @@
 import { estimateTokens, estimateTokensForMessage, estimateTokensForMessages } from '#/llm-adapter/contract/tokens';
-import { isSkillActivationPart } from '#human/agent/origin';
-import type { ContentPart } from '#human/llm/message';
+import { isSkillActivationPart } from '@moonshot-ai/core/llm/origin';
+import type { ContentPart } from '@moonshot-ai/core/llm/message';
 import { wrapSystemReminder } from '#/features/reminder/systemReminder';
 import { isUserPromptSubmitHookPart } from './hookParts';
 import summaryPrefixTemplate from './compaction-summary-prefix.md?raw';
@@ -57,6 +57,7 @@ export interface ContextCompactionShape {
   readonly tokensAfter: number;
   readonly keptUserMessageCount: number;
   readonly keptHeadUserMessageCount?: number;
+  readonly appendedInjectionCount: number;
   readonly droppedCount?: number;
   readonly messages: readonly ContextMessage[];
 }
@@ -79,6 +80,7 @@ export function buildContextCompactionShape(
       tokensBefore: input.tokensBefore,
       tokensAfter: input.tokensAfter ?? estimate.messages(messages),
       keptUserMessageCount: 0,
+      appendedInjectionCount: 0,
       droppedCount: input.droppedCount,
       messages,
     };
@@ -99,11 +101,14 @@ export function buildContextCompactionShape(
     : [...selection.head, elisionMessage, ...selection.tail];
   const contextSummary = input.contextSummary ?? input.summary;
   const continuationMessage = createCompactionContinuationMessage(input.handoffPath);
+  const appendedInjections = history
+    .slice(input.compactedCount)
+    .filter((message) => message.origin?.kind === 'injection');
   const tokensAfter =
     input.tokensAfter ??
     (input.requestOverheadTokens ?? 0) +
       (input.summaryOutputTokens ?? estimate.text(contextSummary)) +
-      estimate.messages([...keptMessages, continuationMessage]);
+      estimate.messages([...keptMessages, continuationMessage, ...appendedInjections]);
   const keptUserMessageCount =
     input.keptUserMessageCount ?? selection.head.length + selection.tail.length;
   const keptHeadUserMessageCount =
@@ -117,11 +122,13 @@ export function buildContextCompactionShape(
     tokensAfter,
     keptUserMessageCount,
     keptHeadUserMessageCount,
+    appendedInjectionCount: appendedInjections.length,
     droppedCount: input.droppedCount,
     messages: [
       ...keptMessages,
       createCompactionSummaryMessage(contextSummary),
       continuationMessage,
+      ...appendedInjections,
     ],
   };
 }

@@ -4,8 +4,18 @@ import { vscodeProjects } from './apps/vscode/vitest.projects';
 export default defineConfig({
   test: {
     projects: [
-      'packages/*',
-      '!packages/minidb',
+      'packages/agent-core-v2',
+      'packages/acp-server',
+      'packages/kap-server',
+      'packages/klient',
+      'packages/migration-legacy',
+      'packages/oauth',
+      'packages/pi-tui',
+      'packages/product',
+      'packages/remote-control',
+      'packages/session-import',
+      'packages/telemetry',
+      'packages/tree-sitter-bash',
       'apps/kimi-code',
       'apps/vis/server',
       'apps/vis/web',

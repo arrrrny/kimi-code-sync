@@ -25,20 +25,10 @@ import {
   setModelResultSchema,
   sessionModelOverrideKindSchema,
   shellCommandResultSchema,
-  steerPayloadSchema,
+  steerResultSchema,
+  steerEntrySchema,
   usageStatusSchema,
 } from './schemas.js';
-
-export const agentPromptContract = {
-  submit: {
-    input: z.tuple([promptPayloadSchema]),
-    output: maybe(promptLaunchResultSchema),
-  },
-  submitSteer: {
-    input: z.tuple([steerPayloadSchema]),
-    output: maybe(promptLaunchResultSchema),
-  },
-} satisfies ServiceContract;
 
 export const agentSkillContract = {
   activate: { input: z.tuple([activateSkillPayloadSchema]), output: promptLaunchResultSchema },
@@ -49,6 +39,14 @@ export const agentSkillContract = {
 } satisfies ServiceContract;
 
 export const agentLoopContract = {
+  submit: {
+    input: z.tuple([promptPayloadSchema]),
+    output: maybe(promptLaunchResultSchema),
+  },
+  notifyClient: {
+    input: z.tuple([steerEntrySchema]),
+    output: steerResultSchema,
+  },
   cancelFromUser: { input: z.tuple([z.number().optional()]), output: noResult },
 } satisfies ServiceContract;
 
