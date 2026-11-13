@@ -127,6 +127,13 @@ apps/kimi-code/src/tui/commands/prompts.ts                             :: prompt
 apps/kimi-code/src/tui/components/dialogs/provider-manager.ts          :: onToggleRotation
 apps/kimi-code/src/tui/components/dialogs/api-key-input-dialog.ts      :: allowEmpty
 packages/agent-core-v2/test/llm-adapter/provider/apiKeyRotation.test.ts       :: createKeyedCredentialProvider
+packages/agent-core-v2/src/human/test/credentials/keyRotationRecovery.test.ts :: proposes on a 401 at the first attempt
+# --- auth-rejection key rotation (feature 833) ---
+# Widening the rotation trigger to a rejected credential (401) is fork-owned behavior on a
+# file upstream also edits; the auth-rejection predicate and its acceptance tests are the
+# markers a clean merge must not silently drop.
+packages/agent-core-v2/src/human/credentials/keyRotationRecovery.ts    :: isAuthRejection
+packages/agent-core-v2/test/agent/loop/machineEngineRecovery.test.ts   :: rotates to the next key when the provider reports the token is invalid
 packages/agent-core-v2/src/human/test/credentials/keyRotationRecovery.test.ts :: keyRotationRecovery
 
 # --- auto-compact handoff document (spec 832) ---

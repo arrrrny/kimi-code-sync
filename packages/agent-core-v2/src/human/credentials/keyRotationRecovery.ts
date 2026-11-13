@@ -16,11 +16,13 @@ function rotationFailed(appliedRecoveries: readonly LlmRecoveryRecord[]): boolea
   );
 }
 
+function isAuthRejection(error: LlmRemoteErrorMessage): boolean {
+  return error.kind === 'status' && (error.statusCode === 401 || error.statusCode === 403);
+}
+
 function qualifies(error: LlmRemoteErrorMessage, attempt: number, maxAttempts: number): boolean {
-  if (error.kind === 'rate_limit') {
-    return attempt >= maxAttempts;
-  }
-  return error.kind === 'status' && error.statusCode === 403;
+  if (isAuthRejection(error)) return true;
+  return error.kind === 'rate_limit' && attempt >= maxAttempts;
 }
 
 function eligible(ctx: LlmRecoveryContext): LlmKeyRotationController | undefined {
