@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createActor, emit, setup } from '#human/xstate2';
 
 import type {
+  AgentLLMRequestOverrides,
   AgentLLMRequestPartHandler,
   AgentLLMRequestTask,
   LoopRequester,
@@ -9,9 +10,10 @@ import type {
 import {
   machineEngineAttachBundle,
   type CreateMachineEngineOptions,
+  type MachineEngineEvent,
 } from '#/agent/loop/machine/engine';
 import type { IAgentToolExecutorService } from '#/agent/toolExecutor/toolExecutor';
-import { APIProviderRateLimitError } from '#/llm-adapter/contract/errors';
+import { APIProviderRateLimitError, APIStatusError } from '#/llm-adapter/contract/errors';
 import type { LLMRequestTrace } from '#/llm-adapter/contract/request-trace';
 import { UNKNOWN_CAPABILITY } from '#human/llm-requester/capability';
 import { memoryJournal } from '#human/eventStore/journal';
@@ -23,7 +25,7 @@ import type { TurnEvent, TurnInput, TurnLlmEvent } from '#human/agent/turn';
 
 const model: LlmModel = { provider: 'test', model: 'test-model', capability: UNKNOWN_CAPABILITY };
 
-type FailureStep = 'rate_limit' | 'ok';
+type FailureStep = 'rate_limit' | 'unauthorized' | 'forbidden' | 'ok';
 
 type RecoveringEvent = Extract<TurnLlmEvent, { type: 'llm.recovering' }>;
 
@@ -39,6 +41,20 @@ function createRequesterService(steps: readonly FailureStep[]): LoopRequester {
           result: Promise.reject(new APIProviderRateLimitError('rate limited')),
         } as unknown as AgentLLMRequestTask;
       }
+      if (step === 'unauthorized') {
+        return {
+          trace: {} as LLMRequestTrace,
+          result: Promise.reject(
+            new APIStatusError(401, 'Your authentication token is invalid. Please sign in again.'),
+          ),
+        } as unknown as AgentLLMRequestTask;
+      }
+      if (step === 'forbidden') {
+        return {
+          trace: {} as LLMRequestTrace,
+          result: Promise.reject(new APIStatusError(403, 'forbidden')),
+        } as unknown as AgentLLMRequestTask;
+      }
       void onPart?.({ type: 'text', text: 'done' });
       return {
         trace: {} as LLMRequestTrace,
@@ -48,6 +64,22 @@ function createRequesterService(steps: readonly FailureStep[]): LoopRequester {
           rawFinishReason: 'stop',
         }),
       } as unknown as AgentLLMRequestTask;
+    },
+  } as unknown as LoopRequester;
+}
+
+function createCountingRequester(
+  steps: readonly FailureStep[],
+  requests: string[],
+): LoopRequester {
+  const inner = createRequesterService(steps);
+  return {
+    start: (
+      overrides?: AgentLLMRequestOverrides,
+      onPart?: AgentLLMRequestPartHandler,
+    ): AgentLLMRequestTask => {
+      requests.push(`request:${String(requests.length + 1)}`);
+      return inner.start(overrides, onPart);
     },
   } as unknown as LoopRequester;
 }
@@ -100,7 +132,14 @@ function fallbackChain(applied: string[]): LlmRecovery {
 }
 
 function startEngineTurnActor(options: CreateMachineEngineOptions, turnInput: Partial<TurnInput>) {
-  const bundle = machineEngineAttachBundle(options);
+  const events: MachineEngineEvent[] = [];
+  const bundle = machineEngineAttachBundle({
+    ...options,
+    onEvent: (event) => {
+      events.push(event);
+      options.onEvent?.(event);
+    },
+  });
   const harness = setup({
     types: {
       input: {} as TurnInput,
@@ -133,7 +172,7 @@ function startEngineTurnActor(options: CreateMachineEngineOptions, turnInput: Pa
   });
   actor.on('llm.recovering', (event) => recovering.push(event));
   actor.start();
-  return { actor, recovering };
+  return { actor, recovering, events };
 }
 
 async function advanceTurn(actor: { getSnapshot(): unknown }): Promise<void> {
@@ -151,6 +190,123 @@ describe('machine engine api key rotation precedence', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it('stops rotating and fails once every key of the step was rejected', async () => {
+    const applied: string[] = [];
+    const requests: string[] = [];
+    const { actor, recovering } = startEngineTurnActor(
+      {
+        model,
+        llmRequester: createCountingRequester(['unauthorized'], requests),
+        toolExecutor: createToolExecutor(),
+        toolInfos: () => [],
+        maxAttemptsPerStep: 10,
+        journal: memoryJournal(),
+      },
+      {
+        request: {
+          model,
+          credentialProvider: keyedProvider({
+            keyCount: 2,
+            onRotate: (keyId) => applied.push(`rotate:${keyId}`),
+          }),
+        },
+      },
+    );
+
+    await advanceTurn(actor);
+
+    expect(applied).toEqual(['rotate:key2']);
+    expect(requests).toHaveLength(2);
+    expect(recovering.map((event) => event.strategy)).toEqual(['api_key_rotation']);
+  });
+
+  it('announces a rotation that failed to apply without reporting the cycle as exhausted', async () => {
+    const applied: string[] = [];
+    const { actor, recovering, events } = startEngineTurnActor(
+      {
+        model,
+        llmRequester: createRequesterService(['unauthorized']),
+        toolExecutor: createToolExecutor(),
+        toolInfos: () => [],
+        maxAttemptsPerStep: 10,
+        journal: memoryJournal(),
+      },
+      {
+        request: {
+          model,
+          credentialProvider: keyedProvider({
+            keyCount: 2,
+            failRotate: true,
+            onRotate: (keyId) => applied.push(`rotate:${keyId}`),
+          }),
+        },
+      },
+    );
+
+    await advanceTurn(actor);
+
+    expect(recovering.map((event) => event.action)).toEqual(['key2']);
+    expect(recovering[0]?.detail).toContain('could not be applied: config.toml is read-only');
+    expect(events.filter((event) => event.type === 'recovering' && event.action === 'exhausted')).toEqual([]);
+  });
+
+  it('rotates to the next key when the provider reports the token is invalid', async () => {
+    const applied: string[] = [];
+    const { actor, recovering } = startEngineTurnActor(
+      {
+        model,
+        llmRequester: createRequesterService(['unauthorized', 'ok']),
+        toolExecutor: createToolExecutor(),
+        toolInfos: () => [],
+        maxAttemptsPerStep: 10,
+        journal: memoryJournal(),
+      },
+      {
+        request: {
+          model,
+          credentialProvider: keyedProvider({
+            keyCount: 3,
+            onRotate: (keyId) => applied.push(`rotate:${keyId}`),
+          }),
+        },
+      },
+    );
+
+    await advanceTurn(actor);
+
+    expect(applied).toEqual(['rotate:key2']);
+    expect(recovering.map((event) => event.strategy)).toEqual(['api_key_rotation']);
+    expect(recovering[0]?.detail).toBe('kilo → personal (key2)');
+  });
+
+  it('rotates on the first forbidden attempt without spending the rejected key retry budget', async () => {
+    const applied: string[] = [];
+    const { actor, recovering } = startEngineTurnActor(
+      {
+        model,
+        llmRequester: createRequesterService(['forbidden', 'ok']),
+        toolExecutor: createToolExecutor(),
+        toolInfos: () => [],
+        maxAttemptsPerStep: 10,
+        journal: memoryJournal(),
+      },
+      {
+        request: {
+          model,
+          credentialProvider: keyedProvider({
+            keyCount: 3,
+            onRotate: (keyId) => applied.push(`rotate:${keyId}`),
+          }),
+        },
+      },
+    );
+
+    await advanceTurn(actor);
+
+    expect(applied).toEqual(['rotate:key2']);
+    expect(recovering.map((event) => event.strategy)).toEqual(['api_key_rotation']);
   });
 
   it('takes the rotation proposal for an exhausted key even when the fallback chain proposes too', async () => {
@@ -263,5 +419,69 @@ describe('machine engine api key rotation precedence', () => {
       'substitute_model',
     ]);
     expect(recovering[0]?.detail).toContain('could not be applied: config.toml is read-only');
+  });
+
+  it('does not rotate a rejected credential when the provider has rotation turned off', async () => {
+    const applied: string[] = [];
+    const { actor, recovering } = startEngineTurnActor(
+      {
+        model,
+        llmRequester: createRequesterService(['unauthorized']),
+        toolExecutor: createToolExecutor(),
+        toolInfos: () => [],
+        maxAttemptsPerStep: 10,
+        journal: memoryJournal(),
+      },
+      {
+        request: {
+          model,
+          credentialProvider: {
+            resolve: () => ({ apiKey: 'sk-first' }),
+            rotation: () => undefined,
+          },
+        },
+      },
+    );
+
+    await advanceTurn(actor);
+
+    expect(applied).toEqual([]);
+    expect(recovering).toEqual([]);
+  });
+
+  it('does not rotate a rejected credential for a provider with a single key', async () => {
+    const applied: string[] = [];
+    const { actor, recovering } = startEngineTurnActor(
+      {
+        model,
+        llmRequester: createRequesterService(['unauthorized']),
+        toolExecutor: createToolExecutor(),
+        toolInfos: () => [],
+        maxAttemptsPerStep: 10,
+        journal: memoryJournal(),
+      },
+      {
+        request: {
+          model,
+          credentialProvider: {
+            resolve: () => ({ apiKey: 'sk-first' }),
+            rotation: () => ({
+              providerName: 'kilo',
+              keyCount: 1,
+              plan: () => undefined,
+              rotate: (keyId: string | undefined) => {
+                applied.push(`rotate:${String(keyId)}`);
+                return Promise.resolve({ outcome: 'unavailable' as const });
+              },
+            }),
+          },
+        },
+      },
+    );
+
+    await advanceTurn(actor);
+
+    expect(applied).toEqual([]);
+    expect(recovering).toEqual([]);
   });
 });
