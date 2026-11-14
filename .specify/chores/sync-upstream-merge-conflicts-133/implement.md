@@ -21,7 +21,7 @@ favor of upstream and no blind `-X theirs` / `-s ours` was used.
 | `apps/kimi-code/src/tui/config.ts` | modified | Kept `favorite_models` / `favoriteModels` / `favoritesSection` serializer; kept `follow_up_behavior` / `followUpBehavior` |
 | `packages/agent-core-v2/src/llm-adapter/model/catalog-service.ts` | modified | Kept the fork's `this.providers.get(providerId) ?? provider` credential lookup; added upstream's `supportsAmbientCredential` field |
 | `packages/node-sdk/test/sdk-rpc-client-v2.test.ts` | modified | Kept both tests: fork's model-switch-across-reload and upstream's occupied-session read-only |
-| `flake.nix` | modified | Took upstream's `fetchPnpmDeps` hash and documented that the fork lockfile diverges |
+| `flake.nix` | modified | Updated the `fetchPnpmDeps` hash to the value CI computed for the fork lockfile |
 
 ## Verification
 
@@ -51,6 +51,11 @@ None.
 
 ## Follow-ups
 
-- Refresh `flake.nix`'s `pnpmDeps` hash with `nix build .#kimi-code` on a machine with Nix; the
-  committed value is upstream's and is stale for the fork's lockfile.
 - The next scheduled daily sync should be a no-op once this merges.
+
+### Note on the Nix hash
+
+`flake.nix`'s `pnpmDeps` hash is now `sha256-R4eLD9vC4uSKB01g/kRooyW2RS4AL4qdYYMY2tKSKiU=`, the
+value CI's `nix build .#kimi-code` job reported for the fork's lockfile. Neither the fork's previous
+hash nor upstream's matched after this sync, so the first CI run failed on it and this value comes
+from that failure's `got:` line rather than a guess.
