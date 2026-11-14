@@ -13,6 +13,7 @@ import type { ModelMigrationController } from '../controllers/model-migration';
 import type { StreamingUIController } from '../controllers/streaming-ui';
 import type { TasksBrowserController } from '../controllers/tasks-browser';
 import { tryHandleDanceCommand } from '../easter-eggs/dance';
+import type { FollowUpDelivery } from '../config';
 import type { ResolvedTheme } from '../theme/colors';
 import type { TUIState } from '../tui-state';
 import type {
@@ -24,6 +25,7 @@ import type {
   TranscriptEntry,
 } from '../types';
 import { formatErrorMessage } from '../utils/event-payload';
+import type { ExtractionResult } from '../utils/image-placeholder';
 import { handleLoginCommand, handleLogoutCommand } from './auth';
 import { handleBtwCommand } from './btw';
 import { handleCopyCommand } from './copy';
@@ -222,13 +224,18 @@ export interface SlashCommandHost {
   showHelpPanel(): void;
   createNewSession(): Promise<void>;
   showSessionPicker(): Promise<void>;
-  sendNormalUserInput(text: string): void;
+  sendNormalUserInput(text: string, preExtracted?: ExtractionResult, delivery?: FollowUpDelivery): void;
   /**
    * Submit a prompt that explicitly activates one or more skills inline
    * (v2 engine only): all activations ride the same submission as the prompt
    * and launch as a single turn.
    */
-  sendInlineSkillUserInput(text: string, activations: readonly InlineSkillActivation[]): Promise<void>;
+  sendInlineSkillUserInput(
+    text: string,
+    activations: readonly InlineSkillActivation[],
+    preExtracted?: ExtractionResult,
+    delivery?: FollowUpDelivery,
+  ): Promise<void>;
   activatePluginCommand(
     session: Session,
     pluginId: string,
@@ -252,7 +259,11 @@ export interface SlashCommandHost {
 // Dispatch — entry point from handleUserInput
 // ---------------------------------------------------------------------------
 
-export function dispatchInput(host: SlashCommandHost, text: string): void {
+export function dispatchInput(
+  host: SlashCommandHost,
+  text: string,
+  delivery: FollowUpDelivery = 'default',
+): void {
   const { intent, activations } = resolveUserInput({
     input: text,
     skillCommandMap: host.skillCommandMap,
@@ -274,14 +285,14 @@ export function dispatchInput(host: SlashCommandHost, text: string): void {
         skill_name: leading.skillName,
       });
     }
-    void host.sendInlineSkillUserInput(text, activations);
+    void host.sendInlineSkillUserInput(text, activations, undefined, delivery);
     return;
   }
   if (intent.kind !== 'not-command') {
-    void executeSlashCommand(host, text, intent, activations);
+    void executeSlashCommand(host, text, intent, activations, delivery);
     return;
   }
-  host.sendNormalUserInput(text);
+  host.sendNormalUserInput(text, undefined, delivery);
 }
 
 async function executeSlashCommand(
@@ -289,6 +300,7 @@ async function executeSlashCommand(
   input: string,
   intent: Exclude<SlashCommandIntent, { readonly kind: 'skill' | 'not-command' }>,
   activations: readonly InlineSkillActivation[],
+  delivery: FollowUpDelivery,
 ): Promise<void> {
   const parsedCommand = parseSlashInput(input);
 
@@ -336,7 +348,7 @@ async function executeSlashCommand(
       if (parsedCommand !== null && tryHandleDanceCommand(host, parsedCommand)) {
         return;
       }
-      host.sendNormalUserInput(intent.input);
+      host.sendNormalUserInput(intent.input, undefined, delivery);
       return;
     case 'builtin':
       if (intent.enqueue === true) {

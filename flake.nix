@@ -156,7 +156,11 @@
               inherit (finalAttrs) pname version src pnpmWorkspaces;
               inherit pnpm;
               fetcherVersion = 5;
-              hash = "sha256-EYwNjY4xJxT5sfGU4iVAA3BZFJgRjSuisZugSNVg79k=";
+              # Fork-owned: the lockfile diverges from upstream (fork packages
+              # and the proxy-agent deps), so upstream's hash never matches.
+              # Both candidate hashes are stale after this sync; refresh with
+              # `nix build .#kimi-code` and paste the "got:" hash here.
+              hash = "sha256-QOHwKZaAAU4OG9MEvNEWh0DViOvkAaqlVSlYMHUltbE=";
             };
 
             nativeBuildInputs = [
