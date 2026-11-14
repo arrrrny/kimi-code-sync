@@ -1922,7 +1922,10 @@ export class KimiTUI {
       this.state.appState.streamingPhase !== 'idle' ||
       this.state.appState.isCompacting
     ) {
-      this.enqueueMessage(text, enqueueOptions);
+      this.enqueueMessage(
+        text,
+        delivery === 'queue' ? { ...enqueueOptions, holdUntilTurnEnds: true } : enqueueOptions,
+      );
       this.updateQueueDisplay();
       this.state.ui.requestRender();
       return;

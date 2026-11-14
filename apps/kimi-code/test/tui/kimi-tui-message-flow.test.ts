@@ -8217,6 +8217,27 @@ command = "vim"
         expect(driver.state.queuedMessages.map((message) => message.text)).toEqual(['after this turn', 'next objective']);
       });
 
+      it('holds a skill prompt queued with Ctrl-Q in tower mode until the turn ends', async () => {
+        const session = makeSession({ id: 'ses-tower-skill' });
+        const { driver } = await makeDriver(session, {
+          listWorkspaceSkills: vi.fn(async () => [
+            { name: 'my-skill', description: 'A test skill', path: '/tmp/my-skill', source: 'user' },
+          ]),
+          listPluginCommands: vi.fn(async () => []),
+        });
+        await (driver as unknown as { refreshSkillCommands(): Promise<void> }).refreshSkillCommands();
+        driver.state.appState.towerMode = true;
+        driver.state.appState.streamingPhase = 'waiting';
+
+        press(driver, '/skill:my-skill src/app.ts', CTRL_Q);
+        press(driver, 'next objective', '\r');
+        await new Promise((resolve) => setImmediate(resolve));
+
+        expect(session.steer).not.toHaveBeenCalled();
+        expect(driver.state.queuedMessages.map((message) => message.text)).toEqual(['/skill:my-skill src/app.ts', 'next objective']);
+        expect(driver.state.queuedMessages[0]).toMatchObject({ holdUntilTurnEnds: true });
+      });
+
       it('keeps a message queued with Ctrl-Q in tower mode once an in-flight draft steer lands', async () => {
         const steer = pendingSteer();
         const { driver } = await makeDriver(steer.session);

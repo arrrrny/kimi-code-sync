@@ -16,15 +16,20 @@ describe('Bedrock provider', () => {
     expect(
       [
         'global.anthropic.claude-sonnet-4-6',
+        'us-gov.anthropic.claude-sonnet-4-6',
         'openai.gpt-oss-120b-1:0',
         'global.openai.gpt-6-astra',
         'global.moonshotai.kimi-k3',
         'meta.llama-4',
       ].map(inferBedrockProtocol),
-    ).toEqual(['anthropic', 'openai', 'openai_responses', 'openai', undefined]);
+    ).toEqual(['anthropic', 'anthropic', 'openai', 'openai_responses', 'openai', undefined]);
     expect(stripBedrockInferenceProfilePrefix('apac.moonshotai.kimi-k3')).toBe(
       'moonshotai.kimi-k3',
     );
+    expect(stripBedrockInferenceProfilePrefix('us-gov.anthropic.claude-sonnet-4-6')).toBe(
+      'anthropic.claude-sonnet-4-6',
+    );
+    expect(stripBedrockInferenceProfilePrefix('meta.llama-4')).toBe('meta.llama-4');
     expect(resolveBedrockBaseUrl('anthropic', { AWS_REGION: 'us-west-2' })).toBe(
       'https://bedrock-runtime.us-west-2.amazonaws.com/anthropic',
     );
