@@ -15,6 +15,7 @@ interface ModelsDevModelEntry {
   readonly tool_call?: boolean;
   readonly reasoning?: boolean;
   readonly status?: string;
+  readonly interleaved?: boolean | { readonly field?: string };
   readonly modalities?: { readonly input?: readonly string[]; readonly output?: readonly string[] };
   readonly family?: string;
 }
@@ -29,6 +30,7 @@ export interface ModelsDevModelInfo {
   readonly displayName?: string;
   readonly capabilities?: string[];
   readonly context?: number;
+  readonly reasoningKey?: string;
 }
 
 const MODELS_DEV_URL = 'https://models.dev/api.json';
@@ -66,6 +68,19 @@ function toCapabilities(model: ModelsDevModelEntry): string[] | undefined {
   return caps.size > 0 ? [...caps] : undefined;
 }
 
+/**
+ * The wire field a model streams its reasoning text in (models.dev
+ * `interleaved.field`), e.g. `reasoning_content`. Mirrors `modelsDevReasoningKey`
+ * in agent-core-v2's kosongConfig so a catalog refresh writes the same key an
+ * import would.
+ */
+function toReasoningKey(model: ModelsDevModelEntry): string | undefined {
+  const interleaved = model.interleaved;
+  if (typeof interleaved !== 'object' || interleaved === null) return undefined;
+  const field = interleaved.field?.trim();
+  return field !== undefined && field.length > 0 ? field : undefined;
+}
+
 function entryFor(catalog: ModelsDevCatalog, providerId: string): ModelsDevProviderEntry | undefined {
   if (!isRecord(catalog[providerId])) return undefined;
   return catalog[providerId] as ModelsDevProviderEntry;
@@ -88,16 +103,23 @@ function modelInfoFrom(
   // value so the caller does not have to distinguish "absent" from
   // "explicitly undefined".
   const capabilities = toCapabilities(raw as ModelsDevModelEntry);
+  const reasoningKey = toReasoningKey(raw as ModelsDevModelEntry);
   const limit = isRecord(raw['limit']) ? (raw['limit'] as Record<string, unknown>) : undefined;
   const rawContext = limit?.['context'];
   const context = typeof rawContext === 'number' && rawContext > 0 ? rawContext : undefined;
-  if (displayName === undefined && capabilities === undefined && context === undefined) {
+  if (
+    displayName === undefined &&
+    capabilities === undefined &&
+    context === undefined &&
+    reasoningKey === undefined
+  ) {
     return undefined;
   }
   return {
     ...(displayName !== undefined ? { displayName } : {}),
     ...(capabilities !== undefined ? { capabilities } : {}),
     ...(context !== undefined ? { context } : {}),
+    ...(reasoningKey !== undefined ? { reasoningKey } : {}),
   };
 }
 

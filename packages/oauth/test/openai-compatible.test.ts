@@ -324,6 +324,106 @@ describe('refreshProviderCatalog — OpenAI-compatible on-demand', () => {
     expect(alias?.capabilities).toEqual(expect.arrayContaining(['tool_use', 'image_in']));
   });
 
+  it('preserves curated reasoningKey and supportEfforts when the endpoint reports no reasoning metadata', async () => {
+    // zstart-style endpoint: `/models` returns no reasoning fields at all, so the
+    // curated effort ladder and the interleaved-reasoning field are the only
+    // source of truth. A refresh must not replace them with a default on/off.
+    const config: ManagedKimiConfigShape = {
+      providers: {
+        zstart: { type: 'openai', baseUrl: 'http://127.0.0.1:8790/v1', apiKey: 'zstart-local' },
+      },
+      models: {
+        'zstart/glm-5.3': {
+          provider: 'zstart',
+          model: 'glm-5.3',
+          maxContextSize: 1000000,
+          capabilities: ['thinking', 'tool_use'],
+          displayName: 'GLM-5.3',
+          reasoningKey: 'reasoning_content',
+          supportEfforts: ['low', 'high', 'max'],
+        },
+      },
+      telemetry: true,
+    };
+    const host = makeRefreshHost(config);
+    const fetchMock = vi.fn<FetchMock>(async () =>
+      new Response(
+        JSON.stringify({
+          data: [{ id: 'glm-5.3', context_length: 1000000 }],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await refreshProviderCatalog(host, {});
+
+    expect(result.failed).toEqual([]);
+    const alias = (await host.getConfig()).models?.['zstart/glm-5.3'];
+    expect(alias?.['reasoningKey']).toBe('reasoning_content');
+    expect(alias?.supportEfforts).toEqual(['low', 'high', 'max']);
+  });
+
+  it('lets the models.dev catalog override a curated reasoningKey and effort ladder', async () => {
+    // The complement of the test above: when the catalog does declare these
+    // fields, its answer is the newer one and must win over the curated value.
+    const config: ManagedKimiConfigShape = {
+      providers: {
+        zai: { type: 'openai', baseUrl: 'https://api.z.ai/api/v1', apiKey: 'sk-zai' },
+      },
+      models: {
+        'zai/glm-5.3': {
+          provider: 'zai',
+          model: 'glm-5.3',
+          maxContextSize: 1000000,
+          capabilities: ['thinking', 'tool_use'],
+          reasoningKey: 'stale_key',
+          supportEfforts: ['low'],
+        },
+      },
+      telemetry: true,
+    };
+    const host = makeRefreshHost(config);
+
+    const catalogFetch = vi.fn<FetchMock>(async () =>
+      new Response(
+        JSON.stringify({
+          zai: {
+            models: {
+              'glm-5.3': {
+                id: 'glm-5.3',
+                name: 'GLM-5.3',
+                limit: { context: 1000000 },
+                tool_call: true,
+                reasoning: true,
+                interleaved: { field: 'reasoning_content' },
+                modalities: { input: ['text'], output: ['text'] },
+              },
+            },
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', catalogFetch);
+    const { refreshModelsDevCatalog } = await import('../src/modelsDevCatalog');
+    await refreshModelsDevCatalog();
+
+    const endpointFetch = vi.fn<FetchMock>(async () =>
+      new Response(JSON.stringify({ data: [{ id: 'glm-5.3' }] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', endpointFetch);
+
+    const result = await refreshProviderCatalog(host, {});
+
+    expect(result.failed).toEqual([]);
+    const alias = (await host.getConfig()).models?.['zai/glm-5.3'];
+    expect(alias?.['reasoningKey']).toBe('reasoning_content');
+  });
+
   it('overrides a stale user-curated maxContextSize with the catalog context (opencode-style endpoint)', async () => {
     const config: ManagedKimiConfigShape = {
       providers: {

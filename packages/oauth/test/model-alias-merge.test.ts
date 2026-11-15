@@ -48,6 +48,29 @@ describe('mergeRefreshedModelAlias', () => {
     expect(merged.supportEfforts).toBeUndefined();
   });
 
+  it('keeps a curated reasoningKey when the managed payload never declares one', () => {
+    // `toManagedModelAlias` has no `reasoningKey` to give, so the managed and
+    // open-platform refreshes must treat a hand-written value as a user extra
+    // rather than as a managed field they own — otherwise every managed refresh
+    // would silently drop it.
+    const merged = mergeRefreshedModelAlias(
+      {
+        provider: 'managed:kimi-code',
+        model: 'kimi-k2',
+        maxContextSize: 262144,
+        reasoningKey: 'reasoning_content',
+      },
+      {
+        provider: 'managed:kimi-code',
+        model: 'kimi-k2',
+        maxContextSize: 262144,
+      },
+      MANAGED_KIMI_MODEL_FIELDS,
+    );
+
+    expect(merged['reasoningKey']).toBe('reasoning_content');
+  });
+
   it('refreshes custom-registry supportEfforts from upstream', () => {
     const merged = mergeRefreshedModelAlias(
       {
