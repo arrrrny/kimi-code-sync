@@ -1305,9 +1305,11 @@ describe('refreshCatalogProviderModels', () => {
     });
 
     expect(result.failed).toEqual([]);
-    expect(result.changed).toEqual([
-      { providerId: 'zai-coding-plan', providerName: 'zai-coding-plan', added: 0, removed: 0 },
-    ]);
+    // Nothing the remote declared actually differs from the curated alias
+    // (`maxContextSize` 1000000, `capabilities` already `tool_use`), so the
+    // refresh reports the provider as unchanged rather than churning the file.
+    expect(result.changed).toEqual([]);
+    expect(result.unchanged).toEqual(['zai-coding-plan']);
     // The curated 1M window survives the catalog refresh.
     expect(host.current().models?.['zai-coding-plan/glm-5.3']?.maxContextSize).toBe(1000000);
   });
@@ -1413,5 +1415,87 @@ describe('refreshCatalogProviderModels', () => {
     expect(catalogIndex).toBeGreaterThanOrEqual(0);
     expect(providerIndex).toBeGreaterThanOrEqual(0);
     expect(catalogIndex).toBeLessThan(providerIndex);
+  });
+
+  it('keeps the zstart effort ladder and reasoning key across a refresh', async () => {
+    // The reported bug, on the user's real provider: `zstart` is a local
+    // OpenAI-compatible gateway whose `/models` reports no reasoning metadata
+    // at all, and models.dev has no `zstart` entry. The curated
+    // `support_efforts` / `reasoning_key` are therefore the only source of
+    // truth, and the refresh must not replace them with a default on/off.
+    const baseUrl = 'http://127.0.0.1:8790/v1';
+    const host = makeRefreshHost({
+      providers: { zstart: { type: 'openai', baseUrl, apiKey: 'zstart-local' } },
+      models: {
+        'zstart/glm-5.3': {
+          provider: 'zstart',
+          model: 'glm-5.3',
+          maxContextSize: 1000000,
+          maxOutputSize: 131072,
+          capabilities: ['thinking', 'tool_use'],
+          displayName: 'GLM-5.3',
+          reasoningKey: 'reasoning_content',
+          supportEfforts: ['low', 'high', 'max'],
+        },
+        'zstart/glm-5.3-flash': {
+          provider: 'zstart',
+          model: 'glm-5.3-flash',
+          maxContextSize: 1000000,
+          maxOutputSize: 131072,
+          capabilities: ['image_in', 'video_in', 'thinking', 'tool_use'],
+          displayName: 'GLM-5.3-Flash',
+          reasoningKey: 'reasoning_content',
+          supportEfforts: ['low', 'high', 'max'],
+        },
+      },
+      thinking: { enabled: true, effort: 'max' },
+      telemetry: true,
+    } as unknown as KimiConfig);
+
+    const fetchMock = vi.fn<FetchMock>(async (input) => {
+      if (fetchInputUrl(input) === MODELS_DEV_URL) {
+        // models.dev carries no `zstart` provider.
+        return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      expect(fetchInputUrl(input)).toBe(`${baseUrl}/models`);
+      // Exactly what the real gateway returns.
+      return new Response(
+        JSON.stringify({
+          object: 'list',
+          data: [
+            { id: 'glm-5.3-flash', object: 'model', owned_by: 'zstart', context_length: 1000000, max_tokens: 1000000 },
+            { id: 'glm-5.3', object: 'model', owned_by: 'zstart', context_length: 1000000, max_tokens: 1000000 },
+          ],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await refreshCatalogProviderModels({
+      getConfig: async () => host.current(),
+      removeProvider: host.removeProvider,
+      setConfig: host.setConfig,
+      resolveOAuthToken: vi.fn(),
+    });
+
+    expect(result.failed).toEqual([]);
+    const after = host.current();
+    for (const [alias, expected] of Object.entries({
+      'zstart/glm-5.3': ['thinking', 'tool_use'],
+      'zstart/glm-5.3-flash': ['image_in', 'video_in', 'thinking', 'tool_use'],
+    })) {
+      const model = after.models?.[alias];
+      expect(model?.reasoningKey).toBe('reasoning_content');
+      expect(model?.supportEfforts).toEqual(['low', 'high', 'max']);
+      expect(model?.maxContextSize).toBe(1000000);
+      // The gateway echoes its context window into `max_tokens` (1000000); a
+      // curated `maxOutputSize` of 131072 must survive rather than be inflated
+      // to the context length.
+      expect(model?.maxOutputSize).toBe(131072);
+      expect(model?.capabilities).toEqual(expect.arrayContaining(expected));
+    }
+    // The effort selection itself is untouched.
+    expect(after.thinking).toEqual({ enabled: true, effort: 'max' });
   });
 });

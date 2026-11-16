@@ -5,7 +5,7 @@ import { DEFAULT_KIMI_CODE_OAUTH_HOST } from './constants';
 import { OAuthUnauthorizedError } from './errors';
 import { parseKimiCodeCustomHeaders } from './identity';
 import { DEFAULT_KIMI_CODE_BASE_URL, kimiCodeBaseUrl } from './managed-usage';
-import { MANAGED_KIMI_MODEL_FIELDS, mergeRefreshedModelAlias } from './model-alias-merge';
+import { MANAGED_KIMI_MODEL_FIELDS, mergeOpenAiCompatibleModelAlias, mergeRefreshedModelAlias } from './model-alias-merge';
 import { lookupModelsDevModel } from './modelsDevCatalog';
 import { OPENAI_COMPATIBLE_DEFAULT_CONTEXT } from './openai-compatible';
 import { isRecord } from './utils';
@@ -43,6 +43,13 @@ export interface ManagedKimiCodeModelInfo {
    * with the default.
    */
   readonly reportedContextLength?: number | undefined;
+  /**
+   * The largest completion the provider's `/models` endpoint reports (OpenAI's
+   * `max_tokens`, OpenRouter's `top_provider.max_completion_tokens`), or
+   * `undefined` when it says nothing. A curated `maxOutputSize` survives an
+   * absent value the same way a curated `maxContextSize` does.
+   */
+  readonly reportedMaxOutputSize?: number | undefined;
   readonly supportsReasoning: boolean;
   readonly supportsImageIn: boolean;
   readonly supportsVideoIn: boolean;
@@ -815,18 +822,25 @@ export function applyOpenAiCompatibleCatalog(
       catalog?.context ??
       existingMaxContextSize ??
       OPENAI_COMPATIBLE_DEFAULT_CONTEXT;
+    // Same shape as `maxContextSize`: the endpoint's `max_tokens` wins, then a
+    // curated value, and an absent answer from both writes nothing — which the
+    // merge reads as "unknown" and leaves the alias alone.
+    const existingMaxOutputSize =
+      typeof existing['maxOutputSize'] === 'number' ? existing['maxOutputSize'] : undefined;
+    const maxOutputSize = model.reportedMaxOutputSize ?? existingMaxOutputSize;
     const remoteAlias: ManagedKimiModelAlias = {
       provider: providerId,
       model: model.id,
       maxContextSize,
+      ...(maxOutputSize !== undefined ? { maxOutputSize } : {}),
       ...(model.displayName !== undefined ? { displayName: model.displayName } : {}),
       ...(catalog?.capabilities !== undefined ? { capabilities: catalog.capabilities } : {}),
+      // The wire field the model streams reasoning in. The provider's own
+      // `/models` payload cannot express it, so the catalog is the only
+      // source; absent here, the merge keeps whatever the alias already had.
+      ...(catalog?.reasoningKey !== undefined ? { reasoningKey: catalog.reasoningKey } : {}),
     };
-    existingModels[key] = mergeRefreshedModelAlias(
-      existing,
-      remoteAlias,
-      MANAGED_KIMI_MODEL_FIELDS,
-    );
+    existingModels[key] = mergeOpenAiCompatibleModelAlias(existing, remoteAlias);
     // Prefer the provider's own display name; otherwise use the catalog name.
     const displayName = resolveModelsDevDisplayName(providerId, model.id, model.displayName);
     if (displayName !== undefined) existingModels[key].displayName = displayName;
