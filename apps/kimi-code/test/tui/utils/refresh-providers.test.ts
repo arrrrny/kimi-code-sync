@@ -1489,6 +1489,10 @@ describe('refreshCatalogProviderModels', () => {
       expect(model?.reasoningKey).toBe('reasoning_content');
       expect(model?.supportEfforts).toEqual(['low', 'high', 'max']);
       expect(model?.maxContextSize).toBe(1000000);
+      // The gateway echoes its context window into `max_tokens` (1000000); a
+      // curated `maxOutputSize` of 131072 must survive rather than be inflated
+      // to the context length.
+      expect(model?.maxOutputSize).toBe(131072);
       expect(model?.capabilities).toEqual(expect.arrayContaining(expected));
     }
     // The effort selection itself is untouched.

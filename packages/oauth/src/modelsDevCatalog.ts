@@ -64,7 +64,11 @@ function toCapabilities(model: ModelsDevModelEntry): string[] | undefined {
   if (inputs.includes('audio')) caps.add('audio_in');
   if (Boolean(model.reasoning) || model.reasoning !== undefined) caps.add('thinking');
   caps.add('tool_use');
-  if (model.status === 'deprecated' || model.status === 'alpha') return undefined;
+  // A deprecated/alpha model is a *known* catalog answer of "no capabilities",
+  // not the same as "no catalog entry". Return an explicit empty set so the
+  // merge can retract a curated set instead of reading the deprecation as
+  // silence and keeping `tool_use` / `image_in` forever.
+  if (model.status === 'deprecated' || model.status === 'alpha') return [];
   return caps.size > 0 ? [...caps] : undefined;
 }
 
@@ -96,12 +100,11 @@ function modelInfoFrom(
   const rawName = raw['name'];
   const displayName =
     typeof rawName === 'string' && rawName.length > 0 ? rawName : undefined;
-  // `capabilities` and `context` are independent signals — a model that is
-  // flagged `deprecated` / `alpha` in the catalog has no capabilities here
-  // (so we drop the capabilities hint) but can still carry a `limit.context`
-  // we want to surface. Read both, then return only the fields that have a
-  // value so the caller does not have to distinguish "absent" from
-  // "explicitly undefined".
+  // `capabilities` and `context` are independent signals — a model flagged
+  // `deprecated` / `alpha` yields an explicit empty capabilities set (so the
+  // merge retracts a curated one) but can still carry a `limit.context` we want
+  // to surface. Read both, then return only the fields that have a value so the
+  // caller does not have to distinguish "absent" from "explicitly undefined".
   const capabilities = toCapabilities(raw as ModelsDevModelEntry);
   const reasoningKey = toReasoningKey(raw as ModelsDevModelEntry);
   const limit = isRecord(raw['limit']) ? (raw['limit'] as Record<string, unknown>) : undefined;
@@ -170,8 +173,8 @@ function lookupInEntry(
  * `limit.context`, and the catalog's object-key order is a listing order, not
  * a ranking. Its context is therefore returned only when every provider that
  * reports one reports the same value; otherwise the caller keeps its curated
- * or default window. Display name and capabilities still surface from the
- * first candidate.
+ * or default window. Display name, capabilities and reasoning key still surface
+ * from the first candidate.
  */
 export function lookupModelsDevModel(
   providerId: string,
@@ -198,11 +201,12 @@ export function lookupModelsDevModel(
   if (firstCandidate === undefined) return undefined;
   const context =
     candidateContexts.size === 1 ? candidateContexts.values().next().value : undefined;
-  const { displayName, capabilities } = firstCandidate;
+  const { displayName, capabilities, reasoningKey } = firstCandidate;
   return {
     ...(displayName !== undefined ? { displayName } : {}),
     ...(capabilities !== undefined ? { capabilities } : {}),
     ...(context !== undefined ? { context } : {}),
+    ...(reasoningKey !== undefined ? { reasoningKey } : {}),
   };
 }
 

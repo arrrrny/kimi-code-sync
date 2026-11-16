@@ -42,8 +42,6 @@ const OPENAI_COMPATIBLE_REFRESHED_FIELDS: ReadonlySet<string> = new Set([
   'maxContextSize',
   'maxOutputSize',
   'displayName',
-  'supportEfforts',
-  'defaultEffort',
 ]);
 
 /**
@@ -54,10 +52,11 @@ const OPENAI_COMPATIBLE_REFRESHED_FIELDS: ReadonlySet<string> = new Set([
  * (`fetchOpenAIProviderModels` fills in `supportsReasoning: false` and no
  * efforts), and models.dev has no entry for a private model id — so for these
  * fields "the remote said nothing" means *unknown*, not *removed*. Overwriting
- * a curated set with that absence is the data loss this guards against: it
- * downgrades the model from `low|high|max` to the UI's default thinking on/off
- * toggle, and drops `thinking` from `capabilities` so a reasoning model looks
- * non-reasoning entirely.
+ * a curated `reasoningKey` or `displayName` with that absence is the data loss
+ * this guards against: it drops the interleaved-reasoning field and the user's
+ * chosen name. The curated effort ladder (`supportEfforts` / `defaultEffort`)
+ * has no remote source at all on this path, so it is in neither set below and
+ * survives as a user extra.
  *
  * When the catalog does declare a value it still wins — the remote answer
  * outranks the curated one. `capabilities` is the exception: it is unioned
@@ -66,12 +65,7 @@ const OPENAI_COMPATIBLE_REFRESHED_FIELDS: ReadonlySet<string> = new Set([
  * contributed earlier. A catalog that knows nothing must not subtract from it,
  * and a catalog that knows more must still add.
  */
-const CURATED_DERIVED_FIELDS = [
-  'displayName',
-  'supportEfforts',
-  'defaultEffort',
-  'reasoningKey',
-] as const;
+const CURATED_DERIVED_FIELDS = ['displayName', 'reasoningKey'] as const;
 
 function cloneOverrides(
   overrides: ManagedKimiModelAliasOverrides | undefined,
@@ -144,13 +138,19 @@ export function mergeOpenAiCompatibleModelAlias(
 
 /**
  * Union of the curated and catalog capability lists, in that order so a curated
- * `thinking` stays ahead of a catalog `tool_use`. Returns `undefined` only when
- * neither side declared anything.
+ * `thinking` stays ahead of a catalog `tool_use`. A defined-but-empty `catalog`
+ * list is a *known* answer — models.dev marks a `deprecated`/`alpha` model by
+ * returning no capabilities — and retracts the curated set (returns `undefined`)
+ * rather than being read as silence, so a deprecated model stops advertising
+ * capabilities it no longer supports. An `undefined` `catalog` means "no entry"
+ * and unions (the curated set stands). Returns `undefined` when neither side
+ * declared anything.
  */
 function mergeCapabilities(
   curated: unknown,
   catalog: readonly string[] | undefined,
 ): string[] | undefined {
+  if (catalog !== undefined && catalog.length === 0) return undefined;
   const out = new Set<string>();
   if (Array.isArray(curated)) {
     for (const entry of curated) {

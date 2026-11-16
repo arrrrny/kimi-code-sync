@@ -154,6 +154,42 @@ describe('fetchOpenAIProviderModels', () => {
 
     expect(models[0]?.contextLength).toBe(262144);
   });
+
+  it('derives reportedMaxOutputSize from a completion cap, ignoring a context echo', async () => {
+    const fetchMock = vi.fn<FetchMock>(async () =>
+      new Response(
+        JSON.stringify({
+          data: [
+            // A plausible completion cap (smaller than the context window): used.
+            { id: 'cap-ok', context_length: 200000, max_tokens: 8192 },
+            // A gateway echoing its context window into max_tokens: ignored, so a
+            // curated maxOutputSize is not inflated to the context length.
+            { id: 'cap-echo', context_length: 1000000, max_tokens: 1000000 },
+            // OpenRouter's documented field: always trusted, even when it is not
+            // smaller than the context window.
+            {
+              id: 'cap-openrouter',
+              context_length: 200000,
+              top_provider: { max_completion_tokens: 16384 },
+            },
+            // No reported context window: a bare max_tokens has nothing to be an
+            // echo of, so it is used.
+            { id: 'cap-no-ctx', max_tokens: 4096 },
+          ],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const models = await fetchOpenAIProviderModels('https://api.example.test/v1', 'sk-test', {});
+    const byId = new Map(models.map((m) => [m.id, m]));
+
+    expect(byId.get('cap-ok')?.reportedMaxOutputSize).toBe(8192);
+    expect(byId.get('cap-echo')?.reportedMaxOutputSize).toBeUndefined();
+    expect(byId.get('cap-openrouter')?.reportedMaxOutputSize).toBe(16384);
+    expect(byId.get('cap-no-ctx')?.reportedMaxOutputSize).toBe(4096);
+  });
 });
 
 describe('refreshProviderCatalog — OpenAI-compatible on-demand', () => {
@@ -364,9 +400,10 @@ describe('refreshProviderCatalog — OpenAI-compatible on-demand', () => {
     expect(alias?.supportEfforts).toEqual(['low', 'high', 'max']);
   });
 
-  it('lets the models.dev catalog override a curated reasoningKey and effort ladder', async () => {
-    // The complement of the test above: when the catalog does declare these
-    // fields, its answer is the newer one and must win over the curated value.
+  it('lets the models.dev catalog override a curated reasoningKey', async () => {
+    // The complement of the test above: when the catalog declares a reasoning
+    // key (`interleaved.field`), its answer is the newer one and must win over
+    // the curated value.
     const config: ManagedKimiConfigShape = {
       providers: {
         zai: { type: 'openai', baseUrl: 'https://api.z.ai/api/v1', apiKey: 'sk-zai' },
@@ -378,7 +415,6 @@ describe('refreshProviderCatalog — OpenAI-compatible on-demand', () => {
           maxContextSize: 1000000,
           capabilities: ['thinking', 'tool_use'],
           reasoningKey: 'stale_key',
-          supportEfforts: ['low'],
         },
       },
       telemetry: true,
@@ -540,8 +576,75 @@ describe('refreshProviderCatalog — OpenAI-compatible on-demand', () => {
     const alias = (await host.getConfig()).models?.['opencode/nemotron-3-ultra-free'];
     // Catalog context survives the deprecated/alpha gate.
     expect(alias?.maxContextSize).toBe(1000000);
-    // Capabilities are stripped by toCapabilities, so the alias carries none
-    // (no merging happens for an empty/undefined catalog capability set).
+    // The catalog marks the model deprecated, so toCapabilities returns an
+    // explicit empty set and the merge retracts any capabilities — here there
+    // are none curated, so the alias carries none.
+    expect(alias?.capabilities).toBeUndefined();
+  });
+
+  it('retracts a curated capabilities set when the catalog marks the model deprecated/alpha', async () => {
+    // The complement of the test above: an alias that already advertises
+    // capabilities must LOSE them when the catalog says the model is
+    // deprecated/alpha. A deprecation is a negative answer, not silence, so the
+    // union must not keep `tool_use` / `image_in` alive forever.
+    const config: ManagedKimiConfigShape = {
+      providers: {
+        opencode: {
+          type: 'openai',
+          baseUrl: 'https://opencode.ai/zen/v1',
+          apiKey: 'sk-oc-test',
+        },
+      },
+      models: {
+        'opencode/nemotron-3-ultra-free': {
+          provider: 'opencode',
+          model: 'nemotron-3-ultra-free',
+          maxContextSize: 1000000,
+          capabilities: ['image_in', 'thinking', 'tool_use'],
+        },
+      },
+      telemetry: true,
+    };
+    const host = makeRefreshHost(config);
+
+    const catalog = {
+      opencode: {
+        models: {
+          'nemotron-3-ultra-free': {
+            id: 'nemotron-3-ultra-free',
+            name: 'Nemotron 3 Ultra Free',
+            limit: { context: 1000000 },
+            tool_call: true,
+            status: 'deprecated',
+            modalities: { input: ['text'], output: ['text'] },
+          },
+        },
+      },
+    };
+    const catalogFetch = vi.fn<FetchMock>(async () =>
+      new Response(JSON.stringify(catalog), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', catalogFetch);
+    const { refreshModelsDevCatalog } = await import('../src/modelsDevCatalog');
+    await refreshModelsDevCatalog();
+
+    const endpointFetch = vi.fn<FetchMock>(async () =>
+      new Response(
+        JSON.stringify({ data: [{ id: 'nemotron-3-ultra-free' }] }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', endpointFetch);
+
+    const result = await refreshProviderCatalog(host, {});
+    expect(result.failed).toEqual([]);
+    const alias = (await host.getConfig()).models?.['opencode/nemotron-3-ultra-free'];
+    // Context is independent of the deprecation and still surfaces ...
+    expect(alias?.maxContextSize).toBe(1000000);
+    // ... but the curated capabilities are retracted, not unioned.
     expect(alias?.capabilities).toBeUndefined();
   });
 
@@ -1013,6 +1116,28 @@ describe('lookupModelsDevModel — provider/model cascade', () => {
     });
     const { lookupModelsDevModel } = await import('../src/modelsDevCatalog');
     expect(lookupModelsDevModel('opencode-go', 'glm-5')?.context).toBe(204800);
+  });
+
+  it('surfaces the reasoning key from the any-provider step', async () => {
+    // The widest cascade step used to rebuild its result as
+    // { displayName, capabilities, context } and drop `reasoningKey`, so a model
+    // id picked up `interleaved.field` from the opencode fallback but not from
+    // any other provider. It must propagate here too.
+    await warmCatalog({
+      'opencode-go': { models: {} },
+      opencode: { models: {} },
+      zhipuai: {
+        models: {
+          'glm-5': {
+            name: 'GLM-5',
+            limit: { context: 204800 },
+            interleaved: { field: 'reasoning_content' },
+          },
+        },
+      },
+    });
+    const { lookupModelsDevModel } = await import('../src/modelsDevCatalog');
+    expect(lookupModelsDevModel('opencode-go', 'glm-5')?.reasoningKey).toBe('reasoning_content');
   });
 
   it('drops a contested context window at the any-provider step but keeps the display name', async () => {

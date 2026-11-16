@@ -69,15 +69,24 @@ export async function fetchOpenAIProviderModels(
     // default. `reportedContextLength` stays undefined when the endpoint said
     // nothing, so the catalog refresh can preserve a curated `maxContextSize`.
     const contextLength = reportedContextLength ?? OPENAI_COMPATIBLE_DEFAULT_CONTEXT;
-    // OpenAI reports the completion cap as `max_tokens`; OpenRouter nests it in
-    // `top_provider.max_completion_tokens`. Absent means "unknown", so a curated
+    // OpenRouter documents the completion cap as `top_provider.max_completion_tokens`
+    // and it is always trustworthy. A bare `max_tokens` is NOT part of the OpenAI
+    // `/v1/models` contract: some gateways echo their context window into it
+    // (e.g. `max_tokens === context_length`), and trusting that would silently
+    // inflate a curated `maxOutputSize` by the context-to-output ratio. So a bare
+    // `max_tokens` is honored only when it is smaller than the reported context
+    // window — a plausible completion cap. Absent means "unknown", so a curated
     // `maxOutputSize` is left alone rather than reset.
-    const reportedMaxOutputSize = positiveInteger(
-      raw['max_tokens'] ??
-        (isRecord(raw['top_provider'])
-          ? raw['top_provider']['max_completion_tokens']
-          : undefined),
-    );
+    const topProviderMaxOutputSize = isRecord(raw['top_provider'])
+      ? positiveInteger(raw['top_provider']['max_completion_tokens'])
+      : undefined;
+    const bareMaxTokens = positiveInteger(raw['max_tokens']);
+    const reportedMaxOutputSize =
+      topProviderMaxOutputSize ??
+      (bareMaxTokens !== undefined &&
+      (reportedContextLength === undefined || bareMaxTokens < reportedContextLength)
+        ? bareMaxTokens
+        : undefined);
     const rawName = raw['name'];
     const displayName = typeof rawName === 'string' && rawName.length > 0 ? rawName : undefined;
     out.push({
