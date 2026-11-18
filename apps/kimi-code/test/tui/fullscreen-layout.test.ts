@@ -1142,7 +1142,7 @@ describe('fullscreen layout', () => {
       '❯ queued 1',
       '❯ queued 2',
       '❯ queued 3',
-      '5 queued · ↑ to edit · ctrl-s to steer immediately',
+      '5 queued · ↑ to edit · alt-q manage · ctrl-s to steer immediately',
     ]);
     expect(rows[first]!.at(-1)).toBe('┃');
     expect(rows.join('\n')).toContain('test-model');

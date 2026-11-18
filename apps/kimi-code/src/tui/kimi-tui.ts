@@ -4927,11 +4927,38 @@ export class KimiTUI {
   ): readonly QueuedMessage[] | void {
     switch (action.kind) {
       case 'send-selected': {
-        this.state.queuedMessages.splice(action.index, 1);
-        this.steerQueuedMessagesIntoRunningTurn(true);
-        if (this.state.queuedMessages.length === 0) {
-          this.restoreEditor();
+        const message = this.state.queuedMessages[action.index];
+        if (message === undefined) return this.state.queuedMessages;
+        if (!isPromptQueuedMessage(message)) {
+          this.showStatus('Only a prompt can be sent; a barrier runs in order.');
+          return this.state.queuedMessages;
         }
+        const session = this.session;
+        if (session === undefined || !this.canManuallySteer()) {
+          this.showStatus('No running turn to send into.');
+          return this.state.queuedMessages;
+        }
+        this.state.queuedMessages.splice(action.index, 1);
+        this.steeringQueuedMessages.add(message);
+        this.updateQueueDisplay();
+        this.steerMessage(
+          session,
+          [toSteerInputItem(message)],
+          (outcome) => {
+            this.steeringQueuedMessages.delete(message);
+            if (this.session !== session) return;
+            if (outcome === 'failed') {
+              const at = Math.min(action.index, this.state.queuedMessages.length);
+              this.state.queuedMessages.splice(at, 0, message);
+              this.showStatus('Could not send that message; it is still queued.');
+            } else {
+              if (outcome === 'steered') this.programStatus.markUserSteer();
+              if (this.state.queuedMessages.length === 0) this.restoreEditor();
+            }
+            this.updateQueueDisplay();
+          },
+          true,
+        );
         return this.state.queuedMessages;
       }
       case 'send-all': {
@@ -4944,15 +4971,24 @@ export class KimiTUI {
         return this.state.queuedMessages;
       }
       case 'move': {
+        const messages = this.state.queuedMessages;
         const targetIndex = action.direction === 'up' ? action.index - 1 : action.index + 1;
-        if (targetIndex < 0 || targetIndex >= this.state.queuedMessages.length) {
-          return this.state.queuedMessages;
+        if (targetIndex < 0 || targetIndex >= messages.length) {
+          return messages;
         }
-        const [msg] = this.state.queuedMessages.splice(action.index, 1);
+        // Steering only ever sends what sits before the first compaction /
+        // model-switch barrier, so swapping a message across that boundary
+        // would change what a later steer sends.
+        const firstBarrier = messages.findIndex(isQueuedCompactionBarrier);
+        if (action.index === firstBarrier || targetIndex === firstBarrier) {
+          this.showStatus('A compaction or model-switch barrier keeps its place.');
+          return messages;
+        }
+        const [msg] = messages.splice(action.index, 1);
         if (msg !== undefined) {
-          this.state.queuedMessages.splice(targetIndex, 0, msg);
+          messages.splice(targetIndex, 0, msg);
         }
-        return this.state.queuedMessages;
+        return messages;
       }
       case 'edit': {
         const msg = this.state.queuedMessages[action.index];
