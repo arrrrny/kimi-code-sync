@@ -93,6 +93,11 @@ import { CompactionComponent } from './components/dialogs/compaction';
 import { HelpPanelComponent, keyboardShortcuts } from './components/dialogs/help-panel';
 import { QuestionDialogComponent } from './components/dialogs/question-dialog';
 import { SessionPickerComponent, type SessionRow } from './components/dialogs/session-picker';
+import {
+  MessageQueueManagerComponent,
+  MessageQueueEditDialogComponent,
+  type MessageQueueAction,
+} from './components/dialogs/message-queue-manager';
 import { TrustPromptComponent, type TrustPromptChoice } from './components/dialogs/trust-prompt';
 import {
   FileMentionProvider,
@@ -4884,6 +4889,94 @@ export class KimiTUI {
 
   openTasksBrowser(): void {
     void this.tasksBrowserController.show();
+  }
+
+  openMessageQueueManager(): void {
+    const messages = this.state.queuedMessages;
+    if (messages.length === 0) {
+      this.showStatus('No queued messages.');
+      return;
+    }
+    if (this.state.appState.streamingPhase === 'idle' || this.state.appState.isCompacting) {
+      this.showStatus('No running turn to send into.');
+      return;
+    }
+    this.mountMessageQueueManager(messages);
+  }
+
+  private mountMessageQueueManager(messages: readonly QueuedMessage[]): void {
+    const showManager = (msgs: readonly QueuedMessage[]): void => {
+      this.state.editorReplacementMounted = true;
+      this.mountEditorReplacement(
+        new MessageQueueManagerComponent({
+          messages: msgs,
+          onAction: (action) => this.handleMessageQueueAction(action),
+          onCancel: () => {
+            this.restoreEditor();
+          },
+        }),
+      );
+      this.state.ui.requestRender();
+    };
+
+    showManager(messages);
+  }
+
+  private handleMessageQueueAction(
+    action: MessageQueueAction,
+  ): readonly QueuedMessage[] | void {
+    switch (action.kind) {
+      case 'send-selected': {
+        this.state.queuedMessages.splice(action.index, 1);
+        this.steerQueuedMessagesIntoRunningTurn(true);
+        if (this.state.queuedMessages.length === 0) {
+          this.restoreEditor();
+        }
+        return this.state.queuedMessages;
+      }
+      case 'send-all': {
+        this.steerQueuedMessagesIntoRunningTurn(true);
+        this.restoreEditor();
+        return [];
+      }
+      case 'delete': {
+        this.state.queuedMessages.splice(action.index, 1);
+        return this.state.queuedMessages;
+      }
+      case 'move': {
+        const targetIndex = action.direction === 'up' ? action.index - 1 : action.index + 1;
+        if (targetIndex < 0 || targetIndex >= this.state.queuedMessages.length) {
+          return this.state.queuedMessages;
+        }
+        const [msg] = this.state.queuedMessages.splice(action.index, 1);
+        if (msg !== undefined) {
+          this.state.queuedMessages.splice(targetIndex, 0, msg);
+        }
+        return this.state.queuedMessages;
+      }
+      case 'edit': {
+        const msg = this.state.queuedMessages[action.index];
+        if (msg === undefined) return;
+        this.state.editorReplacementMounted = true;
+        this.mountEditorReplacement(
+          new MessageQueueEditDialogComponent({
+            message: msg,
+            index: action.index,
+            onDone: (result) => {
+              if (result.kind === 'save') {
+                const current = this.state.queuedMessages[result.index];
+                if (current !== undefined) {
+                  this.state.queuedMessages[result.index] = { ...current, text: result.text };
+                }
+              }
+              this.mountMessageQueueManager(this.state.queuedMessages);
+            },
+          }),
+        );
+        this.state.ui.requestRender();
+        return;
+      }
+    }
   }
 
   focusNotifyPanel(): boolean {
