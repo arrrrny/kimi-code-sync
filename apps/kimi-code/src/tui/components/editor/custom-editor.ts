@@ -164,6 +164,8 @@ export class CustomEditor extends Editor {
    * Not fired while a dialog has focus — the model selector's own Alt+M
    * toggles the favorite state instead. */
   public onAltM?: () => void;
+  /** Alt+Q: open the message queue manager while streaming. */
+  public onAltQ?: () => void;
   /** 'bash' when entering a `!` shell command. The `!` is never part of the
    *  text buffer — it is a separate mode + prompt symbol (see handleInput). */
   public inputMode: 'prompt' | 'bash' = 'prompt';
@@ -560,6 +562,11 @@ export class CustomEditor extends Editor {
 
     if (matchesKey(normalized, Key.alt('m'))) {
       this.onAltM?.();
+      return;
+    }
+
+    if (matchesKey(normalized, Key.alt('q'))) {
+      this.onAltQ?.();
       return;
     }
 

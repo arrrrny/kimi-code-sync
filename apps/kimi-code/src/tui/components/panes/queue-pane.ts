@@ -42,10 +42,10 @@ export class QueuePaneComponent extends DockSection {
         : '';
     this.hint =
       options.isCompacting && !options.isStreaming
-        ? `  ${count}↑ to edit · will send after compaction`
+        ? `  ${count}↑ to edit · alt-q manage · will send after compaction`
         : canSteer
-          ? `  ${count}↑ to edit · ctrl-s to steer immediately`
-          : `  ${count}↑ to edit · will send after current task`;
+          ? `  ${count}↑ to edit · alt-q manage · ctrl-s to steer immediately`
+          : `  ${count}↑ to edit · alt-q manage · will send after current task`;
   }
 
   protected renderPart(part: DockPart, width: number): string[] {

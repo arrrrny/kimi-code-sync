@@ -16778,3 +16778,105 @@ describe('transcript fold block clicks', () => {
     expect(driver.state.transcriptContainer.toolOutputExpanded).toBe(true);
   });
 });
+
+describe('KimiTUI message queue manager actions', () => {
+  const UP = `${String.fromCodePoint(27)}[A`;
+  const CTRL_S = '\u0013';
+  type SteerOutcome = 'steered' | 'failed' | 'restored';
+
+  type QueueDriver = MessageDriver & {
+    openMessageQueueManager(): void;
+    steerMessage: KimiTUI['steerMessage'];
+    editorReplacementPanel?: { handleInput(data: string): void };
+  };
+
+  /** A driver with a running turn and `texts` queued. */
+  async function mountManager(
+    texts: readonly QueuedMessage[],
+  ): Promise<{ driver: QueueDriver; panel: { handleInput(data: string): void } }> {
+    const { driver } = await makeDriver();
+    const queueDriver = driver as unknown as QueueDriver;
+    queueDriver.state.appState.streamingPhase = 'waiting';
+    queueDriver.streamingUI.setTurnId('42');
+    queueDriver.state.queuedMessages.push(...texts);
+    queueDriver.openMessageQueueManager();
+    const panel = queueDriver.editorReplacementPanel;
+    if (panel === undefined) throw new Error('message queue manager did not mount');
+    return { driver: queueDriver, panel };
+  }
+
+  /** A steer spy that captures the settle callback instead of running it. */
+  function spySteer(queueDriver: QueueDriver): {
+    steer: ReturnType<typeof vi.spyOn>;
+    settle: (outcome: SteerOutcome) => void;
+  } {
+    let settle: (outcome: SteerOutcome) => void = () => {};
+    const steer = vi
+      .spyOn(queueDriver, 'steerMessage')
+      .mockImplementation(((...args: unknown[]) => {
+        const onSettled = args[2] as ((outcome: SteerOutcome) => void) | undefined;
+        settle = onSettled ?? (() => {});
+      }) as unknown as KimiTUI['steerMessage']);
+    return { steer, settle: (outcome) => settle(outcome) };
+  }
+
+  it('sends the selected message instead of the messages around it', async () => {
+    const { driver, panel } = await mountManager([
+      { text: 'first', agentId: 'main' },
+      { text: 'second', agentId: 'main' },
+      { text: 'third', agentId: 'main' },
+    ]);
+    const { steer } = spySteer(driver);
+
+    panel.handleInput(UP);
+    panel.handleInput(CTRL_S);
+
+    expect(steer).toHaveBeenCalledOnce();
+    const sent = steer.mock.calls[0]?.[1] as readonly { text: string }[];
+    expect(sent.map((item) => item.text)).toEqual(['second']);
+    expect(driver.state.queuedMessages.map((message) => message.text)).toEqual(['first', 'third']);
+  });
+
+  it('puts a failed send back into the queue', async () => {
+    const { driver, panel } = await mountManager([
+      { text: 'first', agentId: 'main' },
+      { text: 'second', agentId: 'main' },
+    ]);
+    const { settle } = spySteer(driver);
+
+    panel.handleInput(CTRL_S);
+    expect(driver.state.queuedMessages.map((message) => message.text)).toEqual(['first']);
+
+    settle('failed');
+
+    expect(driver.state.queuedMessages.map((message) => message.text)).toEqual(['first', 'second']);
+  });
+
+  it('refuses to send a compaction barrier and leaves it queued', async () => {
+    const { driver, panel } = await mountManager([
+      { text: 'first', agentId: 'main' },
+      { text: '/compact', agentId: 'main', mode: 'compact', queuedAfterAutoSerial: 0 },
+    ]);
+    const { steer } = spySteer(driver);
+
+    panel.handleInput(CTRL_S);
+
+    expect(steer).not.toHaveBeenCalled();
+    expect(driver.state.queuedMessages.map((message) => message.text)).toEqual(['first', '/compact']);
+  });
+
+  it('keeps a prompt from moving across a compaction barrier', async () => {
+    const { driver, panel } = await mountManager([
+      { text: '/compact', agentId: 'main', mode: 'compact', queuedAfterAutoSerial: 0 },
+      { text: 'behind barrier', agentId: 'main' },
+    ]);
+
+    panel.handleInput(' ');
+    panel.handleInput(UP);
+
+    expect(driver.state.queuedMessages.map((message) => message.text)).toEqual([
+      '/compact',
+      'behind barrier',
+    ]);
+  });
+});
