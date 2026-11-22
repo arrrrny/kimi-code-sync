@@ -6,6 +6,7 @@ import { IWebSearchProviderService } from '#/app/auth/webSearch/webSearch';
 import type { RunnableToolExecution } from '#/tool/toolContract';
 import type { WebSearchProvider } from '#/agent/tools/web-search/web-search';
 import { WebSearchTool } from '#/agent/tools/web-search/webSearchTool';
+import type { IAgentLoopService } from '#/agent/loop/loop';
 
 function makeProvider(
   search: WebSearchProvider['search'],
@@ -25,6 +26,13 @@ function makeConfig(value: Record<string, boolean> | undefined): IConfigService 
   } as unknown as IConfigService;
 }
 
+function makeLoop(): IAgentLoopService {
+  return {
+    _serviceBrand: undefined,
+    getModel: () => 'kimi-k2',
+  } as unknown as IAgentLoopService;
+}
+
 function ctx(): { turnId: number; toolCallId: string; signal: AbortSignal } {
   return { turnId: 1, toolCallId: 't1', signal: new AbortController().signal };
 }
@@ -34,7 +42,7 @@ const DISABLED_MESSAGE = 'Web search is disabled by configuration.';
 describe('WebSearchTool', () => {
   it('returns a disabled error when web_search is disabled', async () => {
     const search = vi.fn(async () => []) as unknown as WebSearchProvider['search'];
-    const tool = new WebSearchTool(makeProvider(search), makeConfig({ web_search: false }));
+    const tool = new WebSearchTool(makeProvider(search), makeConfig({ web_search: false }), makeLoop());
 
     const result = await (tool.resolveExecution({ query: 'q' }) as RunnableToolExecution).execute(ctx());
 
@@ -50,7 +58,7 @@ describe('WebSearchTool', () => {
       getWebSearchProvider: () => ({ search }),
       hasWebSearchProvider: () => true,
     } as unknown as IWebSearchProviderService;
-    const tool = new WebSearchTool(availableProvider, makeConfig({ web_search: false }));
+    const tool = new WebSearchTool(availableProvider, makeConfig({ web_search: false }), makeLoop());
 
     const result = await (tool.resolveExecution({ query: 'q' }) as RunnableToolExecution).execute(ctx());
 
@@ -63,7 +71,7 @@ describe('WebSearchTool', () => {
     const search = vi.fn(async () => [
       { title: 'T', url: 'https://example.com', snippet: 'S' },
     ]) as unknown as WebSearchProvider['search'];
-    const tool = new WebSearchTool(makeProvider(search), makeConfig(undefined));
+    const tool = new WebSearchTool(makeProvider(search), makeConfig(undefined), makeLoop());
 
     const result = await (tool.resolveExecution({ query: 'q' }) as RunnableToolExecution).execute(ctx());
 

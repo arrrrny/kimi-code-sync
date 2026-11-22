@@ -554,7 +554,13 @@ function providerToToml(provider: ProviderConfig, rawProvider: unknown): Record<
   return out;
 }
 
-const PROVIDER_CREDENTIAL_FIELDS = ['apiKey', 'oauth', 'apiKeyEnv'] as const;
+const PROVIDER_CREDENTIAL_FIELDS = [
+  'apiKey',
+  'oauth',
+  'apiKeyEnv',
+  'searchUrl',
+  'feedbackUrl',
+] as const;
 
 function apiKeysToToml(value: unknown, rawValue: unknown): unknown {
   if (!isPlainObject(value)) return value;

@@ -55,9 +55,8 @@ export function submitPromptTurn(
 }
 import type { IAgentToolExecutorService } from '#/agent/toolExecutor/toolExecutor';
 import type { BeforeToolExecuteEvent, ToolDidExecuteContext, WillExecuteToolEvent } from '#/agent/toolExecutor/toolHooks';
-import { OrderedHookSlot } from '#/hooks';
+import { OrderedHookSlot, createHooks } from '#/hooks';
 import type { ContextMessage, PromptOrigin } from '#/agent/contextMemory/types';
-import { createHooks } from '#/hooks';
 import type { IWireService } from '#/wire/wire';
 
 import { stubAgentWire } from '../../wire/stubs';
@@ -176,6 +175,7 @@ export function stubLoopWithHooks(options: StubLoopOptions = {}): StubLoop {
     addActiveTool: () => {},
     removeActiveTool: () => {},
     history: () => messages,
+    previewRequestContent: () => ({ systemPrompt: '', tools: [], messages }),
     historyRevision: () => 0,
     replaceHistory(next, _reason, onAccepted) {
       messages.splice(0, messages.length, ...next.map((entry) => contextFromHistoryEntry(entry)));
@@ -278,12 +278,13 @@ export function stubLoopWithHooks(options: StubLoopOptions = {}): StubLoop {
     cancel(target, reason) { cancels.push({ turnId: target?.turnId, reason }); if (target?.promptId !== undefined) return true; if (active === undefined || (target?.turnId !== undefined && active.id !== target.turnId)) return false; active.cancel(reason); return true; },
     cancelFromUser(turnId) { stub.cancel(turnId === undefined ? undefined : { turnId }); },
     detachTool: () => {},
+    suppressTaskNotifications: () => {},
     abortTool: () => {},
     tryAcquireQuiescence: () => toDisposable(() => {}),
     tryAcquireHistorySnapshot: () => toDisposable(() => {}),
     resetLoop: () => Promise.resolve(),
     registerLoopErrorHandler: errorHandlers.register,
-    settled: () => Promise.resolve(),
+    settled: () => Promise.resolve(undefined),
     retry: async () => { throw new Error('retry is not supported by this stub'); },
     close: () => Promise.resolve(),
     drainNextBatch(context, kinds) {
@@ -307,6 +308,7 @@ export function stubLoopWithHooks(options: StubLoopOptions = {}): StubLoop {
     flushReminders() {
       stub.drainNextBatch(stub, ['message']);
     },
+    continueTurn() {},
   };
   return stub;
 }

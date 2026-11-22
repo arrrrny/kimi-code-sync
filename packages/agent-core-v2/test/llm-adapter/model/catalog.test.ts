@@ -10,7 +10,7 @@ import { emptyUsage } from '@moonshot-ai/core/llm/usage';
 import { streamLlmRequest } from '@moonshot-ai/core/llm/stream';
 import { UNKNOWN_CAPABILITY } from '#/llm-adapter/contract/capability';
 import { IProtocolAdapterRegistry } from '#/llm-adapter/protocol/protocol';
-import '#/llm-adapter/protocol/protocolAdapterRegistry';
+import { ProtocolAdapterRegistry } from '#/llm-adapter/protocol/protocolAdapterRegistry';
 import {
   IProviderService,
   type ProviderConfig,
@@ -27,7 +27,6 @@ import {
   toProtocolProvider,
 } from '#/llm-adapter/model/catalog';
 import { ModelCatalog } from '#/llm-adapter/model/catalog-service';
-import { ProtocolAdapterRegistry } from '#/llm-adapter/protocol/protocolAdapterRegistry';
 import { createMockProvider, withMockProvider } from '../../harness/scripted-generate';
 import { ProviderCatalogRuntimeService } from '#/llm-adapter/model/catalog-runtime';
 import '#/llm-adapter/model/errors';
@@ -869,10 +868,10 @@ describe('direct generate', () => {
       )) {
         events.push(event);
       }
-      expect(events.find((event) => event.type === 'llm.streaming.part')).toMatchObject({
+      expect(events.find((event) => event.type === 'llm.delta.part')).toMatchObject({
         part: { type: 'text', text: 'pong' },
       });
-      expect(events.find((event) => event.type === 'llm.streaming.usage')).toMatchObject({
+      expect(events.find((event) => event.type === 'llm.delta.usage')).toMatchObject({
         usage: emptyUsage(),
       });
       expect(events.find((event) => event.type === 'llm.ended')).toMatchObject({

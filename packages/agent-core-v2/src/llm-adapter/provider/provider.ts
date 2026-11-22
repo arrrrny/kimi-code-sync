@@ -22,6 +22,8 @@ export interface ProviderConfig {
 
   baseUrl?: string;
   proxyUrl?: string;
+  searchUrl?: string;
+  feedbackUrl?: string;
   customHeaders?: Record<string, string>;
   defaultModel?: string;
 

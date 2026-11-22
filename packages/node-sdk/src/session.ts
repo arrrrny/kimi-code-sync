@@ -184,14 +184,18 @@ export class Session {
   async promptWithSkills(
     input: string | PromptInput,
     skills: readonly PromptSkillActivation[],
-    options?: { readonly steerIfActive?: boolean },
+    options?: { readonly steerIfActive?: boolean; readonly promptId?: string },
   ): Promise<PromptSubmissionResult> {
     this.ensureOpen();
+    if (options?.promptId !== undefined && options.promptId.length === 0) {
+      throw new TypeError('promptId must not be empty');
+    }
     return this.rpc.promptWithSkills({
       sessionId: this.id,
       input: normalizePromptInput(input),
       skills,
       steerIfActive: options?.steerIfActive,
+      promptId: options?.promptId,
     });
   }
 
@@ -216,11 +220,18 @@ export class Session {
     return this.rpc.cancelShellCommand({ sessionId: this.id, commandId });
   }
 
-  async steer(input: string | PromptInput): Promise<PromptSubmissionResult> {
+  async steer(
+    input: string | PromptInput,
+    options?: { promptId?: string },
+  ): Promise<PromptSubmissionResult> {
     this.ensureOpen();
+    if (options?.promptId !== undefined && options.promptId.length === 0) {
+      throw new TypeError('promptId must not be empty');
+    }
     return this.rpc.steer({
       sessionId: this.id,
       input: normalizePromptInput(input),
+      promptId: options?.promptId,
     });
   }
 
@@ -664,12 +675,6 @@ export class Session {
     return this.rpc.handlePrintMainTurnCompleted({ sessionId: this.id });
   }
 
-  // --- Goal lifecycle ---------------------------------------------------
-  // Deterministic user/host control surface. There is intentionally no
-  // `updateGoal`: the goal's terminal status is decided by the model via the
-  // in-conversation UpdateGoal tool (or the goal driver on budget/error), not
-  // by the host.
-
   async createGoal(input: CreateGoalInput): Promise<GoalSnapshot> {
     this.ensureOpen();
     return this.rpc.createGoal({ sessionId: this.id, ...input });
@@ -811,7 +816,7 @@ export class Session {
 
   async activateSkill(
     name: string,
-    args?: string | undefined,
+    args?: string,
     options?: { readonly path?: string },
   ): Promise<void> {
     this.ensureOpen();
@@ -832,7 +837,7 @@ export class Session {
   async activatePluginCommand(
     pluginId: string,
     commandName: string,
-    args?: string | undefined,
+    args?: string,
   ): Promise<void> {
     this.ensureOpen();
     const normalizedPluginId = pluginId.trim();

@@ -56,3 +56,11 @@ specs/
 packages/*/src/**/*.d.ts
 !packages/agent-core-v2/src/env.d.ts
 !apps/kimi-code/src/generated/vis-web-asset.d.ts
+
+# desktop (kimi-code-app) local signing & test outputs
+.env
+.ci-signing/
+mac_keys
+*.log
+test-results/
+playwright-report/

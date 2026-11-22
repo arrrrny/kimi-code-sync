@@ -1,34 +1,3 @@
-/**
- * ProviderManagerComponent — pure-view CRUD UI for the `/provider` command.
- *
- * Single-column layout showing one row per "platform / source":
- *   - each Open Platform login (1 source = 1 provider)
- *   - each Custom Registry connection grouping by `{url, apiKey}`
- *     (1 source = N providers from the same api.json fetch)
- *   - any other configured provider (1 source = 1 provider)
- *   - a synthetic final `[ Add New Platform ]` action row
- * Kimi Code OAuth (`DEFAULT_OAUTH_PROVIDER_NAME`) is intentionally hidden
- * — that account is managed through `/login` / `/logout`, not here.
- *
- * Keyboard:
- *   - ↑ / ↓             move highlight
- *   - ← / → · PgUp/PgDn page
- *   - Enter             on `[ Add New Platform ]` → `onAdd()`
- *   - D                 delete with inline `[y/N]` confirmation
- *                         on a source row → `onDeleteSource(providerIds)`
- *                         on `[ Add New Platform ]` → ignored
- *   - Esc               `onClose()` (outside confirm)
- *
- * The `[y/N]` confirmation is a transient substate handled in-component:
- * while armed, only `y` / `Y` / `n` / `N` / `Esc` are honored and the
- * prompt replaces the footer hint.
- *
- * The component is pure-view: every CRUD side effect is dispatched back
- * through callbacks. The host (`KimiTui`) is responsible for performing
- * the harness / config mutations and then pushing a fresh snapshot via
- * `setOptions`.
- */
-
 import type { ProviderConfig } from '@moonshot-ai/kimi-code-sdk';
 import {
   getOpenPlatformById,
@@ -68,14 +37,9 @@ interface KeyRow {
 }
 
 export interface ProviderManagerOptions {
-  /** All currently configured providers (`config.providers`). */
   readonly providers: Record<string, ProviderConfig>;
-  /** Provider id of the currently active model. */
   readonly activeProviderId?: string;
   readonly onAdd: () => void;
-  /** Delete all providers under a source (Open Platform / custom-registry
-   *  fetch / standalone). Passed the full provider-id list so the host
-   *  doesn't have to re-derive the source grouping. */
   readonly onDeleteSource: (providerIds: readonly string[]) => void;
   /** Add a new named API key to a provider. */
   readonly onAddKey: (providerId: string) => void;
@@ -90,15 +54,12 @@ export interface ProviderManagerOptions {
   readonly onClose: () => void;
 }
 
-/** Real (non-synthetic) source row. */
 interface SourceRow {
   readonly kind: 'source';
   readonly id: string;
   readonly label: string;
   readonly providerIds: readonly string[];
-  /** True when one of `providerIds` is the active provider. */
   readonly hasActive: boolean;
-  /** Optional base URL extracted from the provider config. */
   readonly baseUrl?: string;
   /** True when automatic key rotation is on for the provider. */
   readonly rotateKeys?: boolean;
@@ -106,7 +67,6 @@ interface SourceRow {
   readonly keyRows: readonly KeyRow[];
 }
 
-/** Synthetic `[ Add New Platform ]` action row pinned to the bottom. */
 interface AddRow {
   readonly kind: 'add';
   readonly id: '__add__';
@@ -119,10 +79,6 @@ const ADD_ROW_LABEL = '[ Add New Platform ]';
 const PAGE_SIZE = 8;
 const HEADER_HINT = '↑↓ navigate · D delete · A add key · S set active · R rotate keys · P proxy · Esc cancel';
 
-// Narrows a `ProviderConfig` blob to a `CustomRegistrySource` payload.
-// Mirrors `readCustomRegistrySource` in `kimi-tui.ts`. We can't import
-// that helper because it lives in the host and would create a cyclic
-// dependency on the component's container; duplicating ~15 lines is cheap.
 function readCustomRegistrySource(provider: unknown): CustomRegistrySource | undefined {
   if (typeof provider !== 'object' || provider === null) return undefined;
   const source = (provider as { readonly source?: unknown }).source;
@@ -138,11 +94,6 @@ function readCustomRegistrySource(provider: unknown): CustomRegistrySource | und
   return { kind: 'apiJson', url: candidate.url, apiKey: candidate.apiKey };
 }
 
-/**
- * Pretty-print a URL for the source-row label. Strips the scheme and
- * truncates obvious api.json suffixes so the row stays narrow. Falls
- * back to the raw URL if parsing fails.
- */
 function sourceUrlLabel(url: string): string {
   try {
     const parsed = new URL(url);
@@ -166,8 +117,6 @@ function sourceUrlLabel(url: string): string {
 function buildRows(opts: ProviderManagerOptions): readonly Row[] {
   const rows: Row[] = [];
 
-  // Map from `${url}${apiKey}` → index into `sources`, so we can
-  // append further providers into the same group.
   const customRegistryIndex = new Map<string, number>();
   const sourceRows: SourceRow[] = [];
 
@@ -314,12 +263,6 @@ export class ProviderManagerComponent extends Container implements Focusable {
     this.confirm = undefined;
   }
 
-  /**
-   * Replace the props the component renders against. Existing selection
-   * is preserved when possible (by id or first provider id) so deletions
-   * don't visually jump. Any in-flight `[y/N]` substate is cleared because
-   * the underlying target may have changed.
-   */
   setOptions(next: ProviderManagerOptions): void {
     const previousSelected = this.rows[this.selectedIndex];
     const previousSelectedId = previousSelected?.id;
@@ -346,7 +289,6 @@ export class ProviderManagerComponent extends Container implements Focusable {
     this.invalidate();
   }
 
-  /** Rows after applying the active fuzzy filter; the add-row is always kept. */
   private page(): PageView {
     return pageView(this.rows.length, this.selectedIndex, PAGE_SIZE);
   }
@@ -492,15 +434,11 @@ export class ProviderManagerComponent extends Container implements Focusable {
       }
       return;
     }
-    // Any other key while in the confirm substate is ignored.
   }
 
   override render(width: number): string[] {
     const lines: string[] = [];
 
-    // Header shape mirrors the model dialog (see model-selector.ts): a single
-    // top border, the title, the keymap hint, then a blank line. No inner
-    // border under the title.
     const border = currentTheme.fg('primary', '─'.repeat(width));
     lines.push(border);
     lines.push(currentTheme.boldFg('primary', ' Providers'));
@@ -558,9 +496,6 @@ function renderRow(
   const pointer = isSelected ? SELECT_POINTER : ' ';
   const pointerStyle = (text: string) =>
     isSelected ? currentTheme.fg('primary', text) : currentTheme.fg('textDim', text);
-  // The synthetic "Add New Platform" row is an action/CTA: keep it in the brand
-  // color so it never reads as disabled, and bold it when selected (matching
-  // the other rows' selected treatment).
   const labelStyle = (text: string) =>
     isSelected
       ? currentTheme.boldFg('primary', text)
@@ -574,7 +509,6 @@ function renderRow(
   const isActiveKey = row.kind === 'key' && row.isActive;
   const marker = (isActiveProvider || isActiveKey) ? ` ${CURRENT_MARK}` : '';
 
-  // Reserve 2 leading spaces + 2 for the pointer + room for the marker.
   const labelWidth = Math.max(0, width - 4 - visibleWidth(marker));
   const labelText = truncateToWidth(row.label, labelWidth, '…');
   let line = `  ${pointerStyle(`${pointer} `)}${labelStyle(labelText)}`;

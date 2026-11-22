@@ -348,7 +348,6 @@ describe('CustomEditor Tab key handling', () => {
 });
 
 describe('CustomEditor slash argument hint', () => {
-  // oxlint-disable-next-line no-control-regex -- ESC (\u001B) is required to match ANSI SGR escape sequences
   const stripAnsi = (s: string): string => s.replaceAll(/\u001B\[[0-9;]*m/g, '');
 
   it('renders the argument hint after a command with a trailing space', () => {
@@ -423,14 +422,11 @@ describe('CustomEditor slash argument hint', () => {
     const contentLine = editor.render(90)[1] ?? '';
     const tokenIdx = contentLine.indexOf('/add-dir');
     expect(tokenIdx).toBeGreaterThan(-1);
-    // Prompt mode wraps `/add-dir` in a primary-colour ANSI sequence; in bash
-    // mode the token is plain text, so the byte right before it is a space.
     expect(contentLine[tokenIdx - 1]).toBe(' ');
   });
 });
 
 describe('CustomEditor slash menu description wrapping', () => {
-  // oxlint-disable-next-line no-control-regex -- ESC (\u001B) is required to match ANSI SGR escape sequences
   const stripAnsi = (s: string): string => s.replaceAll(/\u001B\[[0-9;]*m/g, '');
 
   it('wraps long slash command descriptions to at most two lines with an ellipsis', async () => {
@@ -466,7 +462,6 @@ describe('CustomEditor slash menu description wrapping', () => {
     editor.setAutocompleteProvider(provider);
 
     editor.handleInput('@');
-    // @-mention requests are debounced (20ms), unlike slash menus.
     await new Promise((resolve) => setTimeout(resolve, 30));
     await flushAutocomplete();
 
@@ -570,7 +565,6 @@ describe('CustomEditor paste marker expansion', () => {
     simulateLargePaste(editor, 'anything');
     expect(editor.getText()).toContain(longText);
 
-    // Undo (Ctrl+-) restores both the marker text and its paste-registry entry.
     editor.handleInput('\u001B[45;5u');
     expect(editor.getText()).toContain('[paste #1');
 
@@ -597,7 +591,6 @@ describe('CustomEditor paste marker expansion', () => {
     const longText = 'line\n'.repeat(15).trimEnd();
     simulateLargePaste(editor, longText);
 
-    // Split: PASTE_START in chunk 1, paste-end split across chunk 2 and 3
     editor.handleInput(`${PASTE_START}data`);
     editor.handleInput('\u001B[20');
     editor.handleInput('1~');
@@ -605,7 +598,6 @@ describe('CustomEditor paste marker expansion', () => {
     expect(editor.getText()).toContain(longText);
     expect(editor.getText()).not.toContain('data');
 
-    // Verify editor is not stuck — next keystrokes should work normally
     editor.handleInput('x');
     expect(editor.getText()).toContain('x');
   });
@@ -618,8 +610,6 @@ describe('CustomEditor paste marker expansion', () => {
       throw new Error('clipboard backend broken');
     });
 
-    // Regression: a rejecting onPasteImage must not leak an unhandled
-    // rejection — the CLI's crash path turns those into a silent exit.
     const rejections: unknown[] = [];
     const onRejection = (reason: unknown): void => {
       rejections.push(reason);
@@ -741,7 +731,6 @@ describe('CustomEditor shortcut telemetry hooks', () => {
 });
 
 describe('CustomEditor bash mode border label', () => {
-  // oxlint-disable-next-line no-control-regex -- ESC (\u001B) is required to match ANSI SGR escape sequences
   const stripAnsi = (s: string): string => s.replaceAll(/\u001B\[[0-9;]*m/g, '');
 
   it('shows "! shell mode" on the top border in bash mode', () => {
@@ -860,7 +849,6 @@ describe('CustomEditor bash mode file completion', () => {
     const editor = makeEditor();
     const { provider, calls } = providerRecordingForce([{ value: 'help', label: 'help' }]);
     editor.setAutocompleteProvider(provider);
-    // inputMode defaults to 'prompt'
 
     editor.handleInput('/');
     await flushAutocomplete();
@@ -881,9 +869,6 @@ describe('CustomEditor bash mode file completion', () => {
     await new Promise((resolve) => setTimeout(resolve, 30));
     await flushAutocomplete();
 
-    // A force:false request would let pi-tui's own slash-command handling pop
-    // up subcommand completions for `/add-dir `. Bash mode must only ever
-    // request force:true path completion.
     expect(calls.length).toBeGreaterThan(0);
     expect(calls.every((call) => call.force === true)).toBe(true);
   });

@@ -110,12 +110,6 @@ export type ProviderCredentialReconciliation =
   | { readonly ok: true; readonly apiKey?: string; readonly apiKeyEnv?: string }
   | { readonly ok: false; readonly message: string };
 
-/**
- * Merges a submitted credential update into a provider's existing credential.
- * Submitted values are trimmed; a non-empty `apiKey` replaces any `apiKeyEnv`
- * (and vice versa), submitting both is a conflict, and an explicit empty/
- * whitespace value clears its own field while an omitted field is preserved.
- */
 export function reconcileProviderCredentialUpdate(
   existing: ProviderCredentialUpdate,
   submitted: ProviderCredentialUpdate,
