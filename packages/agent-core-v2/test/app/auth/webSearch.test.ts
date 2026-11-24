@@ -11,6 +11,7 @@ import {
 import { IBootstrapService } from '#/app/bootstrap/bootstrap';
 import { IConfigService } from '#/app/config/config';
 import { IProviderService, type ProviderConfig } from '#/llm-adapter/provider/provider';
+import { IModelService } from '#/llm-adapter/model/model';
 import { IWebSearchProviderService } from '#/app/auth/webSearch/webSearch';
 import { WebSearchProviderService } from '#/app/auth/webSearch/webSearchService';
 import { SUBSCRIPTION_SECTION } from '#/app/subscription/configSection';
@@ -67,6 +68,10 @@ describe('WebSearchProviderService', () => {
             domain === SUBSCRIPTION_SECTION
               ? subscriptionConfig
               : undefined) as IConfigService['get'],
+        });
+        reg.definePartialInstance(IModelService, {
+          get: (() => undefined) as IModelService['get'],
+          getDefaultModel: (() => undefined) as IModelService['getDefaultModel'],
         });
         reg.define(IWebSearchProviderService, WebSearchProviderService);
       },
