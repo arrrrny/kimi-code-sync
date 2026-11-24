@@ -1172,7 +1172,7 @@ export class SessionEventHandler {
   private handleCompactionBegin(event: CompactionStartedEvent): void {
     this.compactionFailed = false;
     this.host.lastCompactionTrigger = event.trigger;
-    this.host.streamingUI.finalizeLiveTextBuffers(this.host.state.livePane.mode);
+    this.host.streamingUI.finalizeLiveTextBuffers(this.host.state.livePane?.mode);
     this.host.setAppState({ isCompacting: true });
     this.host.streamingUI.beginCompaction(event.instruction, event.model_display ?? event.model);
   }
