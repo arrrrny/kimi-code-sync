@@ -28,7 +28,7 @@
     "lint": "node scripts/check-no-comments.mjs && oxlint --type-aware --deny-warnings && node packages/agent-core-v2/scripts/check-import-boundaries.mjs && node scripts/checks/guards.mjs && node scripts/checks/ratchet.mjs && node scripts/checks/test-doubles.mjs && node scripts/checks/quarantine.mjs && node scripts/checks/instructions.mjs",
     "lint:fix": "oxlint --type-aware --fix",
     "lint:pkg": "pnpm --filter @moonshot-ai/kimi-code exec publint && npm_config_cache=${TMPDIR:-/tmp}/kimi-code-npm-cache pnpm --filter @moonshot-ai/kimi-code exec attw --pack . --profile node16",
-    "sherif": "sherif -i @agentclientprotocol/sdk -i vite -i fuse.js -i jsdom -i tsdown -i typescript -i diff -i @vitejs/plugin-vue",
+    "sherif": "sherif -i @agentclientprotocol/sdk -i vite -i fuse.js -i jsdom -i tsdown -i typescript -i diff -i @vitejs/plugin-vue -i https-proxy-agent",
     "test": "vitest run",
     "qa:layers": "vitest run tests/scenarios/replay.test.ts packages/app-core/test/replay packages/app-core/test/reconnect tests/scenarios/cold-recovery.test.ts packages/kap-server/test/apiSurface.test.ts packages/acp-server/test/kap-parity.test.ts packages/app-client/test/conversation-events.test.ts",
     "qa:history-perf": "node scripts/measure-history.mjs",
