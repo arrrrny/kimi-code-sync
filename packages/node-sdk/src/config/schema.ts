@@ -67,6 +67,8 @@ export const ProviderConfigSchema = z.object({
   baseUrl: z.string().optional(),
   proxyUrl: z.string().optional(),
   freeModelsOnly: z.boolean().optional(),
+  searchUrl: z.string().optional(),
+  feedbackUrl: z.string().optional(),
   defaultModel: z.string().optional(),
   oauth: OAuthRefSchema.optional(),
   env: StringRecordSchema.optional(),

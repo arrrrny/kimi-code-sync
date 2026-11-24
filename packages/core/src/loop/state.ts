@@ -1,19 +1,14 @@
-/**
- * Loop state model: the read-only `LoopState` view, the live turn, step, and tool records the actor
- * mutates, and pure helpers over them (turn creation, step outcome drafting, tool settlement,
- * resumability checks).
- */
 import { annotateBundledSkillParts, type UserPromptOrigin } from '#/llm/origin';
 import type { AssistantMessage, Message, ToolCall, ToolMessage, UserMessage } from '#/llm/message';
 import type { LlmOutcome } from '#/llm/response';
-import type { ToolExecutionHandler, ToolResult } from '#/tool/runtime';
+import type { ToolExecutionHandler, ToolResult } from '#/tool/types';
 import { withAbort, type AbortScope } from '#/utils/abort';
 import type { LoopInput } from './contract/command';
 import type { LoopAck, LoopEmitted } from './contract/emitted';
 import type { Inbox, MessageSource, QueuedItem, TurnTrigger } from './contract/inbox';
 import { CRASHED, type AsyncToolOutcome, type Cause, type StepOutcome, type ToolCallOutcome, type TurnOutcome } from './contract/outcome';
 import type { LoopProfile } from './contract/profile';
-import type { HookFailure } from './hook/failure';
+import type { HookFailure } from '#/hook/loop/failure';
 import { loopProjection, type LoopRecord, type LoopRecordState } from './record';
 import { abortedToolOutcome, type ToolCompletionFactory } from './tool/outcome';
 
@@ -267,7 +262,9 @@ export function schedule(tx: StateTx): void {
   const head = normalHead ?? inbox.notify[0]!;
   const kind = normalHead === undefined ? 'notify' as const : 'normal' as const;
   const notify = normalHead === undefined ? inbox.notify.slice(1) : inbox.notify;
-  const promptOnly = notify.length > 0;
+  const promptOnly =
+    head.attributes?.promptOnly === true ||
+    notify.some((entry) => entry.attributes?.promptOnly !== true);
   patch(tx, {
     inbox: {
       normal: normalHead === undefined ? inbox.normal : inbox.normal.slice(1),

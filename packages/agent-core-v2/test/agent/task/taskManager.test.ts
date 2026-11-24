@@ -669,6 +669,16 @@ describe('AgentTaskService', () => {
     expect((await fixture.manager.wait(task.handler.taskId, 0))?.status).toBe('completed');
   });
 
+  it('wait with a zero timeout returns the immediate snapshot before task completion', async () => {
+    const fixture = createAgentTaskService();
+    const completion = new Promise<string>((resolve) => {
+      setTimeout(() => resolve('done'), 10);
+    });
+    const task = await controlled(fixture, { completion });
+    expect((await fixture.manager.wait(task.handler.taskId, 0))?.status).toBe('running');
+    expect((await fixture.manager.wait(task.handler.taskId))?.status).toBe('completed');
+  });
+
   it('clears task deadline timers when completion wins the race', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const fixture = createAgentTaskService();

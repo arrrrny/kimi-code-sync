@@ -12,8 +12,7 @@
 //   GYM_EXERCISES=skip node gym-runner.mjs run   (warmup only)
 //   GYM_TIMEOUT=20 node gym-runner.mjs run
 import fs from 'node:fs/promises';
-import { existsSync, readFileSync } from 'node:fs';
-import { globSync } from 'node:fs';
+import { existsSync, readFileSync, globSync } from 'node:fs';
 import path from 'node:path';
 
 const __dirname = import.meta.dirname;

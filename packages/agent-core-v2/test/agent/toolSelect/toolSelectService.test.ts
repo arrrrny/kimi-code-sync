@@ -21,13 +21,14 @@ import {
   IAgentLoopService,
   type AfterStepContext,
   type BeforeStepContext,
+  type LoopRequestContent,
   type LoopSnapshot,
   type PromptSubmitContext,
   type Turn,
 } from '#/agent/loop/loop';
 import { createToolSelectResolver } from '#/agent/loop/toolSelectPolicy';
 import { TurnStarted } from '#/agent/loop/turnEvents';
-import { StubEffectiveProfileReader } from '../loop/stubs';
+import { StubEffectiveProfileReader, stubToolExecutor, stubWire } from '../loop/stubs';
 import { IAgentStateService } from '#/agent/state/agentState';
 import { IAgentToolPolicyService } from '#/agent/toolPolicy/toolPolicy';
 import { IAgentScopeContext, makeAgentScopeContext } from '#/agent/scopeContext/scopeContext';
@@ -63,7 +64,6 @@ import { ISessionMcpHandle } from '#/session/mcp/sessionMcpHandle';
 import { registerLogServices } from '../../_base/log/stubs';
 import { recordingTelemetry } from '../../app/telemetry/stubs';
 import { registerStateServices } from '../../state/stubs';
-import { stubToolExecutor, stubWire } from '../loop/stubs';
 import { registerToolResultTruncationServices } from '../toolResultTruncation/stubs';
 
 function toolsOf(message: Message | undefined) {
@@ -254,6 +254,10 @@ class FakeLoopService extends StubEffectiveProfileReader implements IAgentLoopSe
     return [];
   }
 
+  previewRequestContent(): LoopRequestContent {
+    return { systemPrompt: '', tools: [], messages: this.history() };
+  }
+
   historyRevision(): number {
     return 0;
   }
@@ -287,6 +291,8 @@ class FakeLoopService extends StubEffectiveProfileReader implements IAgentLoopSe
   }
 
   detachTool(): void {}
+
+  suppressTaskNotifications(): void {}
 
   registerToolBatchStarting(): IDisposable {
     return toDisposable(() => {});
@@ -335,7 +341,9 @@ class FakeLoopService extends StubEffectiveProfileReader implements IAgentLoopSe
     return toDisposable(() => {});
   }
 
-  async settled(): Promise<void> {}
+  async settled(): Promise<undefined> {}
+
+  continueTurn(): void {}
 
   async retry(): Promise<never> {
     throw new Error('unused in this suite');
@@ -1057,8 +1065,10 @@ describe('AgentToolSelectService view shaping (gate open)', () => {
     expect(h.sut.requestTools(frozen, true, false)).toBe(frozen);
     expect(h.sut.requestTools(frozen, true, true)).toBe(frozen);
     const staticTools = h.sut.requestTools(shaped, false, true, messages);
-    expect(staticTools.map((tool) => tool.name)).toEqual(['Echo', MCP_ALPHA]);
+    expect(staticTools.map((tool) => tool.name)).toEqual(['Echo', MCP_ALPHA, MCP_BETA]);
     expect(staticTools.find((tool) => tool.name === MCP_ALPHA)?.deferred).toBeUndefined();
+    expect(staticTools.find((tool) => tool.name === MCP_BETA)?.deferred).toBeUndefined();
+    expect(staticTools.find((tool) => tool.name === SELECT_TOOLS_TOOL_NAME)).toBeUndefined();
     expect(h.sut.requestTools(shaped, true, true, messages)).toBe(shaped);
     expect(shaped.find((tool) => tool.name === SELECT_TOOLS_TOOL_NAME)).toBeDefined();
   });

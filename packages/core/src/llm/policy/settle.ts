@@ -1,9 +1,4 @@
-/**
- * Settles one attempt into an `LlmOutcome`: accumulates streamed parts into the assistant message,
- * normalizes tool call ids, collects usage, finish info, ids, and timing, and turns empty or
- * thinking-only responses into `empty_response` errors.
- */
-import { generate, type LlmAttemptEvent } from '#/llm/generate';
+import { generate, type LlmGenerateEvent, type LlmGenerateFailure } from '#/llm/generate';
 import {
   createAssistantMessage,
   createMessageAccumulator,
@@ -21,8 +16,8 @@ import {
   type FinishInfo,
   type LlmErrorMessage,
   type LlmOutcome,
-  type LlmSentEvent,
-  type LlmStreamEvent,
+  type LlmNoticeEvent,
+  type LlmDeltaEvent,
   type LlmTiming,
 } from '#/llm/response';
 import { emptyUsage, mergeUsagePatch, type TokenUsage } from '#/llm/usage';
@@ -55,9 +50,11 @@ function createEmptyResponseError(
   finish: FinishInfo,
   thinkOnly: boolean,
 ): LlmErrorMessage<'empty_response'> {
-  const detail = thinkOnly
-    ? 'The API returned a response containing only thinking content without any text or tool calls. This usually indicates the stream was interrupted or the output token budget was exhausted during reasoning.'
-    : 'The API returned an empty response (no content, no tool calls).';
+  const detail = finish.rawFinishReason === 'repeat'
+    ? 'The API stopped the response because it detected repeated output.'
+    : thinkOnly
+      ? 'The API returned a response containing only thinking content without any text or tool calls. This usually indicates the stream was interrupted or the output token budget was exhausted during reasoning.'
+      : 'The API returned an empty response (no content, no tool calls).';
   return {
     kind: 'empty_response',
     message: `${detail}${formatFinishReasonHint(finish)} Provider: ${model.provider}, model: ${model.name}`,
@@ -72,6 +69,9 @@ export function emptyResponseError(
   model: LlmModelSpec,
   finish: FinishInfo,
 ): LlmErrorMessage<'empty_response'> | null {
+  if (finish.rawFinishReason === 'repeat') {
+    return createEmptyResponseError(model, finish, false);
+  }
   const hasToolCalls = message.toolCalls.length > 0;
   if (message.content.length === 0 && !hasToolCalls) {
     return createEmptyResponseError(model, finish, false);
@@ -88,7 +88,7 @@ export function emptyResponseError(
 
 export interface LlmSettleControl {
   readonly signal: AbortSignal;
-  readonly onEvent?: (event: LlmStreamEvent | LlmSentEvent) => void;
+  readonly onEvent?: (event: LlmDeltaEvent | LlmNoticeEvent) => void;
 }
 
 export async function settleLlmRequest(
@@ -114,19 +114,33 @@ export async function settleLlmRequest(
   let timing: LlmTiming | undefined;
   let failure: { error: LlmErrorMessage; rawError?: unknown } | undefined;
 
-  const handle = (event: LlmAttemptEvent): void => {
+  const captureFailure = (result: LlmGenerateFailure): void => {
+    const statusError = llmStatusErrorMessage(result.error);
+    const error =
+      statusError === null
+        ? result.error
+        : withoutUndefinedStatusCode({
+            ...statusError,
+            requestId: statusError.requestId ?? requestId ?? null,
+            retryAfterMs: statusError.retryAfterMs ?? parseRetryAfterMs(headers),
+            headers:
+              statusError.headers === null
+                ? (headers ?? null)
+                : { ...headers, ...statusError.headers },
+          });
+    failure = { error, rawError: result.rawError };
+  };
+
+  const handle = (event: LlmGenerateEvent): void => {
     switch (event.type) {
       case 'llm.notice':
         onEvent?.(event);
         return;
-      case 'attempt.sending':
-        onEvent?.({ type: 'llm.sent' });
-        return;
-      case 'llm.streaming.request_id':
+      case 'llm.delta.request_id':
         requestId = event.requestId;
         onEvent?.(event);
         return;
-      case 'llm.timing':
+      case 'llm.delta.timing':
         timing = {
           firstTokenLatencyMs: event.firstTokenLatencyMs,
           streamDurationMs: event.streamDurationMs,
@@ -138,56 +152,32 @@ export async function settleLlmRequest(
         };
         onEvent?.(event);
         return;
-      case 'attempt.tool_call_end': {
-        const toolCall = inner.toolCallEnd(event.index);
-        if (toolCall !== undefined) {
-          onEvent?.({ type: 'llm.streaming.tool_call_end', index: event.index, toolCall });
-        }
-        return;
-      }
-      case 'llm.streaming.headers':
+      case 'llm.delta.response_header':
         headers = event.headers;
         requestId = request.protocol.base.requestId?.(event.headers);
         onEvent?.(event);
         return;
-      case 'llm.streaming.part': {
+      case 'llm.delta.part': {
         const normalized = toolCallIds.normalizePart(event.part);
         const accumulated = inner.push(normalized);
         const part = normalized.type === 'think' && accumulated.part.type === 'think'
           ? { ...normalized, hidden: accumulated.part.hidden }
           : normalized;
-        onEvent?.({ type: 'llm.streaming.part', part, block: accumulated.block });
+        onEvent?.({ type: 'llm.delta.part', part, block: accumulated.block });
         return;
       }
-      case 'llm.streaming.usage':
+      case 'llm.delta.usage':
         usage = mergeUsagePatch(usage, event.usage);
         onEvent?.(event);
         return;
-      case 'llm.streaming.finish':
+      case 'llm.delta.finish':
         finish = event.finish;
         onEvent?.(event);
         return;
-      case 'llm.streaming.message_id':
+      case 'llm.delta.message_id':
         messageId = event.messageId;
         onEvent?.(event);
         return;
-      case 'attempt.failed': {
-        const statusError = llmStatusErrorMessage(event.error);
-        const error =
-          statusError === null
-            ? event.error
-            : withoutUndefinedStatusCode({
-                ...statusError,
-                requestId: statusError.requestId ?? requestId ?? null,
-                retryAfterMs: statusError.retryAfterMs ?? parseRetryAfterMs(headers),
-                headers:
-                  statusError.headers === null
-                    ? (headers ?? null)
-                    : { ...headers, ...statusError.headers },
-              });
-        failure = { error, rawError: event.rawError };
-        return;
-      }
     }
   };
 
@@ -242,7 +232,17 @@ export async function settleLlmRequest(
   };
 
   try {
-    await generate(request, { signal, onEvent: handle });
+    const result = await generate(request, {
+      signal,
+      onEvent: handle,
+      onToolCallEnd: (index) => {
+        const toolCall = inner.toolCallEnd(index);
+        if (toolCall !== undefined) {
+          onEvent?.({ type: 'llm.delta.tool_call_end', index, toolCall });
+        }
+      },
+    });
+    if (result !== undefined) captureFailure(result);
   } catch (error) {
     if (isAbortError(error) || signal.aborted) {
       return aborted();
@@ -264,6 +264,15 @@ export async function settleLlmRequest(
   const empty = emptyResponseError(message, request.model.spec, finish ?? NO_FINISH);
   if (empty !== null) {
     return failed({ error: empty }, message);
+  }
+  if (request.protocol.stream !== false && finish === undefined) {
+    return failed({
+      error: {
+        kind: 'provider',
+        message: `The API stream ended without a finish event. Provider: ${request.model.spec.provider}, model: ${request.model.spec.name}`,
+        retryable: true,
+      },
+    }, message);
   }
   return { type: 'done', message: assistantMessage(message, 'llm'), ...extras() };
 }

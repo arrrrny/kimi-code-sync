@@ -230,7 +230,7 @@ describe('TowerSpawnTool', () => {
       id: 'call_spawn',
       name: 'TowerSpawn',
       arguments: JSON.stringify(args),
-    }, { turnId: 0 });
+    }, { turnId: 0, origin: 'loop' });
     const response: ToolExecutionResponse = await lastHandler;
     return {
       output: response.content.every((part) => part.type === 'text')

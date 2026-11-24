@@ -153,6 +153,14 @@ export class ConversationFeed implements IDisposable {
     return this.state.turns;
   }
 
+  hasTrailingRejectedPrompt(): boolean {
+    return this.state.trailingRejectedPrompt;
+  }
+
+  latestPromptId(): string | undefined {
+    return this.state.latestPromptId;
+  }
+
   undo(turnId: string): Promise<readonly string[]> {
     const run = this.undoQueue.then(() => this.undoNow(turnId));
     this.undoQueue = run.catch(() => undefined);
@@ -179,6 +187,7 @@ export class ConversationFeed implements IDisposable {
   }
 
   async page(before: number | undefined, limit: number): Promise<ConversationTurnsPage> {
+    this.flushPending();
     const turns = (this.beforeReplay ?? this.state).turns;
     const end = before === undefined ? turns.length : turns.findIndex((turn) => turn.ordinal >= before);
     const stop = end === -1 ? turns.length : end;
@@ -198,8 +207,13 @@ export class ConversationFeed implements IDisposable {
     return { turns: page, has_more: start > 0 || page.length < selected.length };
   }
 
+  flushPending(): void {
+    if (this.flushQueued) this.flush();
+  }
+
   dispose(): void {
     if (this.disposed) return;
+    this.flushPending();
     this.disposed = true;
     for (const disposable of this.disposables.splice(0)) disposable.dispose();
     this.listeners.clear();
@@ -303,10 +317,6 @@ export class ConversationFeed implements IDisposable {
     queueMicrotask(() => {
       this.flushPending();
     });
-  }
-
-  private flushPending(): void {
-    if (this.flushQueued) this.flush();
   }
 
   private flush(): void {

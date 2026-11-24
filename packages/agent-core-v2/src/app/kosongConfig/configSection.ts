@@ -50,6 +50,8 @@ export const ProviderConfigSchema = z.object({
 
   baseUrl: z.string().optional(),
   proxyUrl: z.string().optional(),
+  searchUrl: z.string().optional(),
+  feedbackUrl: z.string().optional(),
   customHeaders: StringRecordSchema.optional(),
   defaultModel: z.string().optional(),
 
@@ -191,7 +193,13 @@ function providerEntryToToml(
   return out;
 }
 
-const PROVIDER_CREDENTIAL_FIELDS = ['apiKey', 'oauth', 'apiKeyEnv'] as const;
+const PROVIDER_CREDENTIAL_FIELDS = [
+  'apiKey',
+  'oauth',
+  'apiKeyEnv',
+  'searchUrl',
+  'feedbackUrl',
+] as const;
 
 registerConfigSection(PROVIDERS_SECTION, ProvidersSectionSchema, {
   defaultValue: {},

@@ -129,11 +129,6 @@ export function resolveSubagentModelPool(config: IConfigService): SubagentModelP
   return undefined;
 }
 
-export function exposesSubagentModelChoice(config: IConfigService): boolean {
-  const pool = resolveSubagentModelPool(config);
-  return pool !== undefined && Object.keys(pool.models).length > 1;
-}
-
 export const SECONDARY_MODEL_DEFAULT_MODEL_REQUIRED_MESSAGE =
   '[secondary_model].default_model is required when [secondary_model.models] is configured';
 
@@ -344,6 +339,11 @@ export function resolveSubagentThinking(
   if (explicit !== undefined) return explicit;
   if (config.get<ThinkingConfig>(THINKING_SECTION)?.enabled === false) return undefined;
   return declaredDefaultEffortForModel(model?.spec);
+}
+
+export function exposesSubagentModelChoice(config: IConfigService): boolean {
+  const pool = resolveSubagentModelPool(config);
+  return pool !== undefined && Object.keys(pool.models).length > 1;
 }
 
 export function buildSubagentModelDescriptions(config: IConfigService): string | undefined {

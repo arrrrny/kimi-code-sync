@@ -11,7 +11,7 @@ import {
 } from '@moonshot-ai/core/loop/index';
 import { createMockProviderRequester, type MockProviderResponse } from '../../../harness/scripted-generate';
 import { createTestLoop as createLoop } from './factory';
-import type { ToolExecuteInput, ToolResult } from '@moonshot-ai/core/tool/executor';
+import { textToolContent, type ToolReturn } from '#/tool/executor';
 import { executorFrom, successfulExecutor } from './executor';
 
 function requester(responses: MockProviderResponse[]): LoopLlmRequester {
@@ -66,7 +66,7 @@ describe('loop record', () => {
     expect((await loop.runTurn(prompt('hello'))).type).toBe('done');
     expect((await loop.runTurn(prompt('again'))).type).toBe('failed');
     const types = records.map((item) => item.type);
-    expect(types).not.toContain('llm.streaming.part');
+    expect(types).not.toContain('llm.delta.part');
     expect(types).not.toContain('prompt.submitted');
     const ended = records.findLast((item) => item.type === 'turn.ended');
     expect(ended).toMatchObject({ outcome: { type: 'failed', error: { message: 'boom' } } });
@@ -85,16 +85,17 @@ describe('loop record', () => {
     });
     expect(restored.state.messages).toEqual(loop.state.messages);
 
-    let settleBackground: ((result: ToolResult) => void) | undefined;
-    let settleSlow: ((result: ToolResult) => void) | undefined;
-    const executor = executorFrom(['bg', 'slow'], ({ toolCall, detach }: ToolExecuteInput) => {
-        if (toolCall.name === 'bg') {
-          detach?.('bg ack');
-          return new Promise<ToolResult>((resolve) => {
+    let settleBackground: ((result: ToolReturn) => void) | undefined;
+    let settleSlow: ((result: ToolReturn) => void) | undefined;
+    const executor = executorFrom(['bg', 'slow'], (context) => {
+        if (context.call.name === 'bg') {
+          context.onDetach(() => ({ content: textToolContent('bg ack') }));
+          context.detach('bg ack');
+          return new Promise<ToolReturn>((resolve) => {
             settleBackground = resolve;
           });
         }
-        return new Promise<ToolResult>((resolve) => {
+        return new Promise<ToolReturn>((resolve) => {
           settleSlow = resolve;
         });
       },
@@ -114,10 +115,16 @@ describe('loop record', () => {
     expect(crashed.unfinished).toEqual({ turnId: 2, trigger: 'normal', step: 1, stepUnfinished: true, appended: true });
     expect(crashed.nextTurnId).toBe(3);
 
+    const lifecycleEvents: LoopEmitted['type'][] = [];
+    working.subscribe((event) => {
+      if (event.type === 'loop.drained' || event.type === 'loop.idle') lifecycleEvents.push(event.type);
+    });
+    let closingIdle: Promise<void> | undefined;
     let closes: { first: Promise<void>; second: Promise<void> } | undefined;
     const stop = working.subscribe((event) => {
       if (event.type !== 'prompt.reminded') return;
       stop();
+      closingIdle = working.waitForIdle();
       closes = { first: working.close(), second: working.close() };
     });
     working.remind(prompt('reentrant close'));
@@ -126,6 +133,8 @@ describe('loop record', () => {
     settleSlow?.({ content: [{ type: 'text', text: 'slow stopped' }] });
     settleBackground?.({ content: [{ type: 'text', text: 'background stopped' }] });
     await first;
+    await closingIdle;
+    expect(lifecycleEvents).toEqual([]);
     const closed = fold([...records, ...live]);
     expect(closed.unfinished).toBeUndefined();
     expect(closed.turns.at(-1)).toMatchObject({ turnId: 2, outcome: { type: 'aborted', reason: { reason: 'closed' } } });

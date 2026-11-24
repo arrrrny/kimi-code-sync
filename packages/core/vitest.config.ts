@@ -5,5 +5,7 @@ export default defineConfig({
     name: 'core',
     include: ['test/**/*.test.ts'],
     testTimeout: 30_000,
+    setupFiles: ['./test/setup.ts'],
+    retry: 1,
   },
 });

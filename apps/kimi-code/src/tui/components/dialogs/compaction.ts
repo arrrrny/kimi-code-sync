@@ -39,14 +39,12 @@ export class CompactionComponent extends Container {
   private summaryText: Text | undefined;
   private expanded = false;
 
-  constructor(ui?: TUI, instruction?: string | undefined, model?: string) {
+  constructor(ui?: TUI, instruction?: string, model?: string) {
     super();
     this.ui = ui;
     this.instruction = instruction;
     this.model = model;
 
-    // Top margin so the block isn't glued to the previous transcript
-    // entry (status line, tool result, etc.).
     this.addChild(new Spacer(1));
     this.headerText = new Text(this.buildHeader(), 0, 0);
     this.addChild(this.headerText);
@@ -72,10 +70,7 @@ export class CompactionComponent extends Container {
   }
 
   override invalidate(): void {
-    // Repaint the header with the active palette (it caches ANSI codes).
     this.headerText.setText(this.buildHeader());
-    // Rebuild instruction and summary text with fresh theme colours, preserving
-    // header → instruction → summary child order.
     const expanded = this.expanded;
     this.removeInstructionChild();
     if (expanded) {

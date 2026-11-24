@@ -1,24 +1,20 @@
-/**
- * `Loop` interface and `createLoop` entry: the options a host supplies (tool executor, requester,
- * hooks, restored input) and the operations it can call on a running loop.
- */
 import type { Message, SystemMessage, ToolCall, UserMessage } from '#/llm/message';
 import type { PolicyRegistry } from '#/llm/policy/registry';
-import type { ToolExecutionHandler } from '#/tool/runtime';
+import type { ToolExecutionHandler } from '#/tool/types';
 import type { WaitOpts } from '#/utils/wait';
 import { createActorLoop } from './loop-actor';
 import type { LoopInput } from './contract/command';
 import type { LoopAck, LoopEmitted } from './contract/emitted';
-import type { HookRegistration } from './contract/hook';
+import type { LoopHooks } from './contract/hook';
 import type { RemindMessage } from './contract/inbox';
 import type { TurnOutcome } from './contract/outcome';
-import type { HookRegistry } from './hook/registry';
 import type { LoopLlmRequester, LoopRequestRuntime } from './request';
 import type { LoopState } from './state';
 import type { WaitForTasks } from './tool/tasks';
 import type { ToolCompletionFactory } from './tool/outcome';
 
 export interface LoopToolContext {
+  readonly origin: 'loop';
   readonly turnId: number;
   readonly step?: number;
   readonly requestId?: string;
@@ -35,11 +31,12 @@ export interface LoopToolExecutor {
 export interface CreateLoopOptions {
   readonly requester?: LoopLlmRequester;
   readonly executor: LoopToolExecutor;
-  readonly toolContext?: (turnId: number) => Omit<LoopToolContext, 'turnId'>;
-  readonly hooks?: readonly HookRegistration[];
+  readonly toolContext?: (turnId: number) => Omit<LoopToolContext, 'origin' | 'turnId'>;
+  readonly hook?: Partial<LoopHooks>;
   readonly input?: LoopInput;
   readonly abortGraceMs?: number;
   readonly completionMessage?: ToolCompletionFactory;
+  readonly shouldQueueTaskNotification?: (taskId: string) => boolean;
   readonly onListenerError?: (error: unknown, event: LoopEmitted) => void;
 }
 
@@ -48,10 +45,10 @@ export interface Loop {
   readonly historyRevision: number;
   readonly executor: LoopToolExecutor;
   readonly waitForTasks: WaitForTasks;
-  readonly hooks: HookRegistry;
   readonly policy: PolicyRegistry;
   submit(message: UserMessage): LoopAck<'prompt.submitted'> | undefined;
   notify(message: UserMessage): LoopAck<'prompt.notified'> | undefined;
+  recordNotification(message: UserMessage): LoopAck<'prompt.notified'> | undefined;
   remind(...messages: readonly RemindMessage[]): LoopAck<'prompt.reminded'> | undefined;
   flushReminders(): void;
   steer(promptIds: readonly string[]): LoopAck<'prompt.steered'> | undefined;

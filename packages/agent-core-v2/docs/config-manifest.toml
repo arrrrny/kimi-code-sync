@@ -8,7 +8,7 @@
 # commented "# field: type" lines describe the remaining schema fields.
 # Values resolve as: default -> config.toml -> env overlay -> memory.
 
-# Index (36 sections · 4 overlay(s))
+# Index (37 sections · 4 overlay(s))
 #   background               src/agent/task/configSection.ts
 #   builtinProductSkills     src/features/skill/catalog/configSection.ts
 #   compactionModel          src/app/kosongConfig/configSection.ts
@@ -22,6 +22,7 @@
 #   extraSkillDirs           src/features/skill/catalog/configSection.ts
 #   fallbackModel            src/app/kosongConfig/configSection.ts
 #   hooks                    src/features/externalHooks/configSection.ts
+#   hosts                    src/app/hostsConfig/configSection.ts
 #   identity                 src/app/agentIdentity/configSection.ts
 #   image                    src/agent/media/configSection.ts
 #   loopControl              src/agent/loop/configSection.ts
@@ -241,6 +242,23 @@ extra_skill_dirs = []
   # timeout: integer
 
 # ##########################################################################
+# hosts
+#   owner: src/app/hostsConfig/configSection.ts
+#   scope: core
+#   hooks: custom fromToml · custom toToml
+# ##########################################################################
+
+[hosts]
+
+# one [hosts."<name>"] table per entry:
+# [hosts."<name>"]
+  # host: string
+  # name: string
+  # enabled: boolean
+  # identity_file: string
+  # remote_bin: string
+
+# ##########################################################################
 # identity
 #   owner: src/app/agentIdentity/configSection.ts
 #   scope: core
@@ -412,6 +430,8 @@ merge_all_available_skills = true
   # model_source: "static" | "discover" | "oauth-catalog"
   # base_url: string
   # proxy_url: string
+  # search_url: string
+  # feedback_url: string
   # custom_headers: record<string, string>
   # default_model: string
   # type: string
