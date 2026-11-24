@@ -1393,7 +1393,6 @@
     "packages/kap-server/test/prompts.test.ts": 1,
     "packages/kap-server/test/search/searchRoute.test.ts": 1,
     "packages/kap-server/test/search/searchService.test.ts": 19,
-    "packages/kap-server/test/sessionEventBroadcaster.test.ts": 1,
     "packages/kap-server/test/sessions.test.ts": 1,
     "packages/klient/test/contract.test.ts": 2,
     "packages/migration-legacy/test/sessions/fixtures.snapshot.test.ts": 1,
