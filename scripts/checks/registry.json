@@ -1,7 +1,7 @@
 {
   "invocations": [
     {
-      "run": "node scripts/check-comments.mjs",
+      "run": "node scripts/check-no-comments.mjs",
       "in": "package.json#scripts.lint",
       "why": "AGENTS.md forbids comments in JS/TS code, and this check is what enforces it."
     },

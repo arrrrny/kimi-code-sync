@@ -68,10 +68,9 @@ import {
   type KimiSlashCommand,
   type SkillListSession,
 } from './commands';
-import { rotateToNextFavoriteModel } from './commands/config';
+import { rotateToNextFavoriteModel, applyTranscriptPresentation, runQueuedModelSwitch } from './commands/config';
 import * as slashCommands from './commands/dispatch';
 import { resolveUserInput, skillVariantPathsForInput } from './commands/resolve';
-import { applyTranscriptPresentation, runQueuedModelSwitch } from './commands/config';
 import { promptSshPassword } from './commands/prompts';
 import { CacheHintController } from './controllers/cache-hint-controller';
 import { BannerComponent } from './components/chrome/banner';

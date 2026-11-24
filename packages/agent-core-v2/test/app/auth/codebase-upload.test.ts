@@ -63,7 +63,6 @@ describe('uploadArchive', () => {
       expect(init.body).toBeInstanceOf(ReadableStream);
       expect((init as { duplex?: string }).duplex).toBe('half');
       expect(new Headers(init.headers).get('content-length')).toBe('5');
-      // Drain the stream so the underlying file handle is released.
       expect(await new Response(init.body as ReadableStream).text()).toBe('hello');
       expect(api.completeUpload).toHaveBeenCalledWith({
         uploadId: 28,
@@ -331,8 +330,6 @@ describe('scanCodebase filtering', () => {
       await writeFile(join(root, 'deleted.ts'), 'export const gone = 1;\n');
       await execFileAsync('git', ['init'], { cwd: root });
       await execFileAsync('git', ['add', '-A'], { cwd: root });
-      // Remove only from the working tree; the index still lists it, so
-      // `git ls-files` reports a path that no longer exists on disk.
       await rm(join(root, 'deleted.ts'));
 
       const scan = await scanCodebase(root);
@@ -365,7 +362,6 @@ describe('scanCodebase filtering', () => {
       await writeFile(join(root, 'b.txt'), 'b'.repeat(100));
       await writeFile(join(root, 'c.txt'), 'c'.repeat(100));
 
-      // 250 bytes fits any two files (200) but not the third (300).
       const scan = await scanCodebase(root, { limits: { maxArchiveSize: 250 } });
       expect(scan.files).toHaveLength(2);
       expect(scan.exceedsLimit).toEqual({ reason: 'total-size', limit: 250 });

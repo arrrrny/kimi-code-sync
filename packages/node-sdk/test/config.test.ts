@@ -286,5 +286,4 @@ feedback_url = "https://registry.example.test/v1/feedback"
     });
     expect(updatedProviders['acme']).not.toHaveProperty('feedback_url');
   });
-  });
 });

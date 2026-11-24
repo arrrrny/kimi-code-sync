@@ -17,7 +17,6 @@ const BRACKET_PASTE_END = '\u001B[201~';
 const SHIFT_ENTER_LEGACY = '\u001B\r';
 const SHIFT_ENTER_CSI = '\u001B[13;2~';
 const SEGMENTER = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
-// oxlint-disable-next-line no-control-regex -- ESC (\x1b) is required to strip pasted terminal control sequences
 const ANSI_CSI = /\u001B\[[0-?]*[ -/]*[@-~]/g;
 
 export class MultilineTextInput {

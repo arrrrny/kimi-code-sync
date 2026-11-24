@@ -26,11 +26,6 @@ import { MASTER_ENV } from '#/app/flag/flagService';
 import { estimateTokensForMessages } from '#/llm-adapter/contract/tokens';
 import { APIContextOverflowError } from '#/llm-adapter/contract/errors';
 import { recordingTelemetry, type TelemetryRecord } from '../../app/telemetry/stubs';
-import type {
-  TestAgentContext,
-  TestAgentOptions,
-  TestAgentServiceOverride,
-} from '../../harness';
 import {
   agentService,
   appService,
@@ -45,6 +40,9 @@ import {
   sessionServices,
   testAgent as createTestAgent,
   type MockProviderResponse,
+  type TestAgentContext,
+  type TestAgentOptions,
+  type TestAgentServiceOverride,
 } from '../../harness';
 import { IFileSystemStorageService } from '#/persistence/interface/storage';
 import { InMemoryStorageService } from '#/persistence/backends/memory/inMemoryStorageService';

@@ -671,8 +671,6 @@ describe('AgentTaskService', () => {
 
   it('wait with a zero timeout returns the immediate snapshot before task completion', async () => {
     const fixture = createAgentTaskService();
-    // Delay completion beyond the microtask queue so the zero-timeout snapshot
-    // cannot race Promise.resolve() scheduling in different test runners.
     const completion = new Promise<string>((resolve) => {
       setTimeout(() => resolve('done'), 10);
     });

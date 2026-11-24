@@ -12,7 +12,6 @@ import { IFileSystemStorageService } from '#/persistence/interface/storage';
 import { IAtomicTomlDocumentStore } from '#/persistence/interface/atomicDocumentStore';
 import { TomlAtomicDocumentStore } from '#/persistence/backends/node-fs/atomicDocumentStore';
 import { resolveAgentTaskConfig } from '#/agent/task/configSection';
-import '#/agent/task/configSection';
 import { describe, expect, it } from 'vitest';
 
 describe('bash_task_timeout_s smoke (PR #44)', () => {

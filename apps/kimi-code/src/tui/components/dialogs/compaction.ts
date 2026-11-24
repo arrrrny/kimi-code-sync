@@ -39,7 +39,7 @@ export class CompactionComponent extends Container {
   private summaryText: Text | undefined;
   private expanded = false;
 
-  constructor(ui?: TUI, instruction?: string | undefined, model?: string) {
+  constructor(ui?: TUI, instruction?: string, model?: string) {
     super();
     this.ui = ui;
     this.instruction = instruction;
