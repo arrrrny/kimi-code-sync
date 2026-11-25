@@ -21,8 +21,9 @@ verified through the unit suite that exercises the exact code paths (the recover
   → **no errors in the three changed files.** Remaining errors are pre-existing
   missing-module issues in untouched files (`@moonshot-ai/testkit`, `uuid`, `pathe` not
   installed in this checkout).
-- `test/agent/loop/loop.test.ts` could not load because `packages/core` deps `uuid`/`pathe`
-  are not installed (pre-existing environment gap, unrelated to this change).
+- `test/agent/loop/loop.test.ts` → **75 passed** (after `pnpm install` populated the
+  previously-missing `uuid`/`pathe` deps), confirming the `resolveSwap` change does not
+  regress the loop.
 
 ## What the new tests pin down
 

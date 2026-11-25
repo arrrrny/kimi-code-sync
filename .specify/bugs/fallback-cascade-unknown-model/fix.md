@@ -56,7 +56,9 @@ return { model: rebuilt.model, protocol: rebuilt.protocol, endpoint: rebuilt.end
 
 - `pnpm --filter @moonshot-ai/agent-core-v2 exec vitest run test/session/fallback/recovery.test.ts` → 13 passed.
 - `pnpm --filter @moonshot-ai/agent-core-v2 typecheck` → no errors in the three changed files (remaining errors are pre-existing missing-module issues in untouched files: `@moonshot-ai/testkit`, `uuid`, `pathe` not installed in this checkout).
-- `test/agent/loop/loop.test.ts` could not load in this checkout because `packages/core` deps `uuid`/`pathe` are not installed (pre-existing environment gap, unrelated to this change); the 28 tests in the loadable files passed.
+- `test/agent/loop/loop.test.ts` → 75 passed (after `pnpm install` populated the
+  previously-missing `uuid`/`pathe` deps), confirming the `resolveSwap` change is
+  regression-free.
 
 ## Deviations from Assessment
 
