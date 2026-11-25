@@ -763,7 +763,7 @@ export class AgentLoopService extends Disposable implements IAgentLoopService {
             const rebuilt = this.protocolRegistry
               .request(model, { model: modelPart }, this.requesterExecution)
               .request({ content: current.content, profile: current.profile, policy: current.policy });
-            return { model: rebuilt.model, protocol: rebuilt.protocol };
+            return { model: rebuilt.model, protocol: rebuilt.protocol, endpoint: rebuilt.endpoint };
           },
         }),
         createStructureRecovery(this.projector),

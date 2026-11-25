@@ -210,6 +210,46 @@ describe('createFallbackModelRecovery', () => {
     expect(entry).toBeUndefined();
   });
 
+  it('U9: the rewrite swaps the endpoint to the fallback provider', () => {
+    const d = deps({
+      fallback: { model: 'fb1' },
+      resolve: (_request, alias) => ({
+        model: { spec: { provider: 'test', name: alias } },
+        endpoint: { baseUrl: 'https://fallback.example' },
+      }),
+    });
+    const recovery = createFallbackModelRecovery(d);
+    const request: LlmRequest = {
+      ...makeRequest('primary'),
+      endpoint: { baseUrl: 'https://primary.example' },
+    };
+    const entry = recovery.propose(ctx({ error: errorOf('provider'), request }));
+    const rewritten = entry?.rewrite ? entry.rewrite(request) : request;
+    expect(rewritten.endpoint?.baseUrl).toBe('https://fallback.example');
+  });
+
+  it('U10: a model-not-found 404 is eligible and yields to the secondary tier', () => {
+    const d = deps({ fallback: { model: 'fb1', secondaryModel: 'fb2' } });
+    const recovery = createFallbackModelRecovery(d);
+    const first = recovery.propose(
+      ctx({ error: errorOf('status', 404), request: makeRequest('primary') }),
+    );
+    expect(first?.action).toBe('fb1');
+    const applied: LlmRecoveryRecord[] = [{ strategy: 'fallback_model', action: 'fb1' }];
+    const second = recovery.propose(
+      ctx({
+        error: {
+          kind: 'status',
+          message: 'Unknown Model, please check the model code',
+          statusCode: 400,
+        } as LlmErrorMessage,
+        request: makeRequest('fb1'),
+        appliedRecoveries: applied,
+      }),
+    );
+    expect(second?.action).toBe('fb2');
+  });
+
   it('ignores non-retryable client errors', () => {
     const d = deps({ fallback: { model: 'fb1' } });
     const recovery = createFallbackModelRecovery(d);

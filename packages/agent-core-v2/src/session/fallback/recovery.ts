@@ -18,6 +18,7 @@ export const FALLBACK_MODEL_STRATEGY = 'fallback_model';
 export interface FallbackModelSwap {
   readonly model: LlmRequestModel;
   readonly protocol?: LlmRequest['protocol'];
+  readonly endpoint?: LlmRequest['endpoint'];
 }
 
 export interface FallbackModelRecoveryDeps {
@@ -39,6 +40,14 @@ const FALLBACK_ELIGIBLE_KINDS: ReadonlySet<LlmErrorMessage['kind']> = new Set([
 
 function isRotationEligible(error: LlmErrorMessage): boolean {
   return error.kind === 'rate_limit' || isAuthRejection(error);
+}
+
+function isModelNotFound(error: LlmErrorMessage): boolean {
+  if (error.kind !== 'status') return false;
+  if (error.statusCode === 404) return true;
+  return /unknown model|model\s+(?:not found|does not exist)|please check the model code/i.test(
+    error.message,
+  );
 }
 
 function rotationAvailable(ctx: LlmRecoveryContext): boolean {
@@ -65,7 +74,7 @@ export function createFallbackModelRecovery(deps: FallbackModelRecoveryDeps): Ll
 
       if (isRotationEligible(ctx.error)) {
         if (rotationAvailable(ctx)) return undefined;
-      } else if (!FALLBACK_ELIGIBLE_KINDS.has(ctx.error.kind)) {
+      } else if (!FALLBACK_ELIGIBLE_KINDS.has(ctx.error.kind) && !isModelNotFound(ctx.error)) {
         return undefined;
       }
 
@@ -88,6 +97,7 @@ export function createFallbackModelRecovery(deps: FallbackModelRecoveryDeps): Ll
             ...request,
             model: swap.model,
             protocol: swap.protocol ?? request.protocol,
+            endpoint: swap.endpoint ?? request.endpoint,
           }),
         };
         return entry;
