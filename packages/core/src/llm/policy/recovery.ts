@@ -8,6 +8,25 @@ export interface LlmRecoveryRecord {
   readonly failed?: boolean;
 }
 
+export const API_KEY_ROTATION_STRATEGY = 'api_key_rotation';
+
+export function isAuthRejection(error: LlmErrorMessage): boolean {
+  if (error.kind === 'auth') return true;
+  return error.kind === 'status' && (error.statusCode === 401 || error.statusCode === 403);
+}
+
+export function rotationCount(appliedRecoveries: readonly LlmRecoveryRecord[]): number {
+  return appliedRecoveries.filter(
+    (record) => record.strategy === API_KEY_ROTATION_STRATEGY && record.failed !== true,
+  ).length;
+}
+
+export function rotationFailed(appliedRecoveries: readonly LlmRecoveryRecord[]): boolean {
+  return appliedRecoveries.some(
+    (record) => record.strategy === API_KEY_ROTATION_STRATEGY && record.failed === true,
+  );
+}
+
 export interface LlmRecoveryContext {
   readonly error: LlmErrorMessage;
   readonly request: LlmRequest;

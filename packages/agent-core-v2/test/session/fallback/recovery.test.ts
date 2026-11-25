@@ -154,6 +154,22 @@ describe('createFallbackModelRecovery', () => {
     expect(entry?.action).toBe('fb1');
   });
 
+  it('U5b: claims the turn after a failed key rotation, including auth rejections', () => {
+    for (const error of [errorOf('rate_limit', 429), errorOf('auth', 401)]) {
+      const d = deps({ fallback: { model: 'fb1' } });
+      const recovery = createFallbackModelRecovery(d);
+      const entry = recovery.propose(
+        ctx({
+          error,
+          request: makeRequest('primary'),
+          appliedRecoveries: [rotationRecord('k1', true)],
+          endpoint: endpointWithRotation(rotationController(3)),
+        }),
+      );
+      expect(entry?.action).toBe('fb1');
+    }
+  });
+
   it('U6: skips a tier equal to the current model', () => {
     const d = deps({ fallback: { model: 'fb1', secondaryModel: 'fb2' } });
     const recovery = createFallbackModelRecovery(d);

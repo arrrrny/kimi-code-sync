@@ -1,8 +1,10 @@
-import type {
-  LlmRecovery,
-  LlmRecoveryContext,
-  LlmRecoveryEntry,
-  LlmRecoveryRecord,
+import {
+  isAuthRejection,
+  rotationCount,
+  rotationFailed,
+  type LlmRecovery,
+  type LlmRecoveryContext,
+  type LlmRecoveryEntry,
 } from '@moonshot-ai/core/llm/policy/recovery';
 import type { LlmErrorMessage } from '@moonshot-ai/core/llm/response';
 import type { LlmRequest, LlmRequestModel, ThinkingRequestOptions } from '@moonshot-ai/core/llm/request';
@@ -12,8 +14,6 @@ import type { IFlagService } from '#/app/flag/flag';
 import { resolveFallbackModel } from './configSection';
 
 export const FALLBACK_MODEL_STRATEGY = 'fallback_model';
-
-const API_KEY_ROTATION_STRATEGY = 'api_key_rotation';
 
 export interface FallbackModelSwap {
   readonly model: LlmRequestModel;
@@ -37,29 +37,16 @@ const FALLBACK_ELIGIBLE_KINDS: ReadonlySet<LlmErrorMessage['kind']> = new Set([
   'quota_exhausted',
 ]);
 
-function statusCodeOf(error: LlmErrorMessage): number | undefined {
-  return (error as { readonly statusCode?: number }).statusCode;
-}
-
-function isAuthRejection(error: LlmErrorMessage): boolean {
-  if (error.kind === 'auth') return true;
-  return error.kind === 'status' && (statusCodeOf(error) === 401 || statusCodeOf(error) === 403);
-}
-
 function isRotationEligible(error: LlmErrorMessage): boolean {
   return error.kind === 'rate_limit' || isAuthRejection(error);
 }
 
-function rotationCount(applied: readonly LlmRecoveryRecord[]): number {
-  return applied.filter(
-    (record) => record.strategy === API_KEY_ROTATION_STRATEGY && record.failed !== true,
-  ).length;
-}
-
 function rotationAvailable(ctx: LlmRecoveryContext): boolean {
+  const applied = ctx.appliedRecoveries;
+  if (rotationFailed(applied)) return false;
   const controller = ctx.endpoint?.credentials?.rotation?.();
   if (controller === undefined) return false;
-  return rotationCount(ctx.appliedRecoveries) < controller.keyCount - 1;
+  return rotationCount(applied) < controller.keyCount - 1;
 }
 
 function triedAliases(ctx: LlmRecoveryContext): Set<string> {
