@@ -1,25 +1,15 @@
-import type { LlmRecovery, LlmRecoveryContext, LlmRecoveryRecord } from '@moonshot-ai/core/llm/policy/recovery';
+import {
+  API_KEY_ROTATION_STRATEGY,
+  isAuthRejection,
+  rotationCount,
+  rotationFailed,
+  type LlmRecovery,
+  type LlmRecoveryContext,
+} from '@moonshot-ai/core/llm/policy/recovery';
 import type { LlmKeyRotationController } from '@moonshot-ai/core/llm/request';
 import type { LlmErrorMessage } from '@moonshot-ai/core/llm/response';
 
-export const API_KEY_ROTATION_STRATEGY = 'api_key_rotation';
-
-function rotationCount(appliedRecoveries: readonly LlmRecoveryRecord[]): number {
-  return appliedRecoveries.filter(
-    (record) => record.strategy === API_KEY_ROTATION_STRATEGY && record.failed !== true,
-  ).length;
-}
-
-function rotationFailed(appliedRecoveries: readonly LlmRecoveryRecord[]): boolean {
-  return appliedRecoveries.some(
-    (record) => record.strategy === API_KEY_ROTATION_STRATEGY && record.failed === true,
-  );
-}
-
-function isAuthRejection(error: LlmErrorMessage): boolean {
-  if (error.kind === 'auth') return true;
-  return error.kind === 'status' && (error.statusCode === 401 || error.statusCode === 403);
-}
+export { API_KEY_ROTATION_STRATEGY };
 
 function qualifies(error: LlmErrorMessage, attempt: number, maxAttempts: number): boolean {
   if (isAuthRejection(error)) return true;

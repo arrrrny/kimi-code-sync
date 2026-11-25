@@ -38,6 +38,8 @@ import { ISessionRequestAttributionService } from '#/session/requestAttribution/
 import { IBootstrapService } from '#/app/bootstrap/bootstrap';
 import { credentialRecovery } from '@moonshot-ai/core/llm/policy/credentials';
 import { keyRotationRecovery } from '#human/credentials/keyRotationRecovery';
+import { createFallbackModelRecovery } from '#/session/fallback/recovery';
+import { IFlagService } from '#/app/flag/flag';
 import { IAgentToolExecutorService } from '#/agent/toolExecutor/toolExecutor';
 import { agentTaskInfo } from '#/agent/task/handler';
 import { IAgentTaskHistoryService } from '#/agent/task/taskService';
@@ -211,6 +213,7 @@ export class AgentLoopService extends Disposable implements IAgentLoopService {
     @IAgentToolExecutorService private readonly toolExecutor: IAgentToolExecutorService,
     @IAgentToolRegistryService _toolRegistry: IAgentToolRegistryService,
     @IConfigService private readonly config: IConfigService,
+    @IFlagService private readonly flags: IFlagService,
     @IEventDispatcher private readonly dispatcher: IEventDispatcher,
     @IEventBus private readonly events: IEventBus,
     @IAgentScopeContext private readonly scopeContext: IAgentScopeContext,
@@ -747,6 +750,22 @@ export class AgentLoopService extends Disposable implements IAgentLoopService {
       recoveries: [
         credentialRecovery,
         keyRotationRecovery,
+        createFallbackModelRecovery({
+          config: this.config,
+          flags: this.flags,
+          resolveSwap: (current, alias, thinking) => {
+            const model = this.modelCatalog.get(alias);
+            const modelPart: LlmRequestModel = {
+              ...current.model,
+              spec: model.spec,
+              ...(thinking === undefined ? {} : { thinking: { effort: thinking } }),
+            };
+            const rebuilt = this.protocolRegistry
+              .request(model, { model: modelPart }, this.requesterExecution)
+              .request({ content: current.content, profile: current.profile, policy: current.policy });
+            return { model: rebuilt.model, protocol: rebuilt.protocol };
+          },
+        }),
         createStructureRecovery(this.projector),
         mediaPolicy.recovery,
       ],
