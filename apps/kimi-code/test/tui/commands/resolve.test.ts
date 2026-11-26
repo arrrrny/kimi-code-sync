@@ -362,6 +362,16 @@ describe('resolveSlashCommandInput', () => {
       name: 'btw',
       args: 'side question',
     });
+    expect(resolve('/queue', { isStreaming: true })).toMatchObject({
+      kind: 'builtin',
+      name: 'queue',
+      args: '',
+    });
+    expect(resolve('/queue', { isCompacting: true })).toMatchObject({
+      kind: 'builtin',
+      name: 'queue',
+      args: '',
+    });
   });
 
   it('keeps the compaction-threshold commands usable while streaming and compacting', () => {

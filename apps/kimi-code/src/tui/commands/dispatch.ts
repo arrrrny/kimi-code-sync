@@ -180,6 +180,7 @@ export interface SlashCommandHost {
   setExitOpenUrl(url: string): void;
   setExitForegroundTask(task: (exitCode: number) => Promise<void>): void;
   showHelpPanel(): void;
+  openMessageQueueManager(): void;
   createNewSession(): Promise<void>;
   showSessionPicker(): Promise<void>;
   sendNormalUserInput(text: string, preExtracted?: ExtractionResult, delivery?: FollowUpDelivery): void;
@@ -400,6 +401,9 @@ async function handleBuiltInSlashCommand(
       return;
     case 'tasks':
       void host.tasksBrowserController.show();
+      return;
+    case 'queue':
+      host.openMessageQueueManager();
       return;
     case 'mcp':
       void showMcpServers(host);
