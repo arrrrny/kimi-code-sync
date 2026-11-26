@@ -31,6 +31,7 @@ Some commands are only available in the idle state. Executing these commands whi
 | `/new` | `/clear` | Start a fresh session in the current environment, discarding the conversation | No |
 | `/sessions` | `/resume` | Browse historical sessions and switch to / restore one | No |
 | `/tasks` | `/task` | Browse background tasks and inspect running foreground subagents. Press `Enter` on a task to view its output. | Yes |
+| `/queue` | — | Open the message queue manager for the messages stacked up while the agent is working. Use <kbd>↑</kbd> / <kbd>↓</kbd> to browse, <kbd>Space</kbd> to select a message for moving, selected <kbd>↑</kbd> / <kbd>↓</kbd> to reorder it, <kbd>E</kbd> to edit, <kbd>D</kbd> to delete, <kbd>Ctrl-S</kbd> to send the selected message, <kbd>Ctrl-Shift-S</kbd> to send all, and <kbd>Esc</kbd> to cancel | Yes |
 | `/fork` | — | Fork a new session from the current one, preserving the full conversation history; you stay in the current session | No |
 | `/title [<text>]` | `/rename` | Without arguments, display the current session title; with an argument, set a new title (max 200 characters) | Yes |
 | `/compact [<instruction>]` | — | Compact the current conversation context to free up token usage; an optional custom instruction can hint to the model what to preserve; when used while the agent is busy, the command joins the message queue and runs in order; it is skipped if the context was auto-compacted while it waited | Yes |

@@ -208,8 +208,6 @@ export const BUILTIN_SLASH_COMMANDS = [
     priority: 100,
     argumentHint: '[model] [--all]',
     availability: 'always',
-    // Bulk session mutation is strictly opt-in until the experiment graduates;
-    // hidden from the palette and unresolvable while the flag is off.
     experimentalFlag: 'update-all-session-models',
   },
   {
@@ -227,9 +225,6 @@ export const BUILTIN_SLASH_COMMANDS = [
     availability: 'always',
   },
   {
-    // Renamed from `compaction-model` (issue: `/comp` + Tab autocompleted to
-    // this command instead of `/compact`, breaking muscle memory). The
-    // engine flag id stays `compaction-model` — only the command name moved.
     name: 'squeeze-model',
     aliases: [],
     description: 'Configure the model used for context compaction (squeeze)',
@@ -380,9 +375,6 @@ export const BUILTIN_SLASH_COMMANDS = [
     description: 'Show or set the per-session auto-compaction trigger ratio (0.05-0.99)',
     priority: 80,
     argumentHint: '[<ratio>|off]',
-    // Reading and writing the threshold are both allowed while a turn is
-    // streaming; a mid-turn change can move the compaction trigger point
-    // later for the running turn.
     availability: 'always',
   },
   {
@@ -408,6 +400,13 @@ export const BUILTIN_SLASH_COMMANDS = [
         ? 'always'
         : 'idle-only';
     },
+  },
+  {
+    name: 'queue',
+    aliases: [],
+    description: 'Manage the queued messages',
+    priority: 80,
+    availability: 'always',
   },
   {
     name: 'init',
