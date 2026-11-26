@@ -5,8 +5,10 @@ import { isErrorCode } from '#/_base/errors/codes';
 import { isError2 } from '#/_base/errors/errors';
 import { IConfigService } from '#/app/config/config';
 import { ConfigErrors } from '#/app/config/errors';
+import { contentsOf } from '@moonshot-ai/core/llm/requester';
 import { emptyUsage } from '@moonshot-ai/core/llm/usage';
 import { streamLlmRequest } from '@moonshot-ai/core/llm/stream';
+import { UNKNOWN_CAPABILITY } from '#/llm-adapter/contract/capability';
 import { IProtocolAdapterRegistry } from '#/llm-adapter/protocol/protocol';
 import { ProtocolAdapterRegistry } from '#/llm-adapter/protocol/protocolAdapterRegistry';
 import {
@@ -532,6 +534,38 @@ describe('Model assembly (pure data)', () => {
     }
   });
 
+  it('follows the active key for a provider configured with apiKeys', async () => {
+    const { host, catalog, providers } = createHost({
+      providers: {
+        kilo: {
+          type: 'openai',
+          baseUrl: 'https://api.example.test/v1',
+          apiKeys: {
+            key1: { key: 'sk-alpha', name: 'work' },
+            key2: { key: 'sk-beta', name: 'personal', proxyUrl: 'http://127.0.0.1:8081' },
+          },
+          activeApiKeyId: 'key1',
+          rotateKeys: true,
+        },
+      },
+      models: { m1: { provider: 'kilo', model: 'gpt-5', maxContextSize: 128000 } },
+    });
+    try {
+      const model = catalog.get('m1');
+      expect(await model.endpoint.credentials?.resolve()).toEqual({ apiKey: 'sk-alpha' });
+
+      await providers.setActiveApiKey('kilo', 'key2');
+
+      expect(await model.endpoint.credentials?.resolve()).toEqual({
+        apiKey: 'sk-beta',
+        proxyUrl: 'http://127.0.0.1:8081',
+      });
+      expect(model.endpoint.credentials?.rotation?.()?.keyCount).toBe(2);
+    } finally {
+      host.dispose();
+    }
+  });
+
   it('fails credential resolution with config.invalid when the declared api_key_env variable is unset or empty', () => {
     const { host, catalog } = createHost({
       providers: {
@@ -549,6 +583,171 @@ describe('Model assembly (pure data)', () => {
       expect(() => model.endpoint.credentials?.resolve()).toThrowError(
         expect.objectContaining({ code: ConfigErrors.codes.CONFIG_INVALID }),
       );
+    } finally {
+      host.dispose();
+    }
+  });
+
+  it('resolves the provider env key for a model whose provider also declares apiKeys', async () => {
+    const { host, catalog } = createHost({
+      providers: {
+        kilo: {
+          type: 'openai',
+          baseUrl: 'https://api.example.test/v1',
+          apiKeys: { key1: { key: 'sk-alpha', name: 'work' } },
+          env: { OPENAI_API_KEY: 'sk-from-env' },
+        },
+      },
+      models: { m1: { provider: 'kilo', model: 'gpt-5', maxContextSize: 128000 } },
+    });
+    try {
+      const model = catalog.get('m1');
+      expect(await model.endpoint.credentials?.resolve()).toEqual({ apiKey: 'sk-from-env' });
+    } finally {
+      host.dispose();
+    }
+  });
+
+  it('exposes no rotation controller for an oauth-backed model', () => {
+    const tokenProvider = stubTokenProvider(['tok-1']);
+    const { host, catalog } = createHost(
+      {
+        providers: {
+          kimi: {
+            type: 'kimi',
+            oauth: { storage: 'file', key: 'kimi' },
+            baseUrl: 'https://api.moonshot.ai/v1',
+          },
+        },
+        models: { k1: { provider: 'kimi', model: 'kimi-k2', maxContextSize: 1 } },
+      },
+      stubModelOAuthTokens(tokenProvider),
+    );
+    try {
+      const model = catalog.get('k1');
+      expect(model.endpoint.credentials?.rotation?.()).toBeUndefined();
+      expect(model.endpoint.credentials?.canRecover?.(Object.assign(new Error('x'), { status: 401 }))).toBe(
+        true,
+      );
+    } finally {
+      host.dispose();
+    }
+  });
+});
+
+const proxySections: Record<string, unknown> = {
+  providers: {
+    kilo: {
+      type: 'openai',
+      baseUrl: 'https://api.example.test/v1',
+      proxyUrl: 'http://provider.example.test:8080',
+      apiKeys: {
+        key1: { key: 'sk-alpha', name: 'work', proxyUrl: 'http://key1.example.test:8081' },
+        key2: { key: 'sk-beta', name: 'personal' },
+        key3: { key: 'sk-gamma', name: 'backup', proxyUrl: 'http://key3.example.test:8083' },
+      },
+      activeApiKeyId: 'key1',
+      rotateKeys: true,
+    },
+  },
+  models: {
+    m1: { provider: 'kilo', model: 'gpt-5', maxContextSize: 128000 },
+    m2: { provider: 'kilo', model: 'gpt-5-mini', maxContextSize: 128000 },
+  },
+};
+
+function proxyCatalog(sections: Record<string, unknown>): {
+  host: ReturnType<typeof createScopedTestHost>;
+  catalog: ModelCatalog;
+  providers: IProviderService;
+} {
+  const { host, models, providers } = createHost(sections);
+  const registry = {
+    _serviceBrand: undefined,
+    supportedProtocols: () => [],
+    resolveAdapterIdentity: () => {
+      throw new Error('not exercised');
+    },
+    resolveProviderBaseId: () => {
+      throw new Error('not exercised');
+    },
+    resolveCapability: () => UNKNOWN_CAPABILITY,
+  } as unknown as IProtocolAdapterRegistry;
+  const catalog = new ModelCatalog(
+    new ProviderCatalogRuntimeService(models, providers),
+    providers,
+    models,
+    stubModelOAuthTokens(),
+    registry,
+    { headers: {}, thirdPartyHeaders: {} },
+  );
+  return { host, catalog, providers };
+}
+
+function endpointCredentialsOf(catalog: ModelCatalog, id: string) {
+  const initialized = new ProtocolAdapterRegistry().request(catalog.get(id));
+  const endpoint = contentsOf(initialized).endpoint;
+  if (endpoint?.credentials === undefined) throw new Error('endpoint has no credentials');
+  return endpoint.credentials;
+}
+
+describe('per-key proxy cascade on the request path', () => {
+  it("applies the active key's proxy over the provider proxy for a request", async () => {
+    const { host, catalog } = proxyCatalog(proxySections);
+    try {
+      expect(catalog.get('m1').endpoint.proxyUrl).toBe('http://provider.example.test:8080');
+
+      const credential = await endpointCredentialsOf(catalog, 'm1').resolve();
+      expect(credential?.proxyUrl).toBe('http://key1.example.test:8081');
+    } finally {
+      host.dispose();
+    }
+  });
+
+  it('falls back to the provider proxy when the active key declares none', async () => {
+    const { host, catalog, providers } = proxyCatalog(proxySections);
+    try {
+      await providers.setActiveApiKey('kilo', 'key2');
+
+      const credential = await endpointCredentialsOf(catalog, 'm1').resolve();
+      expect(credential?.proxyUrl).toBe('http://provider.example.test:8080');
+    } finally {
+      host.dispose();
+    }
+  });
+
+  it('issues the request without a proxy when neither the provider nor the key declares one', async () => {
+    const { host, catalog } = proxyCatalog({
+      providers: {
+        kilo: {
+          type: 'openai',
+          baseUrl: 'https://api.example.test/v1',
+          apiKeys: { key1: { key: 'sk-alpha', name: 'work' } },
+          activeApiKeyId: 'key1',
+        },
+      },
+      models: { m1: { provider: 'kilo', model: 'gpt-5', maxContextSize: 128000 } },
+    });
+    try {
+      expect(catalog.get('m1').endpoint.proxyUrl).toBeUndefined();
+
+      const credential = await endpointCredentialsOf(catalog, 'm1').resolve();
+      expect(credential?.proxyUrl).toBeUndefined();
+    } finally {
+      host.dispose();
+    }
+  });
+
+  it('carries the active key proxy for every model bound to the provider', async () => {
+    const { host, catalog, providers } = proxyCatalog(proxySections);
+    try {
+      let credential = await endpointCredentialsOf(catalog, 'm2').resolve();
+      expect(credential?.proxyUrl).toBe('http://key1.example.test:8081');
+
+      await providers.setActiveApiKey('kilo', 'key3');
+
+      credential = await endpointCredentialsOf(catalog, 'm2').resolve();
+      expect(credential?.proxyUrl).toBe('http://key3.example.test:8083');
     } finally {
       host.dispose();
     }
@@ -1146,6 +1345,28 @@ describe('ModelCatalog enumeration', () => {
       expect(byId['kimi']).toMatchObject({ has_api_key: true, status: 'connected' });
       expect(byId['claude']).toMatchObject({ has_api_key: true, status: 'connected' });
       expect(byId['empty']).toMatchObject({ has_api_key: false, status: 'unconfigured' });
+    } finally {
+      host.dispose();
+    }
+  });
+
+  it('reports a rotation provider that also declares api_key_env as a credential conflict', async () => {
+    vi.stubEnv('KIMI_TEST_ROTATION_ENV_KEY', 'sk-from-env');
+    const { host, catalog } = createHost({
+      providers: {
+        rot: {
+          type: 'openai',
+          baseUrl: 'https://rot.example.test/v1',
+          apiKeys: { k1: { key: 'sk-rotated', name: 'primary' } },
+          activeApiKeyId: 'k1',
+          apiKeyEnv: 'KIMI_TEST_ROTATION_ENV_KEY',
+        },
+      },
+      models: {},
+    });
+    try {
+      const [provider] = await catalog.listProviders();
+      expect(provider).toMatchObject({ id: 'rot', has_api_key: true, status: 'error' });
     } finally {
       host.dispose();
     }

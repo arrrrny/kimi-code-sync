@@ -4,6 +4,7 @@ export const FullCompactionErrors = {
   codes: {
     COMPACTION_FAILED: 'compaction.failed',
     COMPACTION_UNABLE: 'compaction.unable',
+    COMPACTION_CANCELLED: 'compaction.cancelled',
   },
 } as const satisfies ErrorDomain;
 

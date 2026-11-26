@@ -41,6 +41,7 @@ export function keyboardShortcuts(
     { keys: 'Ctrl-G', description: 'Edit in external editor ($VISUAL / $EDITOR)' },
     { keys: 'Ctrl-O', description: 'Toggle tool output / compaction summary expansion' },
     { keys: 'Ctrl-S', description: 'Steer — inject a follow-up during streaming' },
+    { keys: 'Alt-Q', description: 'Manage the queued messages' },
     { keys: 'Shift-Enter / Ctrl-J', description: 'Insert newline' },
     { keys: 'Ctrl-C', description: 'Interrupt stream / clear input' },
     { keys: 'Ctrl-D', description: 'Exit (on empty input)' },

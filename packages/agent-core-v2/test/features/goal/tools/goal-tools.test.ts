@@ -53,6 +53,7 @@ describe('goal tools', () => {
       thinkingLevel: 'off',
       reservedContextSize: undefined,
       compactionTriggerRatio: undefined,
+      compactionTokenBudget: undefined,
       compactionMaxAttempts: undefined,
     });
     ctx = createTestAgent(

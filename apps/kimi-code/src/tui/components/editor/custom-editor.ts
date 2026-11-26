@@ -118,6 +118,16 @@ export class CustomEditor extends Editor {
   public onUpArrowEmpty?: () => boolean;
   public onDownArrowEmpty?: () => boolean;
   public onShiftTab?: () => void;
+  /** Alt+M: rotate the session model through the user's favorite models
+   * (tui.toml favorite_models). Alt+M rather than the spec's illustrative
+   * Alt+F because alt+f is already the editor's cursor-word-right binding.
+   * Not fired while a dialog has focus — the model selector's own Alt+M
+   * toggles the favorite state instead. */
+  public onAltM?: () => void;
+  /** Alt+Q: open the message queue manager while streaming. */
+  public onAltQ?: () => void;
+  /** 'bash' when entering a `!` shell command. The `!` is never part of the
+   *  text buffer — it is a separate mode + prompt symbol (see handleInput). */
   public inputMode: 'prompt' | 'bash' = 'prompt';
   public onInputModeChange?: (mode: 'prompt' | 'bash') => void;
   public connectedAbove = false;
@@ -448,6 +458,16 @@ export class CustomEditor extends Editor {
 
     if (matchesKey(normalized, 'shift+tab')) {
       this.onShiftTab?.();
+      return;
+    }
+
+    if (matchesKey(normalized, Key.alt('m'))) {
+      this.onAltM?.();
+      return;
+    }
+
+    if (matchesKey(normalized, Key.alt('q'))) {
+      this.onAltQ?.();
       return;
     }
 

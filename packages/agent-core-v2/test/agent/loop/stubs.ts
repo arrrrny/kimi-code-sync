@@ -42,7 +42,9 @@ export function submitPromptTurn(
       get state() {
         return backing?.state ?? (settledCancelled ? 'cancelled' : 'queued');
       },
-      signal: controller.signal,
+      get signal() {
+        return backing?.signal ?? controller.signal;
+      },
       ready: handle.launched.then(async (turn) => {
         await turn?.ready;
       }),
@@ -98,6 +100,7 @@ export class StubEffectiveProfileReader {
   data() { return { modelCapabilities: UNKNOWN_CAPABILITY, thinkingLevel: 'off', systemPrompt: '' }; }
   getEffectiveThinkingLevel() { return 'off' as const; }
   resolveModelContext(): never { throw new Error('model is not configured'); }
+  resolveModelContextFor(): never { throw new Error('model is not configured'); }
   resolveRequestParams() { return {}; }
   getModelCapabilities(): ModelCapability { return UNKNOWN_CAPABILITY; }
   getModelProviderType() { return undefined; }
@@ -158,6 +161,7 @@ export function stubLoopWithHooks(options: StubLoopOptions = {}): StubLoop {
     data: () => ({ modelCapabilities: UNKNOWN_CAPABILITY, thinkingLevel: 'off', systemPrompt: '' }),
     getEffectiveThinkingLevel: () => 'off',
     resolveModelContext: () => { throw new Error('model is not configured'); },
+    resolveModelContextFor: () => { throw new Error('model is not configured'); },
     resolveRequestParams: () => ({}),
     getModelCapabilities: () => UNKNOWN_CAPABILITY,
     getModelProviderType: () => undefined,
@@ -275,6 +279,7 @@ export function stubLoopWithHooks(options: StubLoopOptions = {}): StubLoop {
     },
     promptHandle: (id) => handles.get(id),
     cancel(target, reason) { cancels.push({ turnId: target?.turnId, reason }); if (target?.promptId !== undefined) return true; if (active === undefined || (target?.turnId !== undefined && active.id !== target.turnId)) return false; active.cancel(reason); return true; },
+    cancelFromUser(turnId) { stub.cancel(turnId === undefined ? undefined : { turnId }); },
     detachTool: () => {},
     suppressTaskNotifications: () => {},
     abortTool: () => {},

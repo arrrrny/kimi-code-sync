@@ -265,6 +265,7 @@ class TestLoopProfileReader implements EffectiveProfileReader {
   data() { return this.profile.data(this.snapshot.profile ?? EMPTY_LOOP_PROFILE); }
   getEffectiveThinkingLevel() { return this.profile.getEffectiveThinkingLevel(this.snapshot.profile); }
   resolveModelContext() { return this.profile.resolveModelContext(this.snapshot.profile); }
+  resolveModelContextFor(modelAlias: string) { return this.profile.resolveModelContextFor(modelAlias); }
   resolveRequestParams() { return this.profile.resolveRequestParams(this.snapshot.profile); }
   getModelCapabilities() { return this.data().modelCapabilities; }
   getModelProviderType(alias?: string) { return this.profile.getModelProviderType(alias, this.snapshot.profile); }

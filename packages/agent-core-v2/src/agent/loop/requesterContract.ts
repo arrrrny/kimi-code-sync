@@ -69,7 +69,9 @@ export interface CoreLoopRequesterOptions {
   ) => void;
 }
 
-export type OperationLoopRequesterOptions = Omit<CoreLoopRequesterOptions, 'runtime'>;
+export interface OperationLoopRequesterOptions extends Omit<CoreLoopRequesterOptions, 'runtime'> {
+  readonly modelAlias?: string;
+}
 
 export type CoreLoopRequester = LoopLlmRequester;
 

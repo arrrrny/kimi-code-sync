@@ -202,6 +202,7 @@ export type LlmRetry =
       readonly timing?: LlmTiming;
       readonly strategy: string;
       readonly action: string;
+      readonly detail?: string;
     };
 
 export interface LlmOutput {

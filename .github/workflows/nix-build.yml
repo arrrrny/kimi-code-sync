@@ -7,7 +7,7 @@ name: Nix Build
 on:
   pull_request:
     branches:
-      - main
+      - master
       - release/**
     paths:
       - 'flake.nix'
@@ -26,7 +26,7 @@ on:
       - '.github/workflows/nix-build.yml'
   push:
     branches:
-      - main
+      - master
       - release/**
 
 permissions:

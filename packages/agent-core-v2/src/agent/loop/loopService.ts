@@ -35,6 +35,9 @@ import { getProviderDefinition } from '#/llm-adapter/provider/provider-definitio
 import { ISessionRequestAttributionService } from '#/session/requestAttribution/requestAttribution';
 import { IBootstrapService } from '#/app/bootstrap/bootstrap';
 import { credentialRecovery } from '@moonshot-ai/core/llm/policy/credentials';
+import { keyRotationRecovery } from '#human/credentials/keyRotationRecovery';
+import { createFallbackModelRecovery } from '#/session/fallback/recovery';
+import { IFlagService } from '#/app/flag/flag';
 import { IAgentToolExecutorService } from '#/agent/toolExecutor/toolExecutor';
 import { agentTaskInfo } from '#/agent/task/handler';
 import { IAgentTaskHistoryService } from '#/agent/task/taskService';
@@ -77,9 +80,11 @@ import {
 import type {
   LlmRequest as CoreLlmRequest,
   LlmRequestModel,
+  ModelCapability as LlmModelCapability,
   ThinkingEffort,
 } from '@moonshot-ai/core/llm/request';
 import type { ModelCapability } from '#/llm-adapter/contract/capability';
+import { READ_MEDIA_FILE_TOOL_NAME } from '#/agent/tools/read-media-file/read-media-file';
 import {
   contentsOf,
   mergeFields,
@@ -203,6 +208,7 @@ export class AgentLoopService extends Disposable implements IAgentLoopService {
     @IAgentToolExecutorService private readonly toolExecutor: IAgentToolExecutorService,
     @IAgentToolRegistryService _toolRegistry: IAgentToolRegistryService,
     @IConfigService private readonly config: IConfigService,
+    @IFlagService private readonly flags: IFlagService,
     @IEventDispatcher private readonly dispatcher: IEventDispatcher,
     @IEventBus events: IEventBus,
     @IAgentScopeContext private readonly scopeContext: IAgentScopeContext,
@@ -236,12 +242,17 @@ export class AgentLoopService extends Disposable implements IAgentLoopService {
     this.mediaPolicyFactory = (model, request) => createAgentMediaPolicy(mediaResolver, model, request);
     this.requester = {
       coreRequester: (options) => this.coreRequester(options),
-      prepareOperation: async (options, _signal) => {
-        await this.start();
-        const loop = this.loop!;
-        const config = this.requestConfigSnapshot();
-        const tools = options.tools ?? this.baselineTools();
-        return loop.operation((runtime) => {
+      prepareOperation: async (options, signal) => {
+        if (this.loop === undefined) throw new BugIndicatingError('Agent loop is not started');
+        const config = options.modelAlias === undefined
+          ? this.requestConfigSnapshot()
+          : this.requestConfigSnapshotFor(options.modelAlias);
+        const baseline = options.tools ?? this.loop.state.profile.tools;
+        const visible = options.tools === undefined && baseline !== undefined
+          ? this.operationTools(baseline, config.resolved.model.capability)
+          : baseline;
+        const tools = await this.prepareTools(signal, config.resolved.model.capability, visible);
+        return this.loop.operation((runtime) => {
           const requester = this.coreRequester({ ...options, runtime, tools, config });
           return requester.snapshot?.() ?? requester;
         });
@@ -666,6 +677,47 @@ export class AgentLoopService extends Disposable implements IAgentLoopService {
     };
   }
 
+  resolveModelContextFor(modelAlias: string): ProfileModelContext {
+    return this.profile.resolveModelContextFor(modelAlias);
+  }
+
+  private requestConfigSnapshotFor(modelAlias: string): RequestConfigSnapshot {
+    return {
+      resolved: this.resolveModelContextFor(modelAlias),
+      params: this.resolveRequestParams(),
+      systemPrompt: this.getSystemPrompt(),
+      maxCompletionTokensCap: this.config.get<ModelOverrides>('modelOverrides')?.maxCompletionTokens,
+    };
+  }
+
+  private operationTools(
+    baseline: readonly Tool[],
+    capabilities: LlmModelCapability | undefined,
+  ): readonly Tool[] {
+    const disclosure = this.toolSelect.enabled(capabilities);
+    const active = new Set(this.toolSelect.defaultTools(disclosure).map((tool) => tool.name));
+    return baseline.filter((tool) => active.has(tool.name));
+  }
+
+  private async prepareTools(
+    signal: AbortSignal,
+    capabilities: LlmModelCapability | undefined,
+    base?: readonly Tool[],
+  ): Promise<readonly Tool[]> {
+    await this.toolSelect.prepareForRequest(signal);
+    return this.toolsForCapabilities(capabilities, base);
+  }
+
+  private toolsForCapabilities(
+    capabilities: LlmModelCapability | undefined,
+    base?: readonly Tool[],
+  ): readonly Tool[] {
+    const disclosure = this.toolSelect.enabled(capabilities);
+    const tools = base ?? this.toolSelect.defaultTools(disclosure);
+    if (capabilities?.image_in === true || capabilities?.video_in === true) return tools;
+    return tools.filter((tool) => tool.name !== READ_MEDIA_FILE_TOOL_NAME);
+  }
+
   private coreRequester(options: CoreLoopRequesterOptions): CoreLoopRequester {
     return {
       generate: (rest, control) => this.generateCoreRequest(options, rest, control),
@@ -713,6 +765,23 @@ export class AgentLoopService extends Disposable implements IAgentLoopService {
       },
       recoveries: [
         credentialRecovery,
+        keyRotationRecovery,
+        createFallbackModelRecovery({
+          config: this.config,
+          flags: this.flags,
+          resolveSwap: (current, alias, thinking) => {
+            const model = this.modelCatalog.get(alias);
+            const modelPart: LlmRequestModel = {
+              ...current.model,
+              spec: model.spec,
+              ...(thinking === undefined ? {} : { thinking: { effort: thinking } }),
+            };
+            const rebuilt = this.protocolRegistry
+              .request(model, { model: modelPart }, this.requesterExecution)
+              .request({ content: current.content, profile: current.profile, policy: current.policy });
+            return { model: rebuilt.model, protocol: rebuilt.protocol, endpoint: rebuilt.endpoint };
+          },
+        }),
         createStructureRecovery(this.projector),
         mediaPolicy.recovery,
       ],
@@ -1271,6 +1340,10 @@ export class AgentLoopService extends Disposable implements IAgentLoopService {
       return true;
     }
     return this.cancelActiveTurn(target?.turnId, cancellation);
+  }
+
+  cancelFromUser(turnId?: number): void {
+    this.cancel(turnId === undefined ? undefined : { turnId });
   }
 
   detachTool(task: LoopDetachedTask, text?: string): void {

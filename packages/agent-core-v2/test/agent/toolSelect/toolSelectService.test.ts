@@ -291,6 +291,10 @@ class FakeLoopService extends StubEffectiveProfileReader implements IAgentLoopSe
     throw new Error('unused in this suite');
   }
 
+  cancelFromUser(): never {
+    throw new Error('unused in this suite');
+  }
+
   detachTool(): void {}
 
   suppressTaskNotifications(): void {}
@@ -300,7 +304,6 @@ class FakeLoopService extends StubEffectiveProfileReader implements IAgentLoopSe
   }
 
   abortTool(): void {}
-
   snapshot(): LoopSnapshot {
     return {
       state: 'idle',

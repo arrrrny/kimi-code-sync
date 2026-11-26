@@ -24,11 +24,33 @@ interface ConfirmState {
   readonly providerIds: readonly string[];
 }
 
+/** Key row for a named API key within a provider. */
+interface KeyRow {
+  readonly kind: 'key';
+  readonly id: string; // `${providerId}:${keyId}`
+  readonly providerId: string;
+  readonly keyId: string;
+  readonly label: string; // key name
+  readonly preview: string; // masked key preview
+  readonly isActive: boolean;
+  readonly proxyUrl?: string; // the key's own proxy, if it declares one
+}
+
 export interface ProviderManagerOptions {
   readonly providers: Record<string, ProviderConfig>;
   readonly activeProviderId?: string;
   readonly onAdd: () => void;
   readonly onDeleteSource: (providerIds: readonly string[]) => void;
+  /** Add a new named API key to a provider. */
+  readonly onAddKey: (providerId: string) => void;
+  /** Remove a named API key from a provider. */
+  readonly onRemoveKey: (providerId: string, keyId: string) => void;
+  /** Set the active API key for a provider. */
+  readonly onSetActiveKey: (providerId: string, keyId: string) => void;
+  /** Set proxy URL for a provider. */
+  readonly onSetProxyUrl: (providerId: string) => void;
+  /** Turn automatic API key rotation on or off for a provider. */
+  readonly onToggleRotation: (providerId: string) => void;
   readonly onClose: () => void;
 }
 
@@ -39,6 +61,10 @@ interface SourceRow {
   readonly providerIds: readonly string[];
   readonly hasActive: boolean;
   readonly baseUrl?: string;
+  /** True when automatic key rotation is on for the provider. */
+  readonly rotateKeys?: boolean;
+  /** Child key rows for this provider (if it has multiple named keys). */
+  readonly keyRows: readonly KeyRow[];
 }
 
 interface AddRow {
@@ -47,11 +73,11 @@ interface AddRow {
   readonly label: string;
 }
 
-type Row = SourceRow | AddRow;
+type Row = SourceRow | AddRow | KeyRow;
 
 const ADD_ROW_LABEL = '[ Add New Platform ]';
 const PAGE_SIZE = 8;
-const HEADER_HINT = '↑↓ navigate · D delete · Esc cancel';
+const HEADER_HINT = '↑↓ navigate · D delete · A add key · S set active · R rotate keys · P proxy · Esc cancel';
 
 function readCustomRegistrySource(provider: unknown): CustomRegistrySource | undefined {
   if (typeof provider !== 'object' || provider === null) return undefined;
@@ -77,10 +103,22 @@ function sourceUrlLabel(url: string): string {
   }
 }
 
+/**
+ * Group providers into source rows + append the synthetic add-row.
+ * The grouping rules:
+ *   - `DEFAULT_OAUTH_PROVIDER_NAME` → skipped (managed via /logout).
+ *   - Open Platform id (`isOpenPlatformId(id)`) → 1 source per provider,
+ *     label = `OpenPlatformDefinition.name`.
+ *   - `cfg.source.kind === 'apiJson'` → one source per `{url, apiKey}`
+ *     pair, label = hostname + pathname.
+ *   - Anything else → 1 source per provider, label = provider id.
+ *   - Providers with multiple named API keys (`apiKeys`) get child key rows.
+ */
 function buildRows(opts: ProviderManagerOptions): readonly Row[] {
-  const sources: SourceRow[] = [];
+  const rows: Row[] = [];
 
   const customRegistryIndex = new Map<string, number>();
+  const sourceRows: SourceRow[] = [];
 
   for (const [id, cfg] of Object.entries(opts.providers)) {
     if (id === DEFAULT_OAUTH_PROVIDER_NAME) continue;
@@ -89,12 +127,13 @@ function buildRows(opts: ProviderManagerOptions): readonly Row[] {
 
     if (isOpenPlatformId(id)) {
       const platform = getOpenPlatformById(id);
-      sources.push({
+      sourceRows.push({
         kind: 'source',
         id: `open:${id}`,
         label: platform?.name ?? id,
         providerIds: [id],
         hasActive: isActive,
+        keyRows: [],
       });
       continue;
     }
@@ -109,42 +148,99 @@ function buildRows(opts: ProviderManagerOptions): readonly Row[] {
       const key = `${customSource.url}${customSource.apiKey}`;
       const existingIdx = customRegistryIndex.get(key);
       if (existingIdx !== undefined) {
-        const existing = sources[existingIdx];
+        const existing = sourceRows[existingIdx];
         if (existing !== undefined && existing.kind === 'source') {
-          sources[existingIdx] = {
+          sourceRows[existingIdx] = {
             kind: 'source',
             id: existing.id,
             label: existing.label,
             providerIds: [...existing.providerIds, id],
             hasActive: existing.hasActive || isActive,
             baseUrl: existing.baseUrl,
+            rotateKeys: existing.rotateKeys,
+            keyRows: existing.keyRows,
           };
         }
         continue;
       }
-      customRegistryIndex.set(key, sources.length);
-      sources.push({
+      customRegistryIndex.set(key, sourceRows.length);
+      sourceRows.push({
         kind: 'source',
         id: `custom:${key}`,
         label: sourceUrlLabel(customSource.url),
         providerIds: [id],
         hasActive: isActive,
         baseUrl,
+        keyRows: [],
       });
       continue;
     }
 
-    sources.push({
+    // Build key rows for providers with multiple named API keys
+    const keyRows = buildKeyRows(id, cfg as ProviderConfig);
+
+    sourceRows.push({
       kind: 'source',
       id: `provider:${id}`,
       label: id,
       providerIds: [id],
       hasActive: isActive,
       baseUrl,
+      rotateKeys: cfg.rotateKeys === true,
+      keyRows,
     });
   }
 
-  return [...sources, { kind: 'add', id: '__add__', label: ADD_ROW_LABEL }];
+  // Flatten: source rows followed by their key rows
+  for (const source of sourceRows) {
+    rows.push(source);
+    for (const keyRow of source.keyRows) {
+      rows.push(keyRow);
+    }
+  }
+
+  rows.push({ kind: 'add', id: '__add__', label: ADD_ROW_LABEL });
+  return rows;
+}
+
+function buildKeyRows(providerId: string, provider: ProviderConfig): readonly KeyRow[] {
+  const apiKeys = provider.apiKeys;
+  if (!apiKeys || Object.keys(apiKeys).length === 0) return [];
+
+  const activeKeyId = provider.activeApiKeyId;
+  return Object.entries(apiKeys).map(([keyId, keyInfo]) => ({
+    kind: 'key' as const,
+    id: `${providerId}:${keyId}`,
+    providerId,
+    keyId,
+    label: keyInfo.name,
+    preview: maskApiKey(keyInfo.key),
+    isActive: keyId === activeKeyId,
+    proxyUrl: keyInfo.proxyUrl,
+  }));
+}
+
+function maskApiKey(key: string): string {
+  if (key.length <= 12) return '*'.repeat(key.length);
+  return `${key.slice(0, 8)}...${key.slice(-4)}`;
+}
+
+/**
+ * Display form of a per-key proxy: its host alone, so credentials a user
+ * embeds in the URL never reach the dialog. A hand-edited config can hold a
+ * value the URL parser rejects, hence the defensive strip of both the scheme
+ * and any userinfo.
+ */
+function proxyHost(proxyUrl: string): string {
+  try {
+    const host = new URL(proxyUrl).host;
+    if (host.length > 0) return host;
+  } catch {
+    // fall through to the strip below
+  }
+  const withoutScheme = proxyUrl.replace(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//, '');
+  const withoutUserinfo = withoutScheme.slice(withoutScheme.lastIndexOf('@') + 1);
+  return withoutUserinfo.split('/')[0] ?? withoutUserinfo;
 }
 
 export class ProviderManagerComponent extends Container implements Focusable {
@@ -245,22 +341,68 @@ export class ProviderManagerComponent extends Container implements Focusable {
     }
 
     const ch = printableChar(data);
-    if (ch === 'd' || ch === 'D') {
-      this.armDeleteConfirm();
+    const selected = rows[this.selectedIndex];
+
+    // Key row actions: A=add key, S=set active, D=delete key
+    if (selected?.kind === 'key') {
+      if (ch === 'a' || ch === 'A') {
+        this.opts.onAddKey(selected.providerId);
+        return;
+      }
+      if (ch === 's' || ch === 'S') {
+        this.opts.onSetActiveKey(selected.providerId, selected.keyId);
+        return;
+      }
+      if (ch === 'd' || ch === 'D') {
+        this.armDeleteKeyConfirm(selected);
+        return;
+      }
+    }
+
+    // Source row actions: A=add key (if provider supports it), D=delete provider, P=proxy
+    if (selected?.kind === 'source') {
+      if ((ch === 'a' || ch === 'A') && selected.providerIds.length === 1) {
+        // Only allow adding keys to standalone providers (not grouped ones)
+        const providerId = selected.providerIds[0];
+        if (providerId) this.opts.onAddKey(providerId);
+        return;
+      }
+      if ((ch === 'p' || ch === 'P') && selected.providerIds.length === 1) {
+        // Allow setting proxy URL for standalone providers
+        const providerId = selected.providerIds[0];
+        if (providerId) this.opts.onSetProxyUrl(providerId);
+        return;
+      }
+      if ((ch === 'r' || ch === 'R') && selected.providerIds.length === 1) {
+        // Allow toggling key rotation for standalone providers
+        const providerId = selected.providerIds[0];
+        if (providerId) this.opts.onToggleRotation(providerId);
+        return;
+      }
+      if (ch === 'd' || ch === 'D') {
+        this.armDeleteProviderConfirm(selected);
+        return;
+      }
     }
   }
 
-  private armDeleteConfirm(): void {
-    const selected = this.rows[this.selectedIndex];
-    if (selected === undefined || selected.kind === 'add') return;
-    const ids = selected.providerIds;
+  private armDeleteProviderConfirm(selected: SourceRow): void {
     const prompt =
-      ids.length === 1
+      selected.providerIds.length === 1
         ? `Delete platform "${selected.label}"?`
-        : `Delete platform "${selected.label}" and all ${String(ids.length)} providers?`;
+        : `Delete platform "${selected.label}" and all ${String(selected.providerIds.length)} providers?`;
     this.confirm = {
       label: prompt,
-      providerIds: ids,
+      providerIds: selected.providerIds,
+    };
+    this.invalidate();
+  }
+
+  private armDeleteKeyConfirm(selected: KeyRow): void {
+    const prompt = `Delete API key "${selected.label}" from provider "${selected.providerId}"?`;
+    this.confirm = {
+      label: prompt,
+      providerIds: [`${selected.providerId}:${selected.keyId}`], // special format for key deletion
     };
     this.invalidate();
   }
@@ -277,7 +419,19 @@ export class ProviderManagerComponent extends Container implements Focusable {
       this.confirm = undefined;
       this.invalidate();
       if (confirm === undefined) return;
-      this.opts.onDeleteSource(confirm.providerIds);
+      // Check if it's a key deletion (format: "providerId:keyId")
+      const firstId = confirm.providerIds[0];
+      if (!firstId) return;
+      if (firstId.includes(':')) {
+        const parts = firstId.split(':', 2);
+        const providerId = parts[0];
+        const keyId = parts[1];
+        if (providerId && keyId) {
+          this.opts.onRemoveKey(providerId, keyId);
+        }
+      } else {
+        this.opts.onDeleteSource(confirm.providerIds);
+      }
       return;
     }
   }
@@ -349,19 +503,52 @@ function renderRow(
         ? currentTheme.fg('primary', text)
         : currentTheme.fg('text', text);
 
-  const isActive = row.kind === 'source' && row.hasActive;
-  const marker = isActive ? ` ${CURRENT_MARK}` : '';
+  // The active provider is flagged with a trailing "← current" (success),
+  // matching the model selector's current-item marker — see .agents/skills/write-tui/DESIGN.md.
+  const isActiveProvider = row.kind === 'source' && row.hasActive;
+  const isActiveKey = row.kind === 'key' && row.isActive;
+  const marker = (isActiveProvider || isActiveKey) ? ` ${CURRENT_MARK}` : '';
 
   const labelWidth = Math.max(0, width - 4 - visibleWidth(marker));
   const labelText = truncateToWidth(row.label, labelWidth, '…');
   let line = `  ${pointerStyle(`${pointer} `)}${labelStyle(labelText)}`;
-  if (isActive) line += currentTheme.fg('success', marker);
+  if (isActiveProvider || isActiveKey) line += currentTheme.fg('success', marker);
 
   const lines: string[] = [line];
 
-  if (row.kind === 'source' && row.baseUrl !== undefined && row.baseUrl.length > 0) {
-    const urlText = truncateToWidth(row.baseUrl, Math.max(0, width - 6), '…');
-    lines.push(currentTheme.fg('textMuted', `      ${urlText}`));
+  if (row.kind === 'source') {
+    if (row.baseUrl !== undefined && row.baseUrl.length > 0) {
+      const urlText = truncateToWidth(row.baseUrl, Math.max(0, width - 6), '…');
+      lines.push(currentTheme.fg('textMuted', `      ${urlText}`));
+    }
+    if (row.keyRows.length >= 2) {
+      const state = row.rotateKeys === true ? 'on' : 'off';
+      lines.push(
+        currentTheme.fg(
+          row.rotateKeys === true ? 'success' : 'textDim',
+          `      rotate keys: ${state}`,
+        ),
+      );
+    }
+    // Key rows are rendered as separate entries in the flat rows array,
+    // so we don't render them again here.
+  } else if (row.kind === 'key') {
+    // Render key row with indentation
+    const keyLabelWidth = Math.max(0, width - 8 - visibleWidth(marker));
+    const keyLabelText = truncateToWidth(row.label, keyLabelWidth, '…');
+    const keyPointer = isSelected ? SELECT_POINTER : ' ';
+    const keyPointerStyle = (text: string) =>
+      isSelected ? currentTheme.fg('primary', text) : currentTheme.fg('textDim', text);
+    const keyLine = `    ${keyPointerStyle(`${keyPointer} `)}${currentTheme.fg('text', keyLabelText)}  ${currentTheme.fg('textMuted', row.preview)}`;
+    if (row.isActive) {
+      lines.push(currentTheme.fg('success', `${keyLine} ${CURRENT_MARK}`));
+    } else {
+      lines.push(keyLine);
+    }
+    if (row.proxyUrl !== undefined) {
+      const proxyText = truncateToWidth(proxyHost(row.proxyUrl), Math.max(0, width - 8), '…');
+      lines.push(currentTheme.fg('textMuted', `      proxy: ${proxyText}`));
+    }
   }
 
   return lines;

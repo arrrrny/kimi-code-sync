@@ -55,6 +55,7 @@ export interface EditorKeyboardHost {
   beginInputHistoryRecall?(): void;
   restoreInputHistoryEntry?(direction: 1 | -1): void;
   restoreInputHistoryDraft?(): void;
+  openMessageQueueManager(): void;
   steerQueuedMessagesIntoRunningTurn(manual?: boolean): void;
   validateMediaCapabilities(extraction: {
     hasMedia: boolean;
@@ -76,6 +77,8 @@ export interface EditorKeyboardHost {
   cancelRunningShellCommand(): void;
   hideSessionPicker(): void;
   openUndoSelector(): void;
+  /** Alt+M: rotate the session model through the user's favorite models. */
+  rotateFavoriteModels(): void;
   stop(exitCode?: number): Promise<void>;
   ensureSession(): Promise<Session | undefined>;
   handlePlanToggle(next: boolean): void;
@@ -275,6 +278,15 @@ export class EditorKeyboardController {
         return;
       }
       togglePlan();
+    };
+
+    editor.onAltM = () => {
+      host.track('shortcut_model_rotate_pressed');
+      host.rotateFavoriteModels();
+    };
+
+    editor.onAltQ = () => {
+      host.openMessageQueueManager();
     };
 
     editor.onInputModeChange = (mode) => {

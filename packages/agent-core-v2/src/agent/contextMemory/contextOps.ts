@@ -39,6 +39,7 @@ export function readContextCompactionShapeInput(
     keptUserMessageCount,
     keptHeadUserMessageCount: readOptionalNumber(fields, 'keptHeadUserMessageCount'),
     droppedCount: readOptionalNumber(fields, 'droppedCount'),
+    handoffPath: readOptionalString(fields, 'handoffPath'),
     legacyTail: readOptionalBoolean(fields, 'legacyTail') ?? keptUserMessageCount === undefined,
   };
 }

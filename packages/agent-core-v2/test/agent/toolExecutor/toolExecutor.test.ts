@@ -855,7 +855,7 @@ describe('AgentToolExecutorService', () => {
         expect.objectContaining({ output: 'Tool "first" was aborted', isError: true }),
         expect.objectContaining({ output: 'Tool "second" was aborted', isError: true }),
       ]);
-      expect([...durations].sort((a, b) => a - b)).toEqual([0, 25]);
+      expect([...durations].toSorted((a, b) => a - b)).toEqual([0, 25]);
     } finally {
       vi.useRealTimers();
     }

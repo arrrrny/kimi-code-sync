@@ -76,6 +76,9 @@ export interface AppState {
   upgrade: UpgradePreferences;
   statusLine?: StatusLineConfig;
   markdown?: MarkdownConfig;
+  /** Favorite model aliases (tui.toml favorite_models, add-order); absent means
+   * none. Drives the /model Favorites tab, star markers, and Alt+M rotation. */
+  favoriteModels?: readonly string[];
   transcript: TranscriptConfig;
   availableModels: Record<string, ModelAlias>;
   availableProviders: Record<string, ProviderConfig>;
@@ -167,6 +170,8 @@ export interface CompactionTranscriptData {
   readonly tokensBefore?: number;
   readonly tokensAfter?: number;
   readonly instruction?: string;
+  readonly model?: string;
+  readonly handoffPath?: string;
 }
 
 export interface CronTranscriptData {

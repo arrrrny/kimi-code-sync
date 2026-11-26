@@ -10,6 +10,7 @@ import { ScopeActivation, registerScopedService } from '#/_base/di/scope';
 import { Error2 } from '#/_base/errors/errors';
 
 import type { CatalogModel, CatalogProviderInfo } from '#human/provider-catalog/catalog';
+import { createKeyedCredentialProvider } from '../provider/apiKeyRotation';
 import {
   createOAuthCredentialProvider,
   createStaticCredentialProvider,
@@ -204,7 +205,10 @@ export class ModelCatalog extends Disposable implements IModelCatalog {
     providerId: string,
     provider: CatalogProviderInfo,
   ): Promise<ProviderCredentialState> {
-    const declared = declaredProviderCredential(provider, providerId);
+    const declared = declaredProviderCredential(
+      this.providers.get(providerId) ?? provider,
+      providerId,
+    );
     const hasApiKey = hasConfiguredApiKey(provider);
     const hasOAuthToken = await this.hasCachedToken(providerId, provider);
     return {
@@ -307,6 +311,7 @@ export class ModelCatalog extends Disposable implements IModelCatalog {
       },
       endpoint: {
         baseUrl: resolvedBaseUrl,
+        proxyUrl: providerConfig?.proxyUrl,
         headers: resolveOutboundHeaders(
           providerConfig?.type,
           providerConfig?.customHeaders,
@@ -382,6 +387,14 @@ export class ModelCatalog extends Disposable implements IModelCatalog {
     auth: ResolvedModelAuthMaterial,
   ): LlmCredentialProvider {
     if (auth.apiKey !== undefined) {
+      const configured = this.providers.get(providerName);
+      if (configured !== undefined && Object.keys(configured.apiKeys ?? {}).length > 0) {
+        return createKeyedCredentialProvider({
+          providers: this.providers,
+          providerName,
+          fallbackApiKey: auth.apiKey,
+        });
+      }
       return createStaticCredentialProvider(auth.apiKey);
     }
     if (auth.apiKeyEnv !== undefined) {

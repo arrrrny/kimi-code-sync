@@ -387,7 +387,7 @@ function buildRgArgs(
   searchRoot = '.',
   cwd = searchRoot,
 ): string[] {
-  const prefix = relative(cwd, searchRoot).replace(/[\\*?[\]{}!]/g, '\\$&');
+  const prefix = relative(cwd, searchRoot).replaceAll(/[\\*?[\]{}!]/g, '\\$&');
   const searchGlob = (pattern: string): string => {
     if (cwd === searchRoot) return pattern;
     const negative = pattern.startsWith('!');

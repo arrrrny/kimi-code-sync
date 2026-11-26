@@ -4,7 +4,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 import type { FeedbackArchive } from './archive';
 
-const MAX_ARCHIVE_SIZE = 524_288_000; // 500 MiB, matches the backend limit.
+const MAX_ARCHIVE_SIZE = 524_288_000;
 const DEFAULT_CONCURRENCY = 3;
 const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_PART_TIMEOUT_MS = 60_000;
@@ -45,15 +45,10 @@ export interface FeedbackUploadUrlApi {
 }
 
 export interface UploadArchiveOptions {
-  /** Zip entry name sent to the backend. */
   readonly filename: string;
-  /** Abort a single part PUT if it does not complete within this many milliseconds. */
   readonly timeoutMs?: number;
-  /** Number of parts to upload concurrently (defaults to 3). */
   readonly concurrency?: number;
-  /** Per-part retry attempts after the first failure (defaults to 3). */
   readonly maxRetries?: number;
-  /** Called after each part finishes with the cumulative uploaded bytes. */
   readonly onProgress?: (uploadedBytes: number, totalBytes: number) => void;
   readonly signal?: AbortSignal;
   readonly redirect?: 'error';
@@ -226,6 +221,5 @@ function isRetryable(error: unknown): boolean {
   if (error instanceof UploadPartHttpError) {
     return error.status >= 500 || error.status === 408 || error.status === 429;
   }
-  // Network errors and timeouts are retryable.
   return true;
 }

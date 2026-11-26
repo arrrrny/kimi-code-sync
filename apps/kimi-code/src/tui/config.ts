@@ -226,6 +226,7 @@ export const TuiConfigFileSchema = z.object({
   cache_expiry_hint: z.boolean().optional(),
   disable_feedback_survey: z.boolean().optional(),
   auto_session_title: z.boolean().optional(),
+  favorite_models: z.array(z.string()).optional(),
   follow_up_behavior: z.unknown().optional(),
   editor: z
     .object({
@@ -266,6 +267,10 @@ export const TuiConfigSchema = z.object({
   cacheExpiryHint: z.boolean().optional(),
   disableFeedbackSurvey: z.boolean().optional(),
   autoSessionTitle: z.boolean().optional(),
+  /** Favorite model aliases in the order they were added; drives the
+   * /model Favorites tab and the Alt+M rotate order. Optional only so older
+   * test fixtures still typecheck. */
+  favoriteModels: z.array(z.string()).optional(),
   followUpBehavior: FollowUpBehaviorSchema.optional(),
   editorCommand: z.string().nullable(),
   notifications: NotificationsConfigSchema,
@@ -296,6 +301,7 @@ export const DEFAULT_TUI_CONFIG: TuiConfig = TuiConfigSchema.parse({
   disablePasteBurst: false,
   cacheExpiryHint: true,
   autoSessionTitle: true,
+  favoriteModels: [],
   editorCommand: null,
   notifications: DEFAULT_NOTIFICATIONS_CONFIG,
   upgrade: DEFAULT_UPGRADE_PREFERENCES,
@@ -455,6 +461,7 @@ export function normalizeTuiConfig(
     cacheExpiryHint: config.cache_expiry_hint ?? DEFAULT_TUI_CONFIG.cacheExpiryHint,
     disableFeedbackSurvey: config.disable_feedback_survey,
     autoSessionTitle: config.auto_session_title ?? DEFAULT_TUI_CONFIG.autoSessionTitle,
+    favoriteModels: config.favorite_models ?? DEFAULT_TUI_CONFIG.favoriteModels,
     followUpBehavior,
     editorCommand: command === undefined || command.length === 0 ? null : command,
     notifications: {
@@ -536,6 +543,11 @@ export function renderTuiConfig(config: TuiConfig): string {
 # It receives a JSON snapshot (model, cwd, git, usage, mode) on stdin.
 # command = "~/.kimi-code/statusline.sh"
 `;
+  const favorites = config.favoriteModels ?? [];
+  const favoritesSection =
+    favorites.length > 0
+      ? `favorite_models = ${JSON.stringify(favorites)} # Aliases shown in the /model Favorites tab; Alt+M in the editor rotates through them`
+      : `# favorite_models = ["kimi-code/kimi-for-coding"] # Shown in the /model Favorites tab; Alt+M rotates`
   return `# ~/.kimi-code/tui.toml
 # Client preferences for kimi-code.
 # Agent/runtime settings stay in ~/.kimi-code/config.toml.
@@ -547,6 +559,7 @@ render_latex = ${String(config.renderLatex !== false)} # false keeps LaTeX math 
 disable_paste_burst = ${String(config.disablePasteBurst)} # true disables non-bracketed paste-burst fallback
 cache_expiry_hint = ${String(config.cacheExpiryHint !== false)} # false disables the "cache expired" dialog on resume / idle submit
 ${config.disableFeedbackSurvey === undefined ? '' : `disable_feedback_survey = ${String(config.disableFeedbackSurvey)}\n`}auto_session_title = ${String(config.autoSessionTitle !== false)} # false stops the TUI from auto-generating a session title after the first turn
+${favoritesSection}
 ${config.followUpBehavior === undefined ? `# ${followUpLine}` : followUpLine}
 
 [editor]

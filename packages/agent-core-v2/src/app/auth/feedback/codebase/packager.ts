@@ -15,9 +15,6 @@ interface PackageEntry {
   readonly mtimeMs: number;
 }
 
-/**
- * Pack the scanned codebase into a zip, with files placed at the zip root.
- */
 export async function packageCodebase(
   scan: FeedbackCodebaseScanResult,
   archivePath: string,
@@ -74,10 +71,6 @@ async function packageEntries(
       fileCount: entries.length,
     };
   } catch (error) {
-    // A failed zip (e.g. a source file vanished or became unreadable between
-    // scan and packaging) would otherwise leave a partial archive behind in
-    // the cache dir. Destroy the stream so the handle is released before we
-    // remove the file, then best-effort delete it.
     output.destroy();
     await rm(archivePath, { force: true }).catch(() => {});
     throw error;

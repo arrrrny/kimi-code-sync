@@ -13,6 +13,7 @@ export function stubProviderService(
     list: () => providers,
     getDefaultProvider: () => undefined,
     set: async () => {},
+    setActiveApiKey: async () => {},
     delete: async () => {},
     loadAll: () => {},
     replaceAll: async () => {},

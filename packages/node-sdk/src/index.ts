@@ -20,6 +20,7 @@ export { SDKRpcClientBase } from '#/rpc';
 export type { ConfigSectionChange } from '#/rpc';
 export { KimiForCodingProvider } from '#/kimi-code-model-provider';
 export type { KimiForCodingProviderOptions } from '#/kimi-code-model-provider';
+export { removeProviderFromConfig } from '#/v2/config-mapper';
 
 export {
   applyCatalogProvider,
@@ -90,6 +91,7 @@ export { resolveConfigPath } from '@moonshot-ai/agent-core-v2';
 export { limitAgentReplayByTurns } from '#/replay';
 export { parseAgentFileText, resolveAgentPath } from '@moonshot-ai/agent-core-v2';
 export { SECONDARY_DERIVED_MODEL_ALIAS } from '#/config/index';
+export { PRIMARY_SUBAGENT_MODEL_CHOICE } from '@moonshot-ai/agent-core-v2/session/subagent/configSection';
 
 export { installGlobalProxyDispatcher } from '#/proxy';
 

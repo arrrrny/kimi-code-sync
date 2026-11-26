@@ -5,7 +5,7 @@ import type { ModelCapability } from '#/llm/request';
 
 export type BedrockWireProtocol = 'anthropic' | 'openai' | 'openai_responses';
 
-const GEO_INFERENCE_PROFILE_PREFIX_RE = /^(?:[a-z]{2}|apac|global)$/;
+const GEO_INFERENCE_PROFILE_PREFIX_RE = /^(?:[a-z]{2}(?:-[a-z]+)?|apac|global)$/;
 
 export function stripBedrockInferenceProfilePrefix(model: string): string {
   const separator = model.indexOf('.');

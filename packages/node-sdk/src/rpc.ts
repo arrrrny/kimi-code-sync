@@ -7,6 +7,8 @@ import type {
 } from '@moonshot-ai/agent-core-v2/app/auth/feedback';
 import type { PromptPredictionCancelReason } from '@moonshot-ai/agent-core-v2/features/promptPrediction/promptPrediction';
 import type { SwarmModeTrigger } from '@moonshot-ai/agent-core-v2/features/swarm/agent/swarm';
+import type { SessionModelOverrideKind } from '@moonshot-ai/klient/core/facade/agent';
+import type { SessionModelOverrides } from '@moonshot-ai/agent-core-v2/agent/profile/profile';
 
 import type { AgentContextData } from '#/context';
 import { ErrorCodes, KimiError, makeErrorPayload } from '#/errors';
@@ -136,6 +138,15 @@ export interface SetSessionModelRpcInput extends SessionIdRpcInput {
   readonly model: string;
 }
 
+export interface SetSessionModelOverrideRpcInput extends SessionIdRpcInput {
+  readonly kind: SessionModelOverrideKind;
+  readonly alias: string | null;
+}
+
+export interface GetSessionModelOverrideRpcInput extends SessionIdRpcInput {
+  readonly kind: SessionModelOverrideKind;
+}
+
 export interface SetSessionModelRpcResult {
   readonly model: string;
   readonly providerName?: string | undefined;
@@ -143,6 +154,16 @@ export interface SetSessionModelRpcResult {
 
 export interface SetSessionThinkingRpcInput extends SessionIdRpcInput {
   readonly effort: string;
+}
+
+export interface SetSessionCompactionTriggerRatioRpcInput extends SessionIdRpcInput {
+  /** New session-scoped auto-compaction trigger ratio; `undefined` clears the override. */
+  readonly ratio?: number | undefined;
+}
+
+export interface SetSessionCompactionTokenBudgetRpcInput extends SessionIdRpcInput {
+  /** New session-scoped absolute compaction token budget (in thousands of tokens); `undefined` clears the override. */
+  readonly tokens?: number | undefined;
 }
 
 export interface SetSessionPermissionRpcInput extends SessionIdRpcInput {
@@ -289,9 +310,13 @@ export abstract class SDKRpcClientBase {
 
   abstract removeProvider(providerId: string): Promise<KimiConfig>;
 
+  abstract supportsAtomicSectionReplace(): boolean;
+
   abstract importCustomRegistry(
     options: ImportCustomRegistryOptions,
   ): Promise<ImportCustomRegistryResult>;
+
+  abstract replaceConfigSections(sections: Record<string, unknown>): Promise<void>;
 
   abstract refreshProviderModels(
     options?: RefreshProviderModelsOptions,
@@ -426,9 +451,43 @@ export abstract class SDKRpcClientBase {
 
   abstract setModel(input: SetSessionModelRpcInput): Promise<SetSessionModelRpcResult>;
 
-  abstract setThinking(input: SetSessionThinkingRpcInput): Promise<void>;
+abstract setThinking(input: SetSessionThinkingRpcInput): Promise<void>;
 
   abstract setPermission(input: SetSessionPermissionRpcInput): Promise<void>;
+
+  setSessionModelOverride(_input: SetSessionModelOverrideRpcInput): Promise<void> {
+    throw new Error(
+      'This SDK client does not support setting session model overrides.',
+    );
+  }
+
+  getSessionModelOverride(_input: GetSessionModelOverrideRpcInput): Promise<string | undefined> {
+    throw new Error(
+      'This SDK client does not support getting session model overrides.',
+    );
+  }
+
+  getAllSessionModelOverrides(_input: SessionIdRpcInput): Promise<SessionModelOverrides> {
+    throw new Error(
+      'This SDK client does not support getting session model overrides.',
+    );
+  }
+
+  setCompactionTriggerRatio(
+    _input: SetSessionCompactionTriggerRatioRpcInput,
+  ): Promise<void> {
+    throw new Error(
+      'This SDK client does not support setting the compaction trigger ratio.',
+    );
+  }
+
+  setCompactionTokenBudget(
+    _input: SetSessionCompactionTokenBudgetRpcInput,
+  ): Promise<void> {
+    throw new Error(
+      'This SDK client does not support setting the compaction token budget.',
+    );
+  }
 
   abstract updateSessionMetadata(input: UpdateSessionMetadataRpcInput): Promise<void>;
 
@@ -466,6 +525,16 @@ export abstract class SDKRpcClientBase {
   abstract getUsage(input: SessionIdRpcInput): Promise<SessionUsage>;
 
   abstract getStatus(input: SessionIdRpcInput): Promise<SessionStatus>;
+
+  /**
+   * The model alias bound to the session's interactive agent, without the
+   * context/plan/usage slices `getStatus` aggregates. The default reads the
+   * full status; clients that can serve the alias alone override it — a
+   * bulk loop over many sessions pays for the difference.
+   */
+  async getModelAlias(input: SessionIdRpcInput): Promise<string | undefined> {
+    return (await this.getStatus(input)).model;
+  }
 
   abstract listSkills(input: SessionIdRpcInput): Promise<readonly SkillSummary[]>;
 

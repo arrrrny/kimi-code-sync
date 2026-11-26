@@ -21,6 +21,8 @@ import { isOAuthCatalogVendor } from '#/llm-adapter/provider/provider-definition
 import { ISessionContext } from '#/session/sessionContext/sessionContext';
 import { ISessionMetadata } from '#/session/sessionMetadata/sessionMetadata';
 import { SessionMetaUpdated } from '#/session/sessionMetadata/sessionMetaEvents';
+import { IConfigService } from '#/app/config/config';
+import { isSubscriptionMethodEnabled } from '#/app/subscription/subscription';
 
 import { IAgentTitlePromptSource } from './agentTitlePromptSource';
 import { ISessionTitleService, type SessionTitleSource } from './sessionTitle';
@@ -60,6 +62,7 @@ export class SessionTitleService implements ISessionTitleService {
     @IHostRequestHeaders private readonly hostHeaders: IHostRequestHeaders,
     @ITelemetryService private readonly telemetry: ITelemetryService,
     @ILogService private readonly log: ILogService,
+    @IConfigService private readonly config: IConfigService,
   ) {}
 
   async generateTitle(opts?: {
@@ -119,6 +122,7 @@ export class SessionTitleService implements ISessionTitleService {
     force: boolean,
     source: SessionTitleSource,
   ): Promise<TitleGenerationResult | undefined> {
+    if (!isSubscriptionMethodEnabled(this.config, 'auto_session_title')) return undefined;
     const current = await this.metadata.read();
     if (!force) {
       if (current.titleKind === 'custom' || current.titleKind === 'generated') return undefined;
