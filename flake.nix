@@ -93,6 +93,7 @@
         ./apps/vis/web
         ./docs
         ./tests/scenarios
+        ./tests/e2e
       ];
 
       workspaceNames = [
@@ -129,6 +130,7 @@
         "@moonshot-ai/vis-web"
         "kimi-code-docs"
         "@moonshot-ai/scenarios"
+        "@moonshot-ai/e2e"
       ];
     in
     {

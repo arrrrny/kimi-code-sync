@@ -924,6 +924,7 @@ describe('AgentConversationUndoService', () => {
       );
     });
 
+    ctx.mockNextResponse({ type: 'text', text: 'task C ack' });
     const resetting = undo.undo(1);
     controlledC.resolve('c\n');
     await resetting;
@@ -933,6 +934,7 @@ describe('AgentConversationUndoService', () => {
       const delivered = ctx.context.history().filter((message) => message.origin?.kind === 'task');
       expect(delivered.map((message) => message.origin?.kind === 'task' ? message.origin.taskId : undefined)).toEqual([taskC]);
     });
+    await ctx.get(IAgentLoopService).settled();
   });
 
   it('registers a participant that late-attaches inside the undo rerun window', async () => {

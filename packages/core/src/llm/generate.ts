@@ -7,7 +7,6 @@ import { mergeHeaders, resolveEndpoint } from '#/llm/endpoint';
 import { opencodeSessionHeaders } from '#/llm/protocol/session-headers';
 import { isAbortError, toLlmErrorMessage, toLlmSyntaxErrorMessage } from '#/llm/protocol/errors';
 import type { DecodeSink, LlmModule, ProtocolReply } from '#/llm/protocol/protocol';
-import { withProtocolCapabilities } from '#/llm/protocol/rules/model';
 import type { LlmRequest } from '#/llm/request';
 import type {
   LlmDeltaEvent,
@@ -36,7 +35,7 @@ function moduleOf(request: LlmRequest): LlmModule {
   return {
     model: {
       ...request.model,
-      spec: withProtocolCapabilities(request.model.spec, request.protocol.base),
+      spec: request.model.spec,
     },
     profile: request.profile ?? {},
     content: request.content,

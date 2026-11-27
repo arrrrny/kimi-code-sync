@@ -534,7 +534,6 @@ describe('AgentGoalService', () => {
     it('accepts a steer during a real goal continuation with the same prompt lifecycle', async () => {
       await ctx.restorePersisted();
       ctx.mockNextResponse({ type: 'text', text: 'Made progress.' });
-      ctx.mockNextResponse({ type: 'text', text: 'Steered response.' });
       const endedTurnIds: number[] = [];
       const endedTurnReasons: string[] = [];
       const continuationTurnIds: number[] = [];
@@ -2275,7 +2274,7 @@ describe('AgentGoalService hard wall-clock deadline', () => {
     );
     try {
       ctx.get(IAgentToolRegistryService).register(tool);
-      ctx.configure({ tools: ['SlowWork'] });
+      ctx.configure({ tools: ['SlowWork', 'UpdateGoal'] });
       await ctx.restorePersisted();
       await ctx.rpc.createGoal({ objective: 'finish bounded work' });
       await ctx
@@ -2345,7 +2344,7 @@ describe('AgentGoalService mid-turn budget stop', () => {
   it('grants one tool-free grace step when a token budget is reached mid-turn', async () => {
     const ctx = createTestAgent();
     try {
-      ctx.configure({ tools: ['GetGoal'] });
+      ctx.configure({ tools: ['GetGoal', 'UpdateGoal'] });
       await ctx.restorePersisted();
       await ctx.rpc.createGoal({ objective: 'work' });
       const goals = ctx.get(IAgentGoalService);
@@ -2358,7 +2357,6 @@ describe('AgentGoalService mid-turn budget stop', () => {
         arguments: JSON.stringify({}),
       });
       ctx.mockNextResponse({ type: 'text', text: 'Final status: budget exhausted.' });
-      ctx.mockNextResponse({ type: 'text', text: 'This step should never run.' });
 
       await ctx.rpc.prompt({ input: [{ type: 'text', text: 'work' }] });
       const events = await ctx.untilTurnEnd();
@@ -2386,7 +2384,6 @@ describe('AgentGoalService mid-turn budget stop', () => {
       expect(toolResultIndex).toBeGreaterThanOrEqual(0);
       expect(reminderIndex).toBeGreaterThan(toolResultIndex);
       expect(JSON.stringify(history)).toContain('Final status: budget exhausted.');
-      expect(JSON.stringify(history)).not.toContain('This step should never run.');
 
       const goal = (await ctx.rpc.getGoal({})).goal;
       expect(goal?.status).toBe('blocked');
@@ -2400,7 +2397,7 @@ describe('AgentGoalService mid-turn budget stop', () => {
   it('lets an automatic continuation report final status after crossing its token budget', async () => {
     const ctx = createTestAgent();
     try {
-      ctx.configure({ tools: ['GetGoal'] });
+      ctx.configure({ tools: ['GetGoal', 'UpdateGoal'] });
       await ctx.restorePersisted();
       const goals = ctx.get(IAgentGoalService);
         await goals.createGoal({ objective: 'work' });
@@ -2414,7 +2411,6 @@ describe('AgentGoalService mid-turn budget stop', () => {
         arguments: JSON.stringify({}),
       });
       ctx.mockNextResponse({ type: 'text', text: 'Final status: budget exhausted.' });
-      ctx.mockNextResponse({ type: 'text', text: 'This step should never run.' });
 
       const turnEnd = ctx.untilTurnEnd();
       await goals.resumeGoal({ continueIfBlocked: true });
@@ -2436,7 +2432,6 @@ describe('AgentGoalService mid-turn budget stop', () => {
 
       const history = ctx.get(IAgentLoopService).history();
       expect(JSON.stringify(history)).toContain('Final status: budget exhausted.');
-      expect(JSON.stringify(history)).not.toContain('This step should never run.');
       expect(goals.getGoal().goal).toMatchObject({
         status: 'blocked',
         budget: { tokenBudgetReached: true },
@@ -2449,7 +2444,7 @@ describe('AgentGoalService mid-turn budget stop', () => {
   it('rejects tool calls made during the budget grace step without executing them', async () => {
     const ctx = createTestAgent();
     try {
-      ctx.configure({ tools: ['GetGoal', 'SetGoalBudget'] });
+      ctx.configure({ tools: ['GetGoal', 'SetGoalBudget', 'UpdateGoal'] });
       await ctx.restorePersisted();
       await ctx.rpc.createGoal({ objective: 'work' });
       const goals = ctx.get(IAgentGoalService);
@@ -2467,7 +2462,6 @@ describe('AgentGoalService mid-turn budget stop', () => {
         name: 'SetGoalBudget',
         arguments: JSON.stringify({ value: 5, unit: 'turns' }),
       });
-      ctx.mockNextResponse({ type: 'text', text: 'This step should never run.' });
 
       await ctx.rpc.prompt({ input: [{ type: 'text', text: 'work' }] });
       const events = await ctx.untilTurnEnd();
@@ -2486,7 +2480,6 @@ describe('AgentGoalService mid-turn budget stop', () => {
       expect(JSON.stringify(toolResults.at(-1))).toContain(
         'Goal budget exhausted; tool calls are rejected. Write your final message.',
       );
-      expect(JSON.stringify(history)).not.toContain('This step should never run.');
 
       const goal = (await ctx.rpc.getGoal({})).goal;
       expect(goal?.status).toBe('blocked');
@@ -2519,7 +2512,6 @@ describe('AgentGoalService mid-turn budget stop', () => {
         name: 'SetGoalBudget',
         arguments: JSON.stringify({ value: 5, unit: 'turns' }),
       });
-      ctx.mockNextResponse({ type: 'text', text: 'This step should never run.' });
 
       await ctx.rpc.prompt({ input: [{ type: 'text', text: 'resume the goal' }] });
       await ctx.untilTurnEnd();
@@ -2529,7 +2521,6 @@ describe('AgentGoalService mid-turn budget stop', () => {
       expect(JSON.stringify(history)).toContain(
         'Goal budget exhausted; tool calls are rejected. Write your final message.',
       );
-      expect(JSON.stringify(history)).not.toContain('This step should never run.');
       await vi.waitFor(() => expect(goals.getGoal().goal?.status).toBe('blocked'));
       expect(goals.getGoal().goal?.budget.turnBudget).toBe(1);
     } finally {
@@ -2640,7 +2631,6 @@ describe('AgentGoalService goal outcome tool result flow', () => {
         name: 'UpdateGoal',
         arguments: JSON.stringify({ status: 'complete' }),
       });
-      ctx.mockNextResponse({ type: 'text', text: 'This summary should not run.' });
 
       await ctx.rpc.prompt({ input: [{ type: 'text', text: 'work' }] });
       const events = await ctx.untilTurnEnd();
@@ -2661,7 +2651,6 @@ describe('AgentGoalService goal outcome tool result flow', () => {
       expect((await ctx.rpc.getGoal({})).goal).toBeNull();
       const history = ctx.get(IAgentLoopService).history();
       expect(JSON.stringify(history)).toContain('Write a concise final message');
-      expect(JSON.stringify(history)).not.toContain('This summary should not run.');
       expect(history.at(-1)?.role).toBe('tool');
     } finally {
       await ctx.dispose();

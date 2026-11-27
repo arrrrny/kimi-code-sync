@@ -11,8 +11,9 @@ export default {
   removeWorkspaceConfirmHostOffline:
     'Remove "{name}" from the sidebar\n{device} isn\'t reachable right now, so this only hides the project in this app. Folders and files on the host are not deleted.',
   removeAction: 'Remove',
-  swarmEnableTitle: 'Enable swarm mode?',
-  swarmEnableConfirm: 'The agent will run multiple sub-agents in parallel.',
+  swarmEnabledMessage:
+    "High usage: Swarm is built for large parallel jobs and can use many times the tokens of a normal task. Start small, and turn swarm off when you're done.",
+  swarmEnabledTitle: 'Swarm mode is on',
   goalStartTitle: 'Start goal?',
   goalStartConfirm: '"{objective}" — the agent will run autonomously toward it.',
   newInGroup: 'New session in this project',
@@ -129,6 +130,7 @@ export default {
   aborted: 'Failed',
   abortedTitle: "This session's latest turn ended on an error",
   trust: {
+    checking: 'Checking project trust…',
     title: 'Trust this project',
     desc: "Until trusted, you can't send messages in this project, and project-level configurations such as agent instructions and MCP config stay disabled. These files can direct Kimi to run commands, so make sure you trust their authors. After trusting, tool calls still ask for your approval one by one, and trust is remembered for future config changes.",
     trustAction: 'Trust project',

@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { request as httpRequest } from 'node:http';
 import { existsSync } from 'node:fs';
-import { readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { createServer, type Socket } from 'node:net';
 import { join, resolve } from 'node:path';
 import { text } from 'node:stream/consumers';
@@ -15,13 +15,15 @@ import { WaitTimeoutError } from '#/errors';
 import { CLI_BUILD_ENV, KIMI_SERVICE_URL, kimiCliBuild, kimiCliCommand, kimiCliEnv, kimiServiceStubs } from '#/fixtures/cli';
 import { kimiConfigToml, mergeKimiConfig } from '#/fixtures/config';
 import { expectGolden, jsonDifferences, REFRESH_ENV, stableJson } from '#/fixtures/golden';
-import { isolateProcessEnv, TEST_ENV_DEFAULTS, testEnv } from '#/fixtures/env';
+import { isolateProcessEnv, TEST_ENV_DEFAULTS, testEnv, UNIT_TEST_SWITCHES } from '#/fixtures/env';
+import { bashPathOf, createGitWorktree } from '#/fixtures/git';
 import { createTestHome, osHomeEnv, type TestHome } from '#/fixtures/home';
 import { BROKEN_DATA_URLS, dataUrl, mp4Header, ONE_PIXEL_PNG_BASE64, solidPng } from '#/fixtures/media';
 import { installNetworkGuard, isLoopback, tcpTargetOf } from '#/fixtures/network';
 import { createNormalizer, FIXED_TIME, normalize } from '#/fixtures/normalize';
 import { killProcessTree, readNetworkViolations, TestProcess, type StartTestProcessOptions } from '#/fixtures/process';
 import { repoPath } from '#/fixtures/repo';
+import { contentDigest, directoryChanges, snapshotDirectory } from '#/fixtures/snapshot';
 import { deferred, gate, until, waitForEvent } from '#/fixtures/wait';
 
 const BLOCKED_CONNECTION = `await new Promise((resolve) => {
@@ -33,6 +35,38 @@ async function startScript(home: TestHome, source: string, options: Partial<Star
   await writeFile(entry, `import { connect } from 'node:net';\n${source}\n`);
   return TestProcess.start({ label: 'probe', command: { entry }, cwd: home.workspace, env: testEnv(), logDir: home.root, ...options });
 }
+
+describe('bashPathOf', () => {
+  it('spells a Windows path the way Git Bash prints the working directory', () => {
+    expect(bashPathOf('C:\\Users\\me\\app', 'win32')).toBe('/c/Users/me/app');
+    expect(bashPathOf('D:/work/app', 'win32')).toBe('/d/work/app');
+  });
+
+  it('keeps a POSIX path as it is', () => {
+    expect(bashPathOf('/tmp/app', 'linux')).toBe('/tmp/app');
+    expect(bashPathOf('/private/var/app', 'darwin')).toBe('/private/var/app');
+  });
+});
+
+describe('createGitWorktree', () => {
+  it('commits the given files in the main checkout and checks them out in a linked worktree', async () => {
+    const home = await createTestHome('git-worktree');
+    try {
+      const layout = {
+        main: join(home.workspace, 'app'),
+        worktree: join(home.workspace, 'app-fix'),
+      };
+
+      expect(await createGitWorktree(layout, { files: { 'src/tracked.txt': 'one\n' } })).toEqual(layout);
+
+      expect(await readFile(join(layout.worktree, 'src', 'tracked.txt'), 'utf8')).toBe('one\n');
+      expect(await readFile(join(layout.worktree, '.git'), 'utf8')).toMatch(/^gitdir: .*worktrees[\\/]app-fix\s*$/);
+      expect(existsSync(join(layout.main, '.git', 'HEAD'))).toBe(true);
+    } finally {
+      await home.remove();
+    }
+  });
+});
 
 describe('TestProcess', () => {
   it('refuses to start an entry that does not exist', async () => {
@@ -89,6 +123,29 @@ describe('TestProcess', () => {
       expect(JSON.parse(await child.waitForLine((line) => line.startsWith('{')))).toEqual({ stubbed: 404, other: 'ECONNREFUSED' });
       await expect(child.closed).resolves.toEqual({ code: 0, signal: null });
       await expect(child.networkViolations()).resolves.toEqual(['other.example.test:80']);
+    } finally {
+      await home.remove();
+    }
+  }, 20_000);
+
+  it('answers every URL under a stubbed prefix and nothing beside it', async () => {
+    const home = await createTestHome('testkit-process');
+    try {
+      const child = await startScript(home, [
+        "const status = async (url) => fetch(url).then((response) => response.status, (error) => error.cause?.code ?? error.message);",
+        "const nested = await status('http://cdn.example.test/tools/fd/v1/fd.tar.gz');",
+        "const sibling = await status('http://cdn.example.test/tools/rg/v1/rg.tar.gz');",
+        "const exact = await status('http://exact.example.test/api.json?page=2');",
+        'console.log(JSON.stringify({ nested, sibling, exact }));',
+      ].join('\n'), {
+        fetchStubs: [
+          { method: 'GET', url: 'http://cdn.example.test/tools/fd/', status: 404, prefix: true },
+          { method: 'GET', url: 'http://exact.example.test/api.json', status: 404 },
+        ],
+      });
+      expect(JSON.parse(await child.waitForLine((line) => line.startsWith('{')))).toEqual({ nested: 404, sibling: 'ECONNREFUSED', exact: 'ECONNREFUSED' });
+      await expect(child.closed).resolves.toEqual({ code: 0, signal: null });
+      await expect(child.networkViolations()).resolves.toEqual(['cdn.example.test:80', 'exact.example.test:80']);
     } finally {
       await home.remove();
     }
@@ -263,6 +320,15 @@ describe('testEnv', () => {
     expect(env).not.toHaveProperty('KIMI_DISABLE_TELEMETRY');
   });
 
+  it('applies the unit-test switches by default and drops them when each is set to undefined', () => {
+    const switches = Object.keys(UNIT_TEST_SWITCHES);
+    expect(switches.length).toBeGreaterThan(0);
+    expect(testEnv({ base: {} })).toMatchObject(UNIT_TEST_SWITCHES);
+    const productDefaults = testEnv({ base: {}, set: Object.fromEntries(switches.map((name) => [name, undefined])) });
+    for (const name of switches) expect(productDefaults).not.toHaveProperty(name);
+    expect(productDefaults['KIMI_DISABLE_TELEMETRY']).toBe('1');
+  });
+
   it('isolates process.env and restores it exactly', () => {
     process.env['KIMI_TESTKIT_PROBE'] = 'outer';
     const before = { ...process.env };
@@ -347,6 +413,73 @@ describe('createTestHome', () => {
     }
     await home.remove();
     expect(existsSync(home.root)).toBe(false);
+  });
+});
+
+describe('snapshotDirectory', () => {
+  it('reports exactly the files that were added, removed or changed between two snapshots', async () => {
+    const home = await createTestHome('testkit-snapshot');
+    try {
+      await mkdir(join(home.workspace, 'nested'));
+      await Promise.all([
+        writeFile(join(home.workspace, 'kept.txt'), 'kept\n'),
+        writeFile(join(home.workspace, 'edited.txt'), 'old\n'),
+        writeFile(join(home.workspace, 'nested', 'removed.txt'), 'gone\n'),
+      ]);
+      const before = await snapshotDirectory(home.workspace);
+      expect(before).toEqual({
+        'edited.txt': contentDigest('old\n'),
+        'kept.txt': contentDigest('kept\n'),
+        'nested/removed.txt': contentDigest('gone\n'),
+      });
+      expect(directoryChanges(before, await snapshotDirectory(home.workspace))).toEqual([]);
+
+      await Promise.all([
+        writeFile(join(home.workspace, 'edited.txt'), 'new\n'),
+        writeFile(join(home.workspace, 'nested', 'added.txt'), 'fresh\n'),
+        rm(join(home.workspace, 'nested', 'removed.txt')),
+      ]);
+      expect(directoryChanges(before, await snapshotDirectory(home.workspace))).toEqual([
+        { path: 'edited.txt', kind: 'changed' },
+        { path: 'nested/added.txt', kind: 'added' },
+        { path: 'nested/removed.txt', kind: 'removed' },
+      ]);
+    } finally {
+      await home.remove();
+    }
+  });
+
+  it('tells a rewritten file with the same bytes from a changed one', async () => {
+    const home = await createTestHome('testkit-snapshot');
+    try {
+      await writeFile(join(home.workspace, 'a.txt'), 'same\n');
+      const before = await snapshotDirectory(home.workspace);
+      await writeFile(join(home.workspace, 'a.txt'), 'same\n');
+      expect(directoryChanges(before, await snapshotDirectory(home.workspace))).toEqual([]);
+      expect(directoryChanges(before, { 'a.txt': contentDigest('same') })).toEqual([{ path: 'a.txt', kind: 'changed' }]);
+    } finally {
+      await home.remove();
+    }
+  });
+
+  it('reports a file named like an Object.prototype member as added or removed, not changed', () => {
+    const digest = contentDigest('content\n');
+    expect(directoryChanges({}, { constructor: digest, toString: digest })).toEqual([
+      { path: 'constructor', kind: 'added' },
+      { path: 'toString', kind: 'added' },
+    ]);
+    expect(directoryChanges({ constructor: digest }, {})).toEqual([{ path: 'constructor', kind: 'removed' }]);
+  });
+
+  it.runIf(process.platform !== 'win32')('records a symbolic link by its target instead of following it', async () => {
+    const home = await createTestHome('testkit-snapshot');
+    try {
+      await writeFile(join(home.workspace, 'target.txt'), 'content\n');
+      await symlink('target.txt', join(home.workspace, 'link.txt'));
+      expect(await snapshotDirectory(home.workspace)).toEqual({ 'link.txt': 'link:target.txt', 'target.txt': contentDigest('content\n') });
+    } finally {
+      await home.remove();
+    }
   });
 });
 

@@ -1,4 +1,4 @@
-export type ProtocolName = 'openai' | 'anthropic' | 'google';
+export type ProtocolName = 'openai' | 'openai-responses' | 'anthropic' | 'google';
 
 export type FinishReason = 'completed' | 'tool_calls' | 'truncated' | 'filtered' | 'paused';
 
@@ -18,6 +18,7 @@ export interface ToolCallSpec {
   readonly rawArguments?: string;
   readonly argumentChunks?: number;
   readonly invalid?: boolean;
+  readonly extras?: Readonly<Record<string, unknown>>;
 }
 
 export type ReplyPart =
@@ -47,7 +48,7 @@ export interface HoldPoint {
 export type ReplyEnding =
   | { readonly type: 'complete' }
   | { readonly type: 'stream-error'; readonly error: ErrorSpec }
-  | { readonly type: 'disconnect' };
+  | { readonly type: 'disconnect'; readonly afterUsage?: boolean };
 
 interface StepBase {
   readonly label: string;
@@ -58,8 +59,10 @@ interface StepBase {
 export interface ReplyStep extends StepBase {
   readonly kind: 'reply';
   readonly parts: readonly ReplyPart[];
+  readonly headers?: Readonly<Record<string, string>>;
   readonly finish?: FinishSpec;
   readonly usage?: UsageSpec | null;
+  readonly responseId?: string;
   readonly ending: ReplyEnding;
   readonly interleaveCalls: boolean;
 }

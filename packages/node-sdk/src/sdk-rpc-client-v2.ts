@@ -138,11 +138,7 @@ import { ISessionMediaStore } from '@moonshot-ai/agent-core-v2/agent/media/sessi
 import { buildDaemonFileUrl } from '@moonshot-ai/agent-core-v2/agent/media/mediaRef';
 import { join } from 'node:path';
 
-import {
-  encodeWorkDirKey,
-  isWorkDirKey,
-  workspaceRootKey,
-} from '@moonshot-ai/agent-core-v2/_base/utils/workdir-slug';
+import { workDirToPin } from '@moonshot-ai/agent-core-v2/session/workspaceContext/workspaceRoots';
 import { ContextClear } from '@moonshot-ai/agent-core-v2/agent/contextMemory/contextEvents';
 import { IEventDispatcher } from '@moonshot-ai/agent-core-v2/state/eventDispatcher';
 import { historyEntryFromContext } from '@moonshot-ai/agent-core-v2/agent/loop/history';
@@ -153,7 +149,8 @@ import { ITowerRateLimitService } from '@moonshot-ai/agent-core-v2/features/towe
 import { readTowerStatusSummary } from '@moonshot-ai/agent-core-v2/features/tower/tools/status/statusReader';
 import { loadMcpServers } from '@moonshot-ai/agent-core-v2/app/mcpConfig/configLoader';
 import { IGitService } from '@moonshot-ai/agent-core-v2/app/git/git';
-import { fsSuggestRequestSchema } from '@moonshot-ai/agent-core-v2/workspace/workspaceFs/fs';
+import { IWorktreeService } from '@moonshot-ai/agent-core-v2/app/worktree/worktree';
+import { fsSuggestRequestSchema } from '@moonshot-ai/agent-core-v2/project/projectFs/fs';
 import { ILogService } from '@moonshot-ai/agent-core-v2/_base/log/log';
 import { IAppendLogStore } from '@moonshot-ai/agent-core-v2/persistence/interface/appendLogStore';
 import { ISessionLockService } from '@moonshot-ai/agent-core-v2/persistence/interface/sessionLock';
@@ -182,7 +179,6 @@ import {
   IAgentPermissionModeService,
   IAgentPermissionRulesService,
   IAgentPluginCommandService,
-  IAgentReminderService,
   IAgentSkillService,
   IAgentSwarmService,
   IAgentTaskService,
@@ -217,9 +213,11 @@ import {
   IAgentTodoService,
   ISessionWorkspaceContext,
   ITelemetryService,
-  IWorkspaceAliases,
   ISessionActivityView,
-  IWorkspaceInstanceManager,
+  IProjectAliases,
+  IProjectInstanceManager,
+  IProjectService,
+  IProjectSessions,
   IEnvironmentService,
   IEnvironmentDeclarationService,
   closeSessionById,
@@ -229,11 +227,13 @@ import {
   programForSession,
   environmentEntryInfo,
   snapshotAgentEnvironmentBinding,
+  reloadProgramForSession,
   resumeSessionById,
   sessionDirOf,
-  workspacePersistenceScope,
+  projectPersistenceScope,
   logSeed,
   MAIN_AGENT_ID,
+  missingConfiguredModelAlias,
   prepareSystemPromptContext,
   PRINT_MAX_TURNS_DEFAULT,
   PRINT_WAIT_CEILING_S_DEFAULT,
@@ -252,10 +252,12 @@ import {
   type IDisposable,
   type ISessionScopeHandle,
   type McpManagedServer,
+  type ProgramDisclosedWorkdir,
   type Scope,
   type ServicesAccessor,
   type SessionSummary as V2SessionSummary,
-  type WorkspaceInstance,
+  type ProjectInstance,
+  type ProjectInstanceLease,
 } from '@moonshot-ai/agent-core-v2';
 import type { SessionModelOverrides } from '@moonshot-ai/agent-core-v2/agent/profile/profile';
 import {
@@ -354,6 +356,7 @@ import type {
   ResumeSessionInput,
   ResumedAgentState,
   ResumedSessionSummary,
+  SessionPlacement,
   SessionPlan,
   SessionStatus,
   SessionSummary,
@@ -373,7 +376,6 @@ import type {
   UploadFileOptions,
   WorkspaceTrustInfo,
   WorkspaceTrustInfoOptions,
-  WorkspaceTrustInstructionSources,
 } from '#/types';
 import {
   diagnosticsToConfigDiagnostics,
@@ -394,7 +396,19 @@ import {
   v2MetaToSessionMeta,
   v2SummaryToSessionSummary,
 } from '#/v2/session-mapper';
-import { SessionEventWiring } from '#/v2/session-wiring';
+import { readStatusModelContext, SessionEventWiring } from '#/v2/session-wiring';
+import type {
+  CreatedWorktree,
+  CreateWorktreeInput,
+  CreateWorktreeOptions,
+  InspectWorktreeRemovalInput,
+  RemoveWorktreeInput,
+  RunSetupScriptInput,
+  RunSetupScriptOptions,
+  WorkLocation,
+  WorktreeListing,
+  WorktreeRemovalCheck,
+} from '#/worktree';
 
 export interface SDKRpcClientV2Options {
   readonly homeDir?: string;
@@ -423,6 +437,11 @@ export interface SDKRpcClientV2Options {
  * `timeoutOutcome` clamps to.
  */
 const MAX_TIMER_DELAY_MS = 0x7fffffff;
+
+interface LeasedWorkdir {
+  readonly instance: ProjectInstance;
+  readonly workdir: ProgramDisclosedWorkdir;
+}
 
 function promptSubmissionResult(result: {
   readonly turn_id?: number;
@@ -711,51 +730,68 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
   }
 
   /**
-   * Session-less workspace instance acquisition shared by the workspace query
-   * surfaces: normalize, reject a missing / non-directory root (the
-   * `POST /workspaces` rule), then acquire a leased instance.
+   * Session-less working-directory acquisition shared by the workspace query
+   * surfaces: normalize, reject a missing / non-directory path (the
+   * `POST /workspaces` rule), then lease the project the directory resolves
+   * to together with the view a new session started there would run in.
    */
-  private async withWorkspaceInstance<T>(
+  private async withWorkdir<T>(
     operation: string,
     workDir: string,
-    use: (instance: WorkspaceInstance) => Promise<T>,
+    use: (leased: LeasedWorkdir) => Promise<T>,
   ): Promise<T> {
-    const root = normalizeRequiredWorkDir(operation, workDir);
-    await assertUsableWorkDir(this.engineAccessor.get(IHostFileSystem), root);
-    const lease = await this.engineAccessor.get(IWorkspaceInstanceManager).acquire({ root });
+    const dir = normalizeRequiredWorkDir(operation, workDir);
+    await assertUsableWorkDir(this.engineAccessor.get(IHostFileSystem), dir);
+    const lease = await this.engineAccessor.get(IProjectInstanceManager).acquire({ cwd: dir });
+    return this.leaseWorkdir(lease, dir, use);
+  }
+
+  private async isMissingWithoutProject(dir: string): Promise<boolean> {
+    const stat = await this.engineAccessor.get(IHostFileSystem).stat(dir).catch(() => undefined);
+    if (stat !== undefined) return false;
+    return (await this.engineAccessor.get(IProjectService).peekImplicit(dir)).project === undefined;
+  }
+
+  private async leaseWorkdir<T>(
+    lease: ProjectInstanceLease,
+    dir: string,
+    use: (leased: LeasedWorkdir) => Promise<T>,
+  ): Promise<T> {
+    const { instance } = lease;
     try {
-      return await use(lease.instance);
+      const pinned = workDirToPin(dir, instance.root);
+      const workdir = await instance.program.acquireWorkdir('local', pinned ?? instance.root, pinned === undefined);
+      try {
+        return await use({ instance, workdir });
+      } finally {
+        workdir.dispose();
+      }
     } finally {
       lease.dispose();
     }
   }
 
   /**
-   * Through the workspace instance's `IWorkspaceSkillCatalog` — the engine's
-   * own merged view (builtin / user / explicit / extra / workspace-root /
-   * plugin), so the session-less list matches what a session would serve.
-   * `IWorkspaceInstanceManager.acquire` is create-or-get: session creation
-   * materializes the instance anyway.
+   * Through the working-directory view's `IWorkspaceSkillCatalog` — the
+   * engine's own merged view (builtin / user / explicit / extra /
+   * workspace-root / plugin), so the session-less list matches what a session
+   * started in `workDir` would serve.
    */
   override async listWorkspaceSkills(workDir: string): Promise<readonly SkillSummary[]> {
-    return this.withWorkspaceInstance('listWorkspaceSkills', workDir, async (handler) => {
-      const catalog = handler.program.skills;
-      await catalog.ready;
-      return catalog.catalog.listSkills().map(summarizeSkill);
+    return this.withWorkdir('listWorkspaceSkills', workDir, async ({ workdir }) => {
+      await workdir.skills.ready;
+      return workdir.skills.catalog.listSkills().map(summarizeSkill);
     });
   }
 
   override async getWorkspaceAdditionalDirs(workDir: string): Promise<readonly string[]> {
-    const lease = await this.engineAccessor
-      .get(IWorkspaceInstanceManager)
-      .acquire({ root: normalizeRequiredWorkDir('getWorkspaceAdditionalDirs', workDir) });
-    try {
-      const dirs = lease.instance.program.dirs;
-      await dirs.ready;
-      return [...dirs.additionalDirs];
-    } finally {
-      lease.dispose();
-    }
+    const dir = normalizeRequiredWorkDir('getWorkspaceAdditionalDirs', workDir);
+    if (await this.isMissingWithoutProject(dir)) return [];
+    const lease = await this.engineAccessor.get(IProjectInstanceManager).acquire({ cwd: dir });
+    return this.leaseWorkdir(lease, dir, async ({ workdir }) => {
+      await workdir.dirs.ready;
+      return [...workdir.dirs.additionalDirs];
+    });
   }
 
   /**
@@ -793,7 +829,7 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
     if (input.sessionId !== undefined) {
       return suggest(this.requireLiveSession(input.sessionId).accessor.get(ISessionWorkdir).fs);
     }
-    return this.withWorkspaceInstance('suggestFiles', workDir, (handler) => suggest(handler.program.fs));
+    return this.withWorkdir('suggestFiles', workDir, ({ workdir }) => suggest(workdir.fs));
   }
 
   /**
@@ -827,16 +863,73 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
     );
   }
 
+  override async resolveWorkLocation(cwd: string): Promise<WorkLocation> {
+    const resolved = normalizeRequiredWorkDir('resolveWorkLocation', cwd);
+    await this.configReady;
+    return withKimiErrors(this.engineAccessor.get(IWorktreeService).locate(resolved));
+  }
+
+  override async listWorktrees(cwd: string): Promise<WorktreeListing> {
+    await this.configReady;
+    return withKimiErrors(this.engineAccessor.get(IWorktreeService).list(normalizeRequiredWorkDir('listWorktrees', cwd)));
+  }
+
+  override async createWorktree(input: CreateWorktreeInput, options?: CreateWorktreeOptions): Promise<CreatedWorktree> {
+    const cwd = normalizeRequiredWorkDir('createWorktree', input.cwd);
+    await this.configReady;
+    return withKimiErrors(this.engineAccessor.get(IWorktreeService).create({ ...input, cwd }, options));
+  }
+
+  override async runWorktreeSetupScript(
+    input: RunSetupScriptInput,
+    options?: RunSetupScriptOptions,
+  ): Promise<{ readonly exitCode: number }> {
+    await this.configReady;
+    return withKimiErrors(this.engineAccessor.get(IWorktreeService).runSetupScript(input, options));
+  }
+
+  override async inspectWorktreeRemoval(input: InspectWorktreeRemovalInput): Promise<WorktreeRemovalCheck> {
+    return withKimiErrors(this.engineAccessor.get(IWorktreeService).inspectRemoval(input));
+  }
+
+  override async removeWorktree(input: RemoveWorktreeInput): Promise<void> {
+    await this.configReady;
+    return withKimiErrors(this.engineAccessor.get(IWorktreeService).remove(input));
+  }
+
   /**
    * klient has no workspace-trust facade; composed directly from the engine
-   * via {@link engineAccessor} — the same `IWorkspaceInstanceManager.acquire({ root })`
-   * path `createSession` takes. The disclosure of what trusting would activate is
-   * computed inside the engine by `WorkspaceTrustDisclosureService`.
+   * via {@link engineAccessor}: the project `workDir` resolves to (the same
+   * resolver `createSession` runs) decides trust and names `projectRoot`, and
+   * the disclosure of what trusting would activate describes a new local
+   * session started in `workDir`, or at the explicit local environment cwd,
+   * computed inside the engine by `WorkspaceTrustDisclosureService`. With `sessionId` both come from the
+   * session instead: the project it is kept in, and the directory it runs in.
+   * A disclosure that fails, such as on an unreachable environment, becomes a
+   * warning; only an unreadable project or trust record rejects.
    */
   override async getWorkspaceTrustInfo(
     workDir: string,
     options?: WorkspaceTrustInfoOptions,
   ): Promise<WorkspaceTrustInfo> {
+    return this.withTrustTarget('getWorkspaceTrustInfo', workDir, options?.sessionId, async (lease) => {
+      const projectRoot = lease.instance.root;
+      if (await lease.instance.program.trust.get()) {
+        return { trusted: true, projectRoot, ...NOTHING_GATED };
+      }
+      try {
+        return { trusted: false, projectRoot, ...(await this.describeGatedActivation(workDir, options, lease)) };
+      } catch {
+        return { trusted: false, projectRoot, ...NOTHING_GATED, warnings: ['Could not inspect project settings.'] };
+      }
+    });
+  }
+
+  private async describeGatedActivation(
+    workDir: string,
+    options: WorkspaceTrustInfoOptions | undefined,
+    { instance, workdir }: LeasedWorkdir,
+  ): Promise<Omit<WorkspaceTrustInfo, 'trusted' | 'projectRoot'>> {
     const environment = options?.environmentId === undefined
       ? undefined
       : await this.resolveSessionEnvironment({
@@ -844,71 +937,108 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
           environmentId: options.environmentId,
           environmentCwd: options.environmentCwd,
         });
+    const local = environment === undefined || environment.environmentId === 'local';
     const baseDir = environment?.cwd ?? normalizeRequiredWorkDir('getWorkspaceTrustInfo', workDir);
-    return this.withWorkspaceInstance('getWorkspaceTrustInfo', workDir, async (handler) => {
-      const trusted = await handler.program.trust.get();
-      if (trusted) {
-        return {
-          trusted: true,
-          gatedMcpServers: [],
-          gatedAdditionalDirs: [],
-          additionalDirSources: [],
-          warnings: [],
-          instructionSources: EMPTY_INSTRUCTION_SOURCES,
-        };
-      }
-      let additionalDirs = options?.additionalDirs;
-      let pendingAdditionalDirsResolved = false;
-      if (environment !== undefined && additionalDirs !== undefined) {
-        const workdir = await handler.program.acquireWorkdir(
-          environment.environmentId,
-          environment.cwd ?? baseDir,
-        );
-        try {
-          const resolved = await workdir.localConfig.resolveAdditionalDirs(
-            environment.cwd ?? baseDir,
-            additionalDirs,
-          );
-          additionalDirs = await Promise.all(
-            resolved.map(async (dir) => {
-              try {
-                return await workdir.hostFs.realpath(dir);
-              } catch {
-                return dir;
-              }
-            }),
-          );
-          pendingAdditionalDirsResolved = true;
-        } finally {
-          workdir.dispose();
-        }
-      }
-      const activation = await handler.program.trustDisclosure.describeGatedActivation(
-        additionalDirs,
-        baseDir,
-        pendingAdditionalDirsResolved,
+    let additionalDirs = options?.additionalDirs;
+    let pendingAdditionalDirsResolved = false;
+    if (environment !== undefined && additionalDirs !== undefined) {
+      const environmentWorkdir = await instance.program.acquireWorkdir(
+        environment.environmentId,
+        environment.cwd ?? baseDir,
+        local,
+        workdir.dirs.primary,
       );
-      return {
-        trusted: false,
-        gatedMcpServers: activation.mcpServers,
-        gatedAdditionalDirs: activation.additionalDirs,
-        additionalDirSources: activation.additionalDirSources,
-        warnings: activation.warnings,
-        instructionSources: activation.instructionSources,
-      };
-    });
+      try {
+        const resolved = await environmentWorkdir.localConfig.resolveAdditionalDirs(
+          environment.cwd ?? baseDir,
+          additionalDirs,
+        );
+        additionalDirs = await Promise.all(
+          resolved.map(async (dir) => {
+            try {
+              return await environmentWorkdir.hostFs.realpath(dir);
+            } catch {
+              return dir;
+            }
+          }),
+        );
+        pendingAdditionalDirsResolved = true;
+      } finally {
+        environmentWorkdir.dispose();
+      }
+    }
+    const activation = await workdir.trustDisclosure.describeGatedActivation(
+      additionalDirs,
+      baseDir,
+      pendingAdditionalDirsResolved,
+      await instance.program.effectiveMcpWorkDir(local && options?.sessionId === undefined ? baseDir : workdir.dirs.primary),
+    );
+    return {
+      gatedMcpServers: activation.mcpServers,
+      gatedAdditionalDirs: activation.additionalDirs,
+      additionalDirSources: activation.additionalDirSources,
+      warnings: activation.warnings,
+      instructionSources: activation.instructionSources,
+    };
   }
 
   /**
    * klient has no workspace-trust facade; see {@link getWorkspaceTrustInfo}.
-   * The flip fires `IWorkspaceTrust.onDidChange`, which makes the engine's
+   * Trust is recorded for the project `workDir` resolves to, or the one
+   * `sessionId` belongs to, on its primary directory. The flip fires
+   * `IWorkspaceTrust.onDidChange`, which makes the engine's
    * `workspaceMcpConfig` reload with project files included — project MCP
    * servers connect live, no restart needed.
    */
-  override async trustWorkspace(workDir: string): Promise<void> {
-    await this.withWorkspaceInstance('trustWorkspace', workDir, async (handler) => {
-      await handler.program.trust.trust();
+  override async trustWorkspace(
+    workDir: string,
+    options?: Pick<WorkspaceTrustInfoOptions, 'sessionId'>,
+  ): Promise<void> {
+    await this.withTrustTarget('trustWorkspace', workDir, options?.sessionId, async ({ instance }) => {
+      await instance.program.trust.trust();
     });
+  }
+
+  private async withTrustTarget<T>(
+    operation: string,
+    workDir: string,
+    sessionId: string | undefined,
+    use: (leased: LeasedWorkdir) => Promise<T>,
+  ): Promise<T> {
+    return sessionId === undefined
+      ? this.withWorkdir(operation, workDir, use)
+      : this.withSessionWorkdir(sessionId, use);
+  }
+
+  /**
+   * Lease the project a session is kept in, together with the local view of
+   * the directory it was started in, or the root view for a session that
+   * follows the primary directory.
+   */
+  private async withSessionWorkdir<T>(
+    sessionId: string,
+    use: (leased: LeasedWorkdir) => Promise<T>,
+  ): Promise<T> {
+    const summary = await this.engineAccessor.get(ISessionIndex).get(sessionId);
+    if (summary === undefined) throw SDKRpcClientV2.sessionNotFound(sessionId);
+    const lease = await programForSession(this.engineAccessor, sessionId).catch((error: unknown) => {
+      throw restateEngineError(error);
+    });
+    if (lease === undefined) throw SDKRpcClientV2.sessionNotFound(sessionId);
+    return this.leaseWorkdir(lease, summary.cwd ?? lease.instance.root, use);
+  }
+
+  /**
+   * The same resolver `createSession` runs, without opening the project. Only
+   * a new project is written to the catalog: a project that already exists
+   * keeps its last-opened time, because nothing was opened.
+   */
+  override async resolveSessionPlacement(workDir: string): Promise<SessionPlacement> {
+    const dir = normalizeRequiredWorkDir('resolveSessionPlacement', workDir);
+    await assertUsableWorkDir(this.engineAccessor.get(IHostFileSystem), dir);
+    const workspaces = this.engineAccessor.get(IProjectService);
+    const project = (await workspaces.peekImplicit(dir)).project ?? (await workspaces.resolveImplicit(dir));
+    return { projectId: project.id, projectRoot: project.root, workDir: dir, environmentCwd: workDirToPin(dir, project.root) };
   }
 
   /**
@@ -1271,12 +1401,14 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
     const ctx = handle.accessor.get(ISessionContext);
     const workspace = handle.accessor.get(ISessionWorkspaceContext);
     const liveOutcome = handle.accessor.get(ISessionActivityView).state().lastTurnReason;
+    const project = await this.klient.global.workspaces.get(ctx.workspaceId);
     return {
       id: meta.id,
       title: meta.title,
       titleKind: meta.titleKind,
       lastPrompt: meta.lastPrompt,
       workDir: ctx.cwd,
+      projectWorkDir: project === undefined ? undefined : normalizeWorkDir(project.root),
       sessionDir: ctx.sessionDir,
       createdAt: meta.createdAt,
       updatedAt: meta.updatedAt,
@@ -1297,7 +1429,8 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
    * agent's fold may arrive already in flight via `mainWireFold` (started by
    * `resumeSession` ahead of the restore; subagents always fold lazily here).
    * `warning` reports when an implicit default model was missing and the
-   * previous session model was preserved instead.
+   * previous session model was preserved instead, or when the session's
+   * bound model alias is no longer configured in `config.toml`.
    */
   private async resumedSessionSummary(
     handle: ISessionScopeHandle,
@@ -1315,6 +1448,19 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
     const main = await this.materializeMainAgent(handle, undefined, (message) => {
       warning = message;
     });
+    try {
+      const missingModel = missingConfiguredModelAlias(main);
+      if (warning === undefined && missingModel !== undefined) {
+        warning = `Session model "${missingModel}" is not configured in config.toml. Use /model to select an available model.`;
+      }
+    } catch (error) {
+      if (
+        !isError2(error) ||
+        (error.code !== ErrorCodes.CONFIG_INVALID && error.code !== ProfileErrors.codes.MODEL_CONFIG_INVALID)
+      ) {
+        throw error;
+      }
+    }
     agents[MAIN_AGENT_ID] = await this.resumedAgentState(
       handle,
       main,
@@ -1431,39 +1577,13 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
     };
   }
 
-  /**
-   * Directory view for `workDir` (already normalized): the matching implicit
-   * workspace's aliases, or the computed hash bucket when no normalized root is
-   * registered, unioned with every registered workspace whose dir set contains
-   * the directory as a primary or member root.
-   */
-  private async workspaceIdsFor(workDir: string): Promise<readonly string[]> {
-    const workspaces = await this.klient.global.workspaces.list();
-    const implicit = workspaces.find(
-      (workspace) => isWorkDirKey(workspace.id) && normalizeWorkDir(workspace.root) === workDir,
-    );
-    const hashIds = await this.engineAccessor
-      .get(IWorkspaceAliases)
-      .resolveAliasIds(implicit?.id ?? encodeWorkDirKey(workDir));
-    const rootKey = workspaceRootKey(workDir);
-    const memberIds = workspaces
-      .filter((workspace) =>
-        [workspace.root, ...workspace.additionalDirs].some(
-          (dir) => workspaceRootKey(dir) === rootKey,
-        ),
-      )
-      .map((workspace) => workspace.id);
-    return [...new Set([...hashIds, ...memberIds])];
-  }
-
   override async listSessions(input: ListSessionsOptions = {}): Promise<readonly SessionSummary[]> {
+    const { limit: _limit, before: _before, ...filter } = input;
     const all: SessionSummary[] = [];
     let before: string | undefined;
     for (;;) {
       const page = await this.listSessionsPage({
-        workDir: input.workDir,
-        sessionId: input.sessionId,
-        includeArchived: input.includeArchived,
+        ...filter,
         before,
       });
       all.push(...page.items);
@@ -1473,30 +1593,53 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
   }
 
   override async listSessionsPage(input: ListSessionsOptions = {}): Promise<SessionSummaryPage> {
-    const workspaceIds =
-      input.workDir === undefined
-        ? undefined
-        : await this.workspaceIdsFor(normalizeRequiredWorkDir('listSessions', input.workDir));
-    const workspacesById = new Map(
-      (await this.klient.global.workspaces.list()).map((workspace) => [workspace.id, workspace]),
+    if (input.scope !== undefined && input.scope !== 'workdir' && input.scope !== 'project') {
+      throw new KimiError(ErrorCodes.REQUEST_INVALID, `Invalid listSessions scope: ${String(input.scope)}`);
+    }
+    if (input.scope !== undefined && input.workDir === undefined) {
+      throw new KimiError(ErrorCodes.REQUEST_WORK_DIR_REQUIRED, 'listSessions with scope requires workDir');
+    }
+    const workDir =
+      input.workDir === undefined ? undefined : normalizeRequiredWorkDir('listSessions', input.workDir);
+    const workspaces = await this.klient.global.workspaces.list();
+    const aliases = this.engineAccessor.get(IProjectAliases);
+    const workspacesById = new Map<string, { readonly root: string }>();
+    await Promise.all(
+      workspaces.map(async (workspace) => {
+        workspacesById.set(workspace.id, workspace);
+        for (const aliasId of await aliases.resolveAliasIds(workspace.id)) {
+          workspacesById.set(aliasId, workspace);
+        }
+      }),
     );
+    const toSummaries = (items: readonly V2SessionSummary[]): SessionSummary[] =>
+      items.flatMap((item) => this.mapIndexSummary(item, workspacesById) ?? []);
+    if (workDir !== undefined && input.sessionId === undefined) {
+      const projectSessions = this.engineAccessor.get(IProjectSessions);
+      const query = {
+        includeArchived: input.includeArchived,
+        limit: input.limit,
+        before: input.before,
+      };
+      const page =
+        input.scope === 'project'
+          ? await projectSessions.listForProject(workDir, query)
+          : await projectSessions.listForWorkdir(workDir, query);
+      return { items: toSummaries(page.items), nextCursor: page.nextCursor };
+    }
     const collected: SessionSummary[] = [];
     let before = input.before;
     for (;;) {
       const remaining = input.limit === undefined ? undefined : input.limit - collected.length;
       if (remaining !== undefined && remaining <= 0) break;
       const page = await this.klient.global.sessions.list({
-        workspaceIds,
         sessionId: input.sessionId,
         includeArchived: input.includeArchived,
         limit: remaining,
         before,
       });
       if (page.items.length === 0) return { items: collected, nextCursor: undefined };
-      for (const item of page.items) {
-        const summary = this.mapIndexSummary(item, workspacesById);
-        if (summary !== undefined) collected.push(summary);
-      }
+      collected.push(...toSummaries(page.items));
       if (page.nextCursor === undefined) return { items: collected, nextCursor: undefined };
       before = page.nextCursor;
       if (input.limit === undefined) return { items: collected, nextCursor: before };
@@ -1515,7 +1658,8 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
     item: V2SessionSummary,
     workspacesById: ReadonlyMap<string, { readonly root: string }>,
   ): SessionSummary | undefined {
-    const workDir = item.cwd ?? workspacesById.get(item.workspaceId)?.root;
+    const projectRoot = workspacesById.get(item.workspaceId)?.root;
+    const workDir = item.cwd ?? projectRoot;
     if (workDir === undefined) return undefined;
     const liveHandle = getLiveSessionById(this.engineAccessor, item.id);
     const effectiveItem =
@@ -1528,9 +1672,10 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
     const bootstrapService = this.engineAccessor.get(IBootstrapService);
     return v2SummaryToSessionSummary(effectiveItem, {
       workDir,
+      projectWorkDir: projectRoot === undefined ? undefined : normalizeWorkDir(projectRoot),
       sessionDir: sessionDirOf(
         bootstrapService.homeDir,
-        workspacePersistenceScope(bootstrapService.scope('sessions'), item.workspaceId),
+        projectPersistenceScope(bootstrapService.scope('sessions'), item.workspaceId),
         item.id,
       ),
     });
@@ -1778,7 +1923,7 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
         if (summary === undefined) return undefined;
         const sessionDir = sessionDirOf(
           bootstrap.homeDir,
-          workspacePersistenceScope(bootstrap.scope('sessions'), summary.workspaceId),
+          projectPersistenceScope(bootstrap.scope('sessions'), summary.workspaceId),
           sessionId,
         );
         return foldAgentWireReplay(
@@ -1835,9 +1980,7 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
       try {
         await this.klient.global.config.reload();
         await this.klient.global.plugins.reload();
-        await this.reloadWorkspaceCatalogs(
-          live?.accessor.get(ISessionContext).workspaceId ?? indexEntry?.workspaceId,
-        );
+        await reloadProgramForSession(this.engineAccessor, sessionId);
         await this.refreshPluginSessionStarts(sessionId);
       } catch (error) {
         await reloadGuard?.restoreAfterFailure();
@@ -1858,15 +2001,8 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
     });
   }
 
-  private async reloadWorkspaceCatalogs(workspaceId: string | undefined): Promise<void> {
-    if (workspaceId === undefined) return;
-    const target = this.engineAccessor.get(IWorkspaceInstanceManager).get(workspaceId);
-    if (target === undefined) return;
-    await target.program.reload();
-  }
-
   private async refreshPluginSessionStarts(excludedSessionId?: string): Promise<void> {
-    const workspaces = this.engineAccessor.get(IWorkspaceInstanceManager);
+    const workspaces = this.engineAccessor.get(IProjectInstanceManager);
     await Promise.all(
       workspaces.list().map(async (handler) => {
         const sessions = this.engineAccessor
@@ -1902,23 +2038,34 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
   }
 
   /**
-   * Through the leased `WorkspaceInstance.program.dirs` (`IWorkspaceDirs`) — the
+   * Through the `IWorkspaceDirs` of the view the session runs in — the
    * workspace-level add-dir surface: `persist: true` (default) appends to the
-   * workspace entry in the registry, `persist: false` joins the `Program`'s
-   * shared in-memory set. The set is shared by every session of the workspace
+   * workspace entry in the registry, `persist: false` joins the view's shared
+   * in-memory set. A local session pinned at its own directory (a worktree or
+   * subdirectory) has a view of its own; every other session uses the
+   * `Program`'s root view. The set is shared by every session of that view
    * (a v1 `persist: false` dir was session-scoped and written into session
-   * metadata to survive a resume; the v2 `Program` keeps it until the last
-   * workspace reference is released). Returns the same
+   * metadata to survive a resume; the v2 view keeps it until its last
+   * reference is released). Returns the same
    * `{additionalDirs, projectRoot, configPath, persisted}` shape as v1.
    */
   override async addAdditionalDir(input: AddAdditionalDirInput): Promise<AddAdditionalDirResult> {
     const handle = this.requireLiveSession(input.id);
     const workspaceId = handle.accessor.get(ISessionContext).workspaceId;
+    const { environmentId, cwd } = handle.accessor.get(ISessionWorkdir);
     const lease = await this.engineAccessor
-      .get(IWorkspaceInstanceManager)
+      .get(IProjectInstanceManager)
       .acquire({ workspaceId });
     try {
-      return await lease.instance.program.dirs.addDir({ path: input.path, persist: input.persist });
+      if (environmentId !== 'local' || cwd === undefined) {
+        return await lease.instance.program.dirs.addDir({ path: input.path, persist: input.persist });
+      }
+      const workdir = await lease.instance.program.acquireWorkdir(environmentId, cwd, false);
+      try {
+        return await workdir.dirs.addDir({ path: input.path, persist: input.persist });
+      } finally {
+        workdir.dispose();
+      }
     } finally {
       lease.dispose();
     }
@@ -2241,7 +2388,10 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
     // compaction-ratio overrides and capability snapshot.
     const profile = agent.accessor.get(IAgentLoopService).data();
     const capability = profile.modelCapabilities ?? profileService.data().modelCapabilities;
-    const maxContextTokens = capability.max_input_tokens ?? capability.max_context_tokens;
+    let maxContextTokens = capability.max_input_tokens ?? capability.max_context_tokens;
+    if (maxContextTokens === undefined || maxContextTokens <= 0) {
+      maxContextTokens = readStatusModelContext(agent).maxContextTokens;
+    }
     const contextTokens = context.tokenCount;
     const contextUsage = maxContextTokens > 0 ? contextTokens / maxContextTokens : 0;
     const hasUsage =
@@ -2415,6 +2565,7 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
       capability.max_input_tokens ?? capability.max_context_tokens,
     );
     const loop = agent.accessor.get(IAgentLoopService);
+    await loop.start();
     loop.remind(historyEntryFromContext(message));
     loop.flushReminders();
   }
@@ -2629,8 +2780,8 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
   /**
    * Through the agent scope (`IAgentSwarmService.enter` / `.exit`) — no
    * klient facade exists. The v2 service is the port of v1's `SwarmMode`:
-   * enter is idempotent and injects the byte-identical enter reminder for
-   * non-`tool` triggers, exit pops that reminder when it is the last message
+   * enter is idempotent and schedules the byte-identical enter reminder for
+   * non-`tool` triggers on the next step, exit pops that reminder when it is the last message
    * (appending the exit reminder otherwise), and `task` / `tool` triggers
    * auto-exit on turn end. The base class's private enter/exit pair is
    * replaced wholesale; `swarm()` below recomposes it over this override.
@@ -2643,7 +2794,6 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
     } else {
       swarm.exit();
     }
-    await agent.accessor.get(IAgentReminderService).reconcileWhenIdle('swarm_mode');
   }
 
   /** v1's `swarm()` composition: enter with the one-shot `task` trigger, then prompt. */
@@ -2667,7 +2817,6 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
     } else {
       await tower.exit();
     }
-    await agent.accessor.get(IAgentReminderService).reconcileWhenIdle('tower_mode');
   }
 
   /** Reads the shared tower status summary; the main agent's tower service is authoritative. */
@@ -3111,17 +3260,25 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
   }
 
   /**
-   * Workspace-level MCP view (the workspace `Program`'s shared connection set),
-   * so `/mcp` is inspectable on a v2 session-less startup before any session
-   * exists. Awaits `ready` so a fresh instance's initial connect settles
-   * before the list is read.
+   * Working-directory MCP view (the connection set a session started there
+   * would use), so `/mcp` is inspectable on a v2 session-less startup before
+   * any session exists. Awaits `ready` so a fresh set's initial connect
+   * settles before the list is read.
    * Same `McpServerEntry`-as-`McpServerInfo` cast as listMcpServers.
    */
-  override async listWorkspaceMcpServers(workDir: string): Promise<readonly McpServerInfo[]> {
-    return this.withWorkspaceInstance('listWorkspaceMcpServers', workDir, async (handler) => {
-      const mcp = handler.program.mcp;
-      await mcp.ready;
-      return mcp.connectionManager().list() as readonly McpServerInfo[];
+  override async listWorkspaceMcpServers(
+    workDir: string,
+    options?: Pick<CreateSessionOptions, 'environmentId' | 'environmentCwd'>,
+  ): Promise<readonly McpServerInfo[]> {
+    return this.withWorkdir('listWorkspaceMcpServers', workDir, async ({ instance, workdir }) => {
+      const pinned = options?.environmentId === 'local' ? options.environmentCwd : undefined;
+      const mcp = await instance.program.acquireMcp(pinned ?? workdir.dirs.primary);
+      try {
+        await mcp.service.ready;
+        return mcp.service.connectionManager().list() as readonly McpServerInfo[];
+      } finally {
+        mcp.dispose();
+      }
     });
   }
 
@@ -3168,8 +3325,8 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
    * validate, optionally persist to the user-level file, then upsert through
    * `connect`. Two accepted gaps against v1: the v2 entry carries no
    * `source`/`config` tags (the manager does not track origins), and the one
-   * shared manager per workspace instance makes an unpersisted add visible to
-   * sibling sessions of the same workspace. The same merged-view limitation
+   * shared manager per checkout of a project makes an unpersisted add visible
+   * to sibling sessions of the same checkout. The same merged-view limitation
    * as {@link reconnectMcpServer} applies.
    */
   override async addSessionMcpServer(input: {
@@ -3189,9 +3346,11 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
     const parsed = parseInlineMcpServer(input.server);
     const target = { ...parsed, name: normalizeServerName(parsed.name) };
     if (input.persist === true) {
-      const cwd = session.accessor.get(ISessionWorkspaceContext).workDir;
-      await this.rejectProjectLayerPersistedMcpAdd(cwd, target.name);
-      await this.mcpManagement((management) => management.addServer(target, { cwd }));
+      await this.withSessionWorkdir(input.sessionId, async ({ instance, workdir }) => {
+        const cwd = await instance.program.effectiveMcpWorkDir(workdir.dirs.primary);
+        await this.rejectProjectLayerPersistedMcpAdd(cwd, target.name);
+        await this.mcpManagement((management) => management.addServer(target, { cwd }));
+      });
     }
     await manager.connect(target.name, mcpConfigWithoutName(target));
     const entry = manager.get(target.name);
@@ -3237,7 +3396,7 @@ function normalizeRequiredWorkDir(operation: string, workDir: string): string {
  * The kap-server `POST /workspaces` rule applied to every SDK path that
  * registers a workDir as a workspace: the local root must exist and be a
  * directory — a missing root is rejected here instead of silently creating
- * a workspace record the engine's `createOrTouch` would accept.
+ * a workspace record the engine's `resolveImplicit` would accept.
  */
 async function assertUsableWorkDir(fs: IHostFileSystem, workDir: string): Promise<void> {
   const stat = await fs.stat(workDir).catch(() => undefined);
@@ -3278,6 +3437,14 @@ function restateEngineError(error: unknown): unknown {
   });
 }
 
+async function withKimiErrors<T>(call: Promise<T>): Promise<T> {
+  try {
+    return await call;
+  } catch (error) {
+    throw restateEngineError(error);
+  }
+}
+
 /**
  * v1's `toManagedServerInfo` over the engine's managed view: flatten the
  * config to the top level (mutable entries carry the full values, read-only
@@ -3295,9 +3462,10 @@ function toManagedServerInfo(server: McpManagedServer): McpManagedServerInfo {
   } as McpManagedServerInfo;
 }
 
-const EMPTY_INSTRUCTION_SOURCES: WorkspaceTrustInstructionSources = {
-  agentsMdPaths: [],
-  skills: [],
-  agentProfiles: [],
-  paths: [],
+const NOTHING_GATED: Omit<WorkspaceTrustInfo, 'trusted' | 'projectRoot'> = {
+  gatedMcpServers: [],
+  gatedAdditionalDirs: [],
+  additionalDirSources: [],
+  warnings: [],
+  instructionSources: { agentsMdPaths: [], skills: [], agentProfiles: [], paths: [] },
 };

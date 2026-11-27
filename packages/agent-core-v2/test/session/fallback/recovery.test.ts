@@ -89,47 +89,47 @@ function rotationRecord(action: string, failed = false): LlmRecoveryRecord {
 }
 
 describe('createFallbackModelRecovery', () => {
-  it('U1: proposes a model-switch rewrite on a provider error', () => {
+  it('U1: proposes a model-switch rewrite on a provider error', async () => {
     const d = deps({ fallback: { model: 'fb1' } });
     const recovery = createFallbackModelRecovery(d);
     const request = makeRequest('primary');
-    const entry = recovery.propose(ctx({ error: errorOf('provider'), request }));
+    const entry = await recovery.propose(ctx({ error: errorOf('provider'), request }));
     expect(entry?.strategy).toBe('fallback_model');
     expect(entry?.action).toBe('fb1');
     const rewritten = entry?.rewrite ? entry.rewrite(request) : request;
     expect(rewritten.model.spec.name).toBe('fb1');
   });
 
-  it('U2: proposes for timeout, network, and quota_exhausted', () => {
+  it('U2: proposes for timeout, network, and quota_exhausted', async () => {
     for (const kind of ['timeout', 'connection', 'quota_exhausted'] as const) {
       const d = deps({ fallback: { model: 'fb1' } });
       const recovery = createFallbackModelRecovery(d);
-      const entry = recovery.propose(ctx({ error: errorOf(kind), request: makeRequest('primary') }));
+      const entry = await recovery.propose(ctx({ error: errorOf(kind), request: makeRequest('primary') }));
       expect(entry?.action).toBe('fb1');
     }
   });
 
-  it('U3: returns undefined when no fallback model is configured', () => {
+  it('U3: returns undefined when no fallback model is configured', async () => {
     const d = deps({ fallback: undefined });
     const recovery = createFallbackModelRecovery(d);
     expect(
-      recovery.propose(ctx({ error: errorOf('provider'), request: makeRequest('primary') })),
+      await recovery.propose(ctx({ error: errorOf('provider'), request: makeRequest('primary') })),
     ).toBeUndefined();
   });
 
-  it('U3b: returns undefined when the flag is disabled', () => {
+  it('U3b: returns undefined when the flag is disabled', async () => {
     const d = deps({ fallback: { model: 'fb1' }, enabled: false });
     const recovery = createFallbackModelRecovery(d);
     expect(
-      recovery.propose(ctx({ error: errorOf('provider'), request: makeRequest('primary') })),
+      await recovery.propose(ctx({ error: errorOf('provider'), request: makeRequest('primary') })),
     ).toBeUndefined();
   });
 
-  it('U4: yields to key rotation on rate_limit/auth while keys remain', () => {
+  it('U4: yields to key rotation on rate_limit/auth while keys remain', async () => {
     for (const error of [errorOf('rate_limit', 429), errorOf('auth', 401)]) {
       const d = deps({ fallback: { model: 'fb1' } });
       const recovery = createFallbackModelRecovery(d);
-      const entry = recovery.propose(
+      const entry = await recovery.propose(
         ctx({
           error,
           request: makeRequest('primary'),
@@ -140,10 +140,10 @@ describe('createFallbackModelRecovery', () => {
     }
   });
 
-  it('U5: claims the turn on rate_limit once rotation is exhausted', () => {
+  it('U5: claims the turn on rate_limit once rotation is exhausted', async () => {
     const d = deps({ fallback: { model: 'fb1' } });
     const recovery = createFallbackModelRecovery(d);
-    const entry = recovery.propose(
+    const entry = await recovery.propose(
       ctx({
         error: errorOf('rate_limit', 429),
         request: makeRequest('primary'),
@@ -154,11 +154,11 @@ describe('createFallbackModelRecovery', () => {
     expect(entry?.action).toBe('fb1');
   });
 
-  it('U5b: claims the turn after a failed key rotation, including auth rejections', () => {
+  it('U5b: claims the turn after a failed key rotation, including auth rejections', async () => {
     for (const error of [errorOf('rate_limit', 429), errorOf('auth', 401)]) {
       const d = deps({ fallback: { model: 'fb1' } });
       const recovery = createFallbackModelRecovery(d);
-      const entry = recovery.propose(
+      const entry = await recovery.propose(
         ctx({
           error,
           request: makeRequest('primary'),
@@ -170,16 +170,16 @@ describe('createFallbackModelRecovery', () => {
     }
   });
 
-  it('U6: skips a tier equal to the current model', () => {
+  it('U6: skips a tier equal to the current model', async () => {
     const d = deps({ fallback: { model: 'fb1', secondaryModel: 'fb2' } });
     const recovery = createFallbackModelRecovery(d);
-    const entry = recovery.propose(
+    const entry = await recovery.propose(
       ctx({ error: errorOf('timeout'), request: makeRequest('fb1') }),
     );
     expect(entry?.action).toBe('fb2');
   });
 
-  it('U7: skips a tier whose alias cannot be resolved', () => {
+  it('U7: skips a tier whose alias cannot be resolved', async () => {
     const d = deps({
       fallback: { model: 'ghost', secondaryModel: 'fb2' },
       resolve: (_request, alias) => {
@@ -188,19 +188,19 @@ describe('createFallbackModelRecovery', () => {
       },
     });
     const recovery = createFallbackModelRecovery(d);
-    const entry = recovery.propose(
+    const entry = await recovery.propose(
       ctx({ error: errorOf('provider'), request: makeRequest('primary') }),
     );
     expect(entry?.action).toBe('fb2');
   });
 
-  it('U8: returns undefined once every tier has been tried', () => {
+  it('U8: returns undefined once every tier has been tried', async () => {
     const d = deps({ fallback: { model: 'fb1', secondaryModel: 'fb2' } });
     const recovery = createFallbackModelRecovery(d);
     const applied: LlmRecoveryRecord[] = [
       { strategy: 'fallback_model', action: 'fb1' },
     ];
-    const entry = recovery.propose(
+    const entry = await recovery.propose(
       ctx({
         error: errorOf('timeout'),
         request: makeRequest('fb2'),
@@ -210,7 +210,7 @@ describe('createFallbackModelRecovery', () => {
     expect(entry).toBeUndefined();
   });
 
-  it('U9: the rewrite swaps the endpoint to the fallback provider', () => {
+  it('U9: the rewrite swaps the endpoint to the fallback provider', async () => {
     const d = deps({
       fallback: { model: 'fb1' },
       resolve: (_request, alias) => ({
@@ -223,20 +223,20 @@ describe('createFallbackModelRecovery', () => {
       ...makeRequest('primary'),
       endpoint: { baseUrl: 'https://primary.example' },
     };
-    const entry = recovery.propose(ctx({ error: errorOf('provider'), request }));
+    const entry = await recovery.propose(ctx({ error: errorOf('provider'), request }));
     const rewritten = entry?.rewrite ? entry.rewrite(request) : request;
     expect(rewritten.endpoint?.baseUrl).toBe('https://fallback.example');
   });
 
-  it('U10: a model-not-found 404 is eligible and yields to the secondary tier', () => {
+  it('U10: a model-not-found 404 is eligible and yields to the secondary tier', async () => {
     const d = deps({ fallback: { model: 'fb1', secondaryModel: 'fb2' } });
     const recovery = createFallbackModelRecovery(d);
-    const first = recovery.propose(
+    const first = await recovery.propose(
       ctx({ error: errorOf('status', 404), request: makeRequest('primary') }),
     );
     expect(first?.action).toBe('fb1');
     const applied: LlmRecoveryRecord[] = [{ strategy: 'fallback_model', action: 'fb1' }];
-    const second = recovery.propose(
+    const second = await recovery.propose(
       ctx({
         error: {
           kind: 'status',
@@ -250,11 +250,11 @@ describe('createFallbackModelRecovery', () => {
     expect(second?.action).toBe('fb2');
   });
 
-  it('ignores non-retryable client errors', () => {
+  it('ignores non-retryable client errors', async () => {
     const d = deps({ fallback: { model: 'fb1' } });
     const recovery = createFallbackModelRecovery(d);
     expect(
-      recovery.propose(ctx({ error: errorOf('unknown', 400), request: makeRequest('primary') })),
+      await recovery.propose(ctx({ error: errorOf('unknown', 400), request: makeRequest('primary') })),
     ).toBeUndefined();
   });
 });

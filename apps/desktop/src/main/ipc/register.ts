@@ -22,7 +22,7 @@ import { createLocalPagesPolicy } from '../browser/local-pages-policy';
 import { asBrowserAnnotationPickRequest } from '../../shared/browser-annotation';
 import { collectBrowserAnnotationAssets, completeBrowserAnnotationCapture, cancelBrowserAnnotationPick, hideBrowserAnnotation, pickBrowserAnnotation, readBrowserAnnotationAsset, showBrowserAnnotation } from '../browser/browser-annotations';
 
-import { getMainWindow, showMainWindow, applyWindowVibrancy, markQuitting, sendToRenderer, windowForWebContents } from '../window/main-window';
+import { getMainWindow, showMainWindow, applyWindowVibrancy, markQuitting, markRendererUiMounted, sendToRenderer, windowForWebContents } from '../window/main-window';
 import { listAvailableOpenInApps, openInApp } from '../system/open-in';
 import { getTerminalManager, initTerminalManager, type NativeTerminalCreateOptions } from '../terminal/manager';
 import { normalizeTerminalSshTarget } from '../../shared/terminal-activity';
@@ -56,6 +56,7 @@ import { log, redactUrlForLog } from '../diagnostics/log';
 import { updateServerRegionToken } from '../server/region';
 import { asProviderModelsFetchRequest, fetchProviderModelsViaNet } from '../system/provider-models-fetch';
 import { createRendererLogWriter } from '../diagnostics/renderer-log';
+import { collectFeedbackDiagnosticsArchive } from '../diagnostics/diagnostics-export';
 import { recordRendererMilestone } from '../diagnostics/startup-milestones';
 import { markCleanExit } from '../app/launch-state';
 import {
@@ -236,6 +237,12 @@ export function registerIpcHandlers(): void {
     clipboard.writeText(text);
     return true;
   });
+  ipcMain.handle(IPC.collectFeedbackDiagnostics, (event) => {
+    if (!isMainRendererSender(event.sender) || event.senderFrame !== event.sender.mainFrame) {
+      throw new Error('Feedback diagnostics are only available to the main window');
+    }
+    return collectFeedbackDiagnosticsArchive();
+  });
   ipcMain.handle(IPC.serverCredential, (_event, token: unknown) => {
     if (typeof token === 'string' && token.length > 0) {
       updateServerRegionToken(token);
@@ -296,12 +303,16 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.quitConfirmResponse, (event, payload: unknown) => {
     if (event.sender !== getMainWindow()?.webContents) return;
     if (payload === null || typeof payload !== 'object') return;
-    const { choice, requestId } = payload as { choice?: unknown; requestId?: unknown };
+    const { choice, requestId, continueSessions } = payload as {
+      choice?: unknown;
+      requestId?: unknown;
+      continueSessions?: unknown;
+    };
     if (
       (choice === 'quit' || choice === 'cancel' || choice === 'unavailable') &&
       typeof requestId === 'number'
     ) {
-      resolveQuitConfirmResponse(choice, requestId);
+      resolveQuitConfirmResponse(choice, requestId, continueSessions === true);
     }
   });
   ipcMain.handle(IPC.updateGetStatus, () => getUpdateStatus());
@@ -503,7 +514,11 @@ export function registerIpcHandlers(): void {
     rendererLogWriter(payload, rendererLogSource(event.sender));
   });
   ipcMain.on(IPC.startupMilestone, (event, payload: unknown) => {
-    if (isMainRendererSender(event.sender)) recordRendererMilestone(payload);
+    if (!isMainRendererSender(event.sender)) return;
+    const milestone = recordRendererMilestone(payload);
+    if (milestone?.milestone !== 'ui-mounted') return;
+    const frame = event.senderFrame;
+    if (frame !== null && frame === event.sender.mainFrame) markRendererUiMounted(frame.url);
   });
   ipcMain.on(IPC.track, (_event, eventName: unknown, payload: unknown) => {
     const parsed = asRendererTrackEvent(eventName, payload);

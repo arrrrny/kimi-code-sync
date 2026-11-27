@@ -202,6 +202,7 @@ export interface PromptHandle extends PromptSnapshot {
 export interface PromptPayload {
   readonly input: readonly ContentPart[];
   readonly promptId?: string;
+  readonly rejectIfBusy?: boolean;
 }
 
 export interface PromptLaunchResult {
@@ -257,6 +258,10 @@ export interface IAgentLoopService extends EffectiveProfileReader {
 
   start(tools?: readonly Tool[]): Promise<void>;
 
+  readonly started: boolean;
+
+  readonly hasPersistedState: boolean;
+
   baselineTools(): readonly Tool[];
 
   bindingSnapshot(): ProfileBindingSnapshot;
@@ -282,6 +287,8 @@ export interface IAgentLoopService extends EffectiveProfileReader {
   removeActiveTool(name: string): void;
 
   history(): readonly ContextMessage[];
+
+  rawHistory(): readonly Message[];
 
   previewRequestContent(): LoopRequestContent;
 

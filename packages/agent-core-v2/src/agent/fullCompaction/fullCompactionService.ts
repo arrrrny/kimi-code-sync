@@ -11,7 +11,7 @@ import {
   isRealUserInput,
 } from '#/agent/contextMemory/compactionHandoff';
 import { ContextApplyCompaction } from '#/agent/contextMemory/contextEvents';
-import { historyFromContext } from '#/agent/loop/history';
+import { contextFromHistoryEntry, historyFromContext } from '#/agent/loop/history';
 import type { ContextMessage } from '#/agent/contextMemory/types';
 import { ISessionTokenCountingService } from '#/session/tokenCounting/sessionTokenCounting';
 import type { LLMRequestTrace } from '#/llm-adapter/contract/request-trace';
@@ -116,6 +116,7 @@ interface ActiveCompaction extends FullCompactionTask {
   readonly quiescence?: IDisposable;
   trace?: LLMRequestTrace;
   blockedByTurn: boolean;
+  historyChanged: boolean;
 }
 
 interface CompactionAttemptResult {
@@ -229,7 +230,7 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
       this.loopService.hooks.onDidFinishStep.register(
         FULL_COMPACTION_STEP_HOOK_ID,
         async (ctx, next) => {
-          await this.afterStep(ctx.signal, ctx.turnId);
+          if (!ctx.signal.aborted) await this.afterStep(ctx.signal, ctx.turnId);
           await next();
         },
       ),
@@ -319,7 +320,7 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
   }
 
   private currentRequestTokens(): number {
-    return this.historyRequestTokens(this.loopService.history());
+    return this.historyRequestTokens(this.loopService.rawHistory());
   }
 
   private historyRequestTokens(messages: readonly Message[]): number {
@@ -455,7 +456,7 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
   }
 
   private validateCompactionStart(source: CompactionBeginData['source']): number {
-    const history = this.loopService.history();
+    const history = this.loopService.rawHistory();
     if (history.length === 0) {
       throw new Error2(ErrorCodes.COMPACTION_UNABLE, 'No messages to compact in current history.');
     }
@@ -497,6 +498,7 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
           return this.trace?.requestId;
         },
         blockedByTurn: false,
+        historyChanged: false,
       },
       resolve,
       reject,
@@ -519,6 +521,12 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
     }
     void this.dispatcher.dispatch(new CompactionCancelled({ agentId: this.agent.agentId }));
     return true;
+  }
+
+  private discardForChangedHistory(active: ActiveCompaction): Error {
+    active.historyChanged = true;
+    this.cancelActive(active);
+    return compactionCancelledReason(active);
   }
 
   private markCompleted(active: ActiveCompaction): boolean {
@@ -579,7 +587,9 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
   private async afterStep(signal?: AbortSignal, turnId?: number): Promise<void> {
     this.consecutiveOverflowCompactions = 0;
     if (this.strategy.checkAfterStep && this.checkAutoCompaction(false)) {
-      await this.block(signal, turnId);
+      if (!this.strategy.shouldBlock(this.tokenCountWithPending())) {
+        await this.block(signal, turnId);
+      }
     }
   }
 
@@ -611,8 +621,18 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
   }
 
   private async block(signal?: AbortSignal, turnId?: number): Promise<void> {
+    const discarded = await this.waitForActiveCompaction(signal, turnId);
+    if (discarded && this.beginAutoCompaction()) {
+      await this.waitForActiveCompaction(signal, turnId);
+    }
+  }
+
+  private async waitForActiveCompaction(
+    signal: AbortSignal | undefined,
+    turnId: number | undefined,
+  ): Promise<boolean> {
     const active = this._compacting;
-    if (active === null) return;
+    if (active === null) return false;
     active.blockedByTurn = true;
     this.propagateBlockingAbort(active, signal);
     void this.dispatcher.dispatch(
@@ -620,8 +640,10 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
     );
     try {
       await active.promise;
+      return false;
     } catch (error) {
-      if (this.wasBlockingWaitAborted(active, signal, error)) return;
+      if (this.wasBlockingWaitAborted(active, signal, error)) return false;
+      if (active.historyChanged) return true;
       throw error;
     }
   }
@@ -696,7 +718,8 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
   ): Promise<CompactionResult> {
     const startedAt = Date.now();
     this.loopService.flushReminders();
-    const originalHistory = [...this.loopService.history()];
+    const originalRaw = [...this.loopService.rawHistory()];
+    const originalHistory = originalRaw.map((entry) => contextFromHistoryEntry(entry));
     const tokensBefore = this.historyRequestTokens(originalHistory);
     let retryCount = 0;
     let thinkingEffort = this.loopService.data().thinkingLevel;
@@ -979,12 +1002,8 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
         );
       }
 
-      if (!historySafeToCompact(this.loopService.history(), originalHistory)) {
-        const active = this._compacting;
-        if (active !== null) {
-          this.cancelActive(active);
-        }
-        throw compactionCancelledReason(active);
+      if (!historySafeToCompact(this.loopService.rawHistory(), originalRaw)) {
+        throw this.discardForChangedHistory(active);
       }
 
       const summary = await this.postProcessSummary(attempt.summary);
@@ -1002,13 +1021,13 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
       if (
         data.source === 'auto' &&
         this.flags.enabled(COMPACTION_HANDOFF_FLAG_ID) &&
-        !historySafeToCompact(this.loopService.history(), originalHistory)
+        !historySafeToCompact(this.loopService.rawHistory(), originalRaw)
       ) {
-        const active = this._compacting;
-        if (active !== null) {
-          this.cancelActive(active);
+        const current = this._compacting;
+        if (current !== null) {
+          this.cancelActive(current);
         }
-        throw compactionCancelledReason(active);
+        throw compactionCancelledReason(current);
       }
       const recoveryFooter = this.renderRecoveryFooter(wireLines);
       const summaryText = buildCompactionSummaryText(summary);
@@ -1022,12 +1041,11 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
           (handoff === undefined ? 0 : this.tokenCounting.estimateText(handoff.footer));
       const dropped = droppedCount === 0 ? undefined : droppedCount;
       this.loopService.flushReminders();
-      const currentHistory = [...this.loopService.history()];
-      if (!historySafeToCompact(currentHistory, originalHistory)) {
-        const active = this._compacting;
-        if (active !== null) this.cancelActive(active);
-        throw compactionCancelledReason(active);
+      const currentRaw = this.loopService.rawHistory();
+      if (!historySafeToCompact(currentRaw, originalRaw)) {
+        throw this.discardForChangedHistory(active);
       }
+      const currentHistory = currentRaw.map((entry) => contextFromHistoryEntry(entry));
       const compacted = buildContextCompactionShape(currentHistory, {
         summary,
         contextSummary,
@@ -1253,7 +1271,7 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
 
   private tokenCountWithPending(): number {
     const counted = this.tokenCounting.get(agentContextOfScope(this.agent)).size;
-    const usageAnchored = this.usageAnchoredRequestTokens(this.loopService.history());
+    const usageAnchored = this.usageAnchoredRequestTokens(this.loopService.rawHistory());
     return usageAnchored === undefined ? counted : Math.max(counted, usageAnchored);
   }
 }
@@ -1406,13 +1424,14 @@ function collectSummary(outcome: Extract<LlmOutcome, { type: 'done' }>): Compact
 }
 
 function historySafeToCompact(
-  current: readonly ContextMessage[],
-  original: readonly ContextMessage[],
+  current: readonly Message[],
+  original: readonly Message[],
 ): boolean {
   if (current.length < original.length) return false;
   if (!original.every((message, index) => message === current[index])) return false;
   return current
     .slice(original.length)
+    .map((message) => contextFromHistoryEntry(message))
     .every((message) => isRealUserInput(message) || message.origin?.kind === 'injection');
 }
 

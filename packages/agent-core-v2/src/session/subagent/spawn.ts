@@ -52,7 +52,7 @@ export interface SubagentSpawnPlan {
   readonly model: string;
   readonly modelSource?: SubagentModelSource;
   readonly thinking?: string;
-  readonly fork: boolean;
+  readonly fork?: boolean;
 }
 
 export interface SpawnSubagentOptions {

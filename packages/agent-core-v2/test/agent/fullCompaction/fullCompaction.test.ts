@@ -9,7 +9,7 @@ import {
   type ToolCall,
 } from '@moonshot-ai/core/llm/message';
 import { resolveEndpoint } from '@moonshot-ai/core/llm/endpoint';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, test as base, vi } from 'vitest';
 
 import {
   DefaultCompactionStrategy,
@@ -19,7 +19,7 @@ import {
   COMPACTION_CONTINUATION_VARIANT,
   COMPACTION_SUMMARY_PREFIX,
 } from '#/agent/contextMemory/compactionHandoff';
-import type { ContextMessage } from '#/agent/contextMemory/types';
+import type { SystemTriggerOrigin } from '#/agent/contextMemory/types';
 import { makeHookRunner } from '../../features/externalHooks/runner-stub';
 import type { IExternalHooksRunnerService } from '#/features/externalHooks/app/externalHooksRunner';
 import { MASTER_ENV } from '#/app/flag/flagService';
@@ -36,21 +36,24 @@ import {
   homeDirServices,
   hostEnvironmentServices,
   createMockProvider,
+  permissionModeServices,
   providerHttpError,
   sessionServices,
   testAgent as createTestAgent,
+  testkitAgentFixtures,
+  type TestkitAgentFixtures,
   type MockProviderResponse,
   type TestAgentContext,
   type TestAgentOptions,
   type TestAgentServiceOverride,
 } from '../../harness';
+import { batch, call, held, say, withUsage } from '@moonshot-ai/testkit/model';
 import { IFileSystemStorageService } from '#/persistence/interface/storage';
 import { InMemoryStorageService } from '#/persistence/backends/memory/inMemoryStorageService';
 import { ISessionTokenCountingService } from '#/session/tokenCounting/sessionTokenCounting';
 import { renderCompactionInstruction } from '#/agent/fullCompaction/compactionInstruction';
 import { IAgentToolSelectAnnouncementsService } from '#/agent/toolSelect/toolSelectAnnouncements';
 import { IAgentToolSelectService } from '#/agent/toolSelect/toolSelect';
-import { TOOL_SELECT_FLAG_ENV } from '#/agent/toolSelect/flag';
 import {
   IAgentFullCompactionService,
   IModelOAuthTokens,
@@ -63,6 +66,7 @@ import {
   type ToolExecution,
 } from '#/index';
 import { IAgentLoopService } from '#/agent/loop/loop';
+import { IAgentToolExecutorService } from '#/agent/toolExecutor/toolExecutor';
 import { IWireService } from '#/wire/wire';
 import { IAgentTodoService } from '#/features/todo/todoService';
 import { IAgentGoalService } from '#/features/goal/goalService';
@@ -177,6 +181,7 @@ describe('FullCompaction', () => {
     ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
     ctx.appendExchange(2, 'old user two', 'old assistant two', 40);
     ctx.appendExchange(3, 'recent user three', 'recent assistant three', 120);
+    expect(ctx.context.started).toBe(false);
     const compacted = new Promise<void>((resolve) => {
       ctx.emitter.once('full_compaction.complete', () => {
         resolve();
@@ -1615,6 +1620,159 @@ describe('FullCompaction', () => {
     await ctx.expectResumeMatches();
   });
 
+  const testkitTest = base.extend<TestkitAgentFixtures>(testkitAgentFixtures(permissionModeServices('yolo')));
+
+  testkitTest(
+    'sends turn and compaction requests the same raw history for a failed turn with unanswered tool calls',
+    async ({ agent: ctx, model }) => {
+      const lookupTool: ExecutableTool<{ query: string }> = {
+        name: 'Lookup',
+        description: 'Look up a short test value.',
+        parameters: {
+          type: 'object',
+          properties: { query: { type: 'string' } },
+          required: ['query'],
+          additionalProperties: false,
+        },
+        resolveExecution: () => ({
+          approvalRule: 'Lookup',
+          execute: async () => ({ output: 'lookup-result' }),
+        }),
+      };
+      ctx.get(IAgentToolRegistryService).register(lookupTool);
+      const hook = ctx.get(IAgentToolExecutorService).registerHook({
+        beforeExecute: () => {
+          throw new Error('beforeExecute blew up');
+        },
+      });
+      try {
+        model.script(call('Lookup', { query: 'moon' }, { id: 'call_dangling', text: 'I will call Lookup.' }));
+        await ctx.rpc.prompt({ input: [{ type: 'text', text: 'run lookup' }] });
+        await ctx.untilTurnEnd();
+      } finally {
+        hook.dispose();
+      }
+
+      const loop = ctx.get(IAgentLoopService);
+      const raw = loop.rawHistory();
+      expect(raw.map((message) => message.role)).toEqual(['user', 'assistant']);
+      const rawAssistant = raw[1];
+      expect(rawAssistant?.role === 'assistant' ? rawAssistant.toolCalls.map((toolCall) => toolCall.id) : []).toEqual([
+        'call_dangling',
+      ]);
+      const projectedAssistant = loop.history().find((message) => message.role === 'assistant');
+      expect(projectedAssistant?.role === 'assistant' ? projectedAssistant.toolCalls : []).toEqual([]);
+
+      model.script(say('turn two ok'));
+      await ctx.rpc.prompt({ input: [{ type: 'text', text: 'continue' }] });
+      await ctx.untilTurnEnd();
+
+      model.lane('compaction').script(say('Summary after failed turn.'));
+      const compacted = ctx.once('full_compaction.complete');
+      const completed = ctx.once('compaction.completed');
+      await ctx.rpc.beginCompaction({});
+      await compacted;
+      await completed;
+
+      const turnRequest = model.requests('main')[1]!;
+      const compactionRequest = model.requests('compaction')[0]!;
+      for (const request of [turnRequest, compactionRequest]) {
+        const messages = request.view.messages;
+        const assistantIndex = messages.findIndex((message) => message.role === 'assistant');
+        expect(messages[assistantIndex]?.calls.map((entry) => entry.id)).toEqual(['call_dangling']);
+        const placeholder = messages[assistantIndex + 1];
+        expect(placeholder).toMatchObject({ role: 'tool', callId: 'call_dangling' });
+        expect(placeholder?.text).toContain('Tool result is not available in the current context');
+      }
+      expect(compactionRequest.view.messages.slice(0, turnRequest.view.messages.length)).toEqual(
+        turnRequest.view.messages,
+      );
+      await ctx.expectResumeMatches();
+    },
+  );
+
+  testkitTest(
+    'renders one identical wall time header for tool results across turn, compaction and resume',
+    async ({ agent: ctx, model }) => {
+      ctx.get(IAgentToolRegistryService).register({
+        name: 'mcp__test__run',
+        description: 'Run a short test task.',
+        parameters: { type: 'object', properties: {}, additionalProperties: false },
+        resolveExecution: () => ({
+          approvalRule: 'mcp__test__run',
+          execute: async () => ({ output: 'run-result' }),
+        }),
+      } satisfies ExecutableTool);
+      ctx.get(IAgentToolRegistryService).register({
+        name: 'mcp__test__fetch',
+        description: 'Fetch a short test page.',
+        parameters: {
+          type: 'object',
+          properties: { url: { type: 'string' } },
+          required: ['url'],
+          additionalProperties: false,
+        },
+        resolveExecution: () => ({ output: 'fetch-result', isError: true }),
+      } satisfies ExecutableTool);
+      model.script(
+        batch(
+          call('mcp__test__run', {}, { id: 'call_run', text: 'I will run both tools.' }),
+          call('mcp__test__fetch', { url: 'https://example.com' }, { id: 'call_fetch' }),
+        ),
+      );
+      model.script(say('turn one done'));
+      await ctx.rpc.prompt({ input: [{ type: 'text', text: 'run the tools' }] });
+      await ctx.untilTurnEnd();
+
+      const loop = ctx.get(IAgentLoopService);
+      const liveMessages = loop.previewRequestContent().messages;
+      const runMessage = liveMessages.find(
+        (message) => message.role === 'tool' && message.toolCallId === 'call_run',
+      );
+      const runDurationMs = runMessage?.role === 'tool' ? runMessage.attributes?.durationMs : undefined;
+      expect(runDurationMs).toBeTypeOf('number');
+      const runHeader = `Wall time: ${((runDurationMs ?? 0) / 1000).toFixed(3)} seconds`;
+      const fetchMessage = liveMessages.find(
+        (message) => message.role === 'tool' && message.toolCallId === 'call_fetch',
+      );
+      expect(fetchMessage?.role === 'tool' ? fetchMessage.attributes?.durationMs : undefined).toBe(0);
+
+      model.script(say('turn two ok'));
+      await ctx.rpc.prompt({ input: [{ type: 'text', text: 'continue' }] });
+      await ctx.untilTurnEnd();
+
+      model.lane('compaction').script(say('Summary with durations.'));
+      const compacted = ctx.once('full_compaction.complete');
+      const completed = ctx.once('compaction.completed');
+      await ctx.rpc.beginCompaction({});
+      await compacted;
+      await completed;
+
+      const liveStepRequest = model.requests('main')[1]!;
+      const turnRequest = model.requests('main')[2]!;
+      const compactionRequest = model.requests('compaction')[0]!;
+      for (const request of [liveStepRequest, turnRequest, compactionRequest]) {
+        const runText = request.view.messages.find(
+          (message) => message.role === 'tool' && message.callId === 'call_run',
+        )?.text ?? '';
+        expect(runText).toContain(`${runHeader}\n`);
+        expect(runText.match(/Wall time: /g)).toHaveLength(1);
+        const fetchText = request.view.messages.find(
+          (message) => message.role === 'tool' && message.callId === 'call_fetch',
+        )?.text ?? '';
+        expect(fetchText).toContain('Wall time: 0.000 seconds\n');
+        expect(fetchText.match(/Wall time: /g)).toHaveLength(1);
+      }
+      expect(turnRequest.view.messages.slice(0, liveStepRequest.view.messages.length)).toEqual(
+        liveStepRequest.view.messages,
+      );
+      expect(compactionRequest.view.messages.slice(0, turnRequest.view.messages.length)).toEqual(
+        turnRequest.view.messages,
+      );
+      await ctx.expectResumeMatches();
+    },
+  );
+
   it('keeps messages appended while compacting an unchanged prefix', async () => {
     const ctx = testAgent();
     ctx.configure({
@@ -2553,8 +2711,10 @@ describe('FullCompaction', () => {
     await compactionRequested.promise;
     await turnEnded;
 
+    const followUpBlocked = ctx.once('compaction.blocked');
     const followUpEnded = ctx.untilTurnEnd();
     await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Follow up while compacting' }] });
+    await followUpBlocked;
     ctx.newEvents();
     const compactionCompleted = ctx.once('compaction.completed');
     releaseCompaction.resolve();
@@ -2580,6 +2740,80 @@ describe('FullCompaction', () => {
     expect(splicedIndex).toBeGreaterThan(applyCompactionIndex);
     await ctx.expectResumeMatches();
   });
+
+  const earlyCompactionTest = base.extend<TestkitAgentFixtures>(
+    testkitAgentFixtures({ initialConfig: { loopControl: { compactionTriggerRatio: 0.5 } } }),
+  );
+
+  earlyCompactionTest(
+    'waits for an auto compaction started below the block ratio before requesting the step',
+    async ({ agent: ctx, model }) => {
+      ctx.appendExchange(1, 'old user one', 'old assistant one', 600_000);
+      model.lane('compaction').script(held('early-summary', say('Early compacted summary.')));
+      model.script(say('Answer after compacting.'));
+      const blocked = ctx.once('compaction.blocked');
+      const turnEnded = ctx.untilTurnEnd();
+
+      await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Answer after compacting' }] });
+      await model.hold('early-summary').reached();
+      await Promise.race([blocked, model.waitForRequest((request) => request.lane === 'main')]);
+      const mainRequestsDuringCompaction = model.requests('main').length;
+      model.hold('early-summary').release();
+      const events = await turnEnded;
+
+      expect(mainRequestsDuringCompaction).toBe(0);
+      expect(countEvents(events, 'full_compaction.cancel')).toBe(0);
+      expect(eventIndex(events, 'context.apply_compaction')).toBeGreaterThanOrEqual(0);
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          event: 'turn.ended',
+          args: expect.objectContaining({ turnId: 0, reason: 'completed' }),
+        }),
+      );
+      expect(model.requests('main').map((request) => request.view.messages.map((message) => message.text))).toEqual([
+        expect.arrayContaining([expect.stringContaining('Early compacted summary.')]),
+      ]);
+      await ctx.expectResumeMatches();
+    },
+  );
+
+  earlyCompactionTest(
+    'compacts again instead of cancelling the turn when the compaction it waits for is discarded',
+    async ({ agent: ctx, model }) => {
+      ctx.appendExchange(1, 'old user one', 'old assistant one', 100_000);
+      model.lane('compaction').script(held('stale-summary', say('Stale summary.')), say('Fresh summary.'));
+      model.script(withUsage({ input: 900_000, output: 1 }, say('First turn answer.')), say('Continued the goal.'));
+      const firstTurnEnded = ctx.untilTurnEnd();
+      await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Start the goal' }] });
+      await firstTurnEnded;
+      await model.hold('stale-summary').reached();
+
+      const blocked = ctx.once('compaction.blocked');
+      const continuationEnded = ctx.untilTurnEnd();
+      const goalContinuation: SystemTriggerOrigin = { kind: 'system_trigger', name: 'goal_continuation' };
+      ctx.get(IAgentLoopService).submit({
+        role: 'user',
+        content: [{ type: 'text', text: 'Continue toward the active goal.' }],
+        attributes: { origin: goalContinuation },
+      });
+      await blocked;
+      model.hold('stale-summary').release();
+      const events = await continuationEnded;
+
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          event: 'turn.ended',
+          args: expect.objectContaining({ turnId: 1, reason: 'completed' }),
+        }),
+      );
+      expect(countEvents(events, 'context.apply_compaction')).toBe(1);
+      expect(model.requests('compaction')).toHaveLength(2);
+      const continuationTexts = model.requests('main').at(-1)?.view.messages.map((message) => message.text) ?? [];
+      expect(continuationTexts).toEqual(expect.arrayContaining([expect.stringContaining('Fresh summary.')]));
+      expect(continuationTexts.some((text) => text.includes('Stale summary.'))).toBe(false);
+      await ctx.expectResumeMatches();
+    },
+  );
 
   it('keeps a deferred system reminder behind an unresolved tool exchange across compaction', async () => {
     const ctx = testAgent();
@@ -4687,6 +4921,13 @@ describe('prompt deferral during full compaction', () => {
 describe('goal reminder re-injection after full compaction', () => {
   const GOAL_OBJECTIVE = 'ship the goal parity fixes';
 
+  const completeGoalCall: ToolCall = {
+    type: 'function',
+    id: 'complete-goal',
+    name: 'UpdateGoal',
+    arguments: JSON.stringify({ status: 'complete' }),
+  };
+
   function goalReminderCount(history: readonly Message[] | readonly string[]): number {
     const texts =
       typeof history[0] === 'string'
@@ -4708,9 +4949,12 @@ describe('goal reminder re-injection after full compaction', () => {
     ctx.appendExchange(2, 'recent user two', 'recent assistant two', 950_000);
 
     ctx.mockNextResponse({ type: 'text', text: 'Auto compacted summary.' });
-    ctx.mockNextResponse({ type: 'text', text: 'I can answer after compaction.' });
+    ctx.mockNextResponse({ type: 'text', text: 'I can answer after compaction.' }, completeGoalCall);
+    ctx.mockNextResponse({ type: 'text', text: 'Goal complete.' });
     await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Answer after compacting' }] });
     await ctx.untilTurnEnd();
+    await vi.waitFor(() => expect(ctx.llmCalls).toHaveLength(3));
+    await ctx.get(IAgentLoopService).settled();
 
     expect(ctx.llmCalls.length).toBeGreaterThanOrEqual(2);
     expect(goalReminderCount(ctx.llmCalls[0]!.history)).toBe(1);
@@ -4752,10 +4996,13 @@ describe('goal reminder re-injection after full compaction', () => {
     expect(floor).toBe(ctx.tokenCounting.get().size);
     expect(floor).toBe(tokensAfter);
 
-    ctx.mockNextResponse({ type: 'text', text: 'Reply after compaction.' });
+    ctx.mockNextResponse({ type: 'text', text: 'Reply after compaction.' }, completeGoalCall);
+    ctx.mockNextResponse({ type: 'text', text: 'Goal complete.' });
     await ctx.rpc.prompt({ input: [{ type: 'text', text: 'next prompt' }] });
     await ctx.untilTurnEnd();
-    expect(goalReminderCount(ctx.llmCalls.at(-1)!.history)).toBe(1);
+    await vi.waitFor(() => expect(ctx.llmCalls).toHaveLength(3));
+    await ctx.get(IAgentLoopService).settled();
+    expect(goalReminderCount(ctx.llmCalls[1]!.history)).toBe(1);
   });
 
   it('replays a deferred prompt whose first request carries the re-injected goal reminder', async () => {
@@ -5507,13 +5754,12 @@ describe('FullCompaction prompt-cache prefix', () => {
     loadSchema: boolean,
     media: (typeof MEDIA_SCENARIOS)[number],
   ): Promise<TestAgentContext> {
-    vi.stubEnv(TOOL_SELECT_FLAG_ENV, toolSelect ? '1' : '0');
     const ctx = testAgent({
       initialConfig: { providers: {}, loopControl: { reservedContextSize: 0 } },
     });
     ctx.configure({
       provider: CATALOGUED_PROVIDER,
-      modelCapabilities: { ...CATALOGUED_MODEL_CAPABILITIES, dynamically_loaded_tools: true },
+      modelCapabilities: { ...CATALOGUED_MODEL_CAPABILITIES, dynamically_loaded_tools: toolSelect },
     });
     await ctx.restorePersisted();
     await ctx.rpc.setPermission({ mode: 'yolo' });
@@ -5523,7 +5769,7 @@ describe('FullCompaction prompt-cache prefix', () => {
     );
     if (media !== 'none') {
       ctx.appendRichToolExchange();
-      ctx.appendRichToolExchange();
+      ctx.appendRichToolExchange('inspect this image again');
       ctx.mockNextProviderResponse(
         media === 'media-degraded'
           ? providerHttpError(413, 'Request Entity Too Large')
@@ -5597,4 +5843,42 @@ describe('FullCompaction prompt-cache prefix', () => {
       expect(findGenerateCallPrefixBreak(lastLoopCall, compactionCall)).toBeUndefined();
     },
   );
+
+  it('skips automatic compaction for aborted steps and preserves it for normal steps', async () => {
+    const ctx = testAgent({ initialConfig: { loopControl: { compactionTriggerRatio: 0.5 } } });
+    const compaction = ctx.get(IAgentFullCompactionService) as IAgentFullCompactionService & {
+      strategy: { shouldCompact: () => boolean };
+    };
+    const shouldCompact = vi.spyOn(compaction.strategy, 'shouldCompact').mockReturnValue(true);
+    const begin = vi.spyOn(compaction, 'begin').mockReturnValue(true);
+    let nextCalls = 0;
+    const registration = ctx.get(IAgentLoopService).hooks.onDidFinishStep.register('test-next', async (_ctx, next) => {
+      nextCalls += 1;
+      await next();
+    });
+    const context = (signal: AbortSignal) => ({
+      turnId: 0,
+      step: 1,
+      firstStepOfTurn: true,
+      signal,
+      usage: { inputOther: 0, output: 0, inputCacheRead: 0, inputCacheCreation: 0 },
+      finishReason: 'completed' as const,
+      tools: [],
+      stopTurn: false,
+    });
+
+    const aborted = new AbortController();
+    aborted.abort('cancelled');
+    await ctx.get(IAgentLoopService).hooks.onDidFinishStep.run(context(aborted.signal));
+    expect(nextCalls).toBe(1);
+    expect(begin).not.toHaveBeenCalled();
+    expect(shouldCompact).not.toHaveBeenCalled();
+
+    await ctx.get(IAgentLoopService).hooks.onDidFinishStep.run(context(new AbortController().signal));
+    expect(nextCalls).toBe(2);
+    expect(shouldCompact).toHaveBeenCalledOnce();
+    expect(begin).toHaveBeenCalledOnce();
+    expect(begin).toHaveBeenCalledWith({ source: 'auto' });
+    registration.dispose();
+  });
 });

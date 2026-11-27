@@ -9,7 +9,7 @@ import type {
   QuestionResult,
   Scope,
   SessionActivityState,
-  Workspace,
+  Project,
 } from '@moonshot-ai/agent-core-v2';
 import {
   Error2,
@@ -25,9 +25,11 @@ import {
   ISessionIndex,
   ISessionManager,
   ISessionMetadata,
-  IWorkspaceService,
+  ISessionToolPolicy,
+  IProjectService,
   followSessionLifecycles,
   getLiveSessionById,
+  missingConfiguredModelAlias,
   resumeSessionById,
   interactions,
   toDisposable,
@@ -67,6 +69,7 @@ import type {
   ConversationFeedCreated,
   ConversationService,
 } from '../../../services/conversation/conversationService';
+import { workspaceRootOf } from '../../../services/workspaceVisibility';
 import { mapError } from '../../errors';
 import { ensureMainAgent, MAIN_AGENT_ID } from '../../mainAgent';
 import { SessionAgentFeed } from './sessionAgentFeed';
@@ -313,7 +316,20 @@ export class SessionEventBroadcaster {
       }),
     };
     subscription.conversation = attachment;
-    void this.sendPage(state, target, agentId, attachment);
+    await this.sendPage(state, target, agentId, attachment);
+    if (!current() || agentId !== MAIN_AGENT_ID) return;
+    const session = getLiveSessionById(this.opts.core.accessor, state.sessionId);
+    const main = session?.accessor.get(IAgentLifecycleService).handleOf(MAIN_AGENT_ID);
+    if (main === undefined) return;
+    const previous = missingConfiguredModelAlias(main);
+    if (previous !== undefined) {
+      this.sendConversation(target, state.sessionId, agentId, {
+        type: 'notice',
+        level: 'warning',
+        title: previous,
+        code: 'model.not_configured',
+      });
+    }
   }
 
   private onFeedCreated({ sessionId, agentId }: ConversationFeedCreated): void {
@@ -454,9 +470,26 @@ export class SessionEventBroadcaster {
     const tasks = new SessionTaskFeed(agents, (agentId, info) => {
       this.sendAgentFrame(state, agentId, toTaskMessage(state.sessionId, agentId, info));
     });
-    const agentStates = new SessionAgentFeed(sessionId, agents, (agentId, message) => {
-      this.sendAgentFrame(state, agentId, message);
-    });
+    const sessionPolicy = session.accessor.get(ISessionToolPolicy) as ISessionToolPolicy | undefined;
+    const config = this.opts.core.accessor.get(IConfigService) as IConfigService | undefined;
+    const agentStates = new SessionAgentFeed(
+      sessionId,
+      agents,
+      (agentId, message) => {
+        this.sendAgentFrame(state, agentId, message);
+      },
+      (listener) => {
+        const subscriptions = [
+          sessionPolicy?.onDidChange(() => listener()),
+          config?.onDidSectionChange?.((event) => {
+            if (event.domain === 'tools' || event.domain === 'experimental') listener();
+          }),
+        ];
+        return toDisposable(() => {
+          for (const subscription of subscriptions) subscription?.dispose();
+        });
+      },
+    );
     state.tasks = tasks;
     state.agents = agentStates;
     state.lifecycleDisposables.push(tasks, agentStates);
@@ -575,12 +608,15 @@ export class SessionEventBroadcaster {
         const live = getLiveSessionById(this.opts.core.accessor, sessionId);
         if (live !== undefined) {
           try {
-            const meta = await live.accessor.get(ISessionMetadata).read();
+            const metadata = live.accessor.get(ISessionMetadata);
+            const meta = await metadata.read();
             const ctx = live.accessor.get(ISessionContext);
             summary = {
               id: meta.id,
               workspaceId: ctx.workspaceId,
-              cwd: ctx.cwd,
+              cwd: metadata.effectiveCwd,
+              environmentId: meta.environmentId,
+              environmentCwd: meta.environmentCwd,
               title: meta.title,
               lastPrompt: meta.lastPrompt,
               createdAt: meta.createdAt,
@@ -598,9 +634,14 @@ export class SessionEventBroadcaster {
         | (SessionWireFields & { cwd?: string })
         | undefined;
       if (summary === undefined) return undefined;
-      const cwd = summary.cwd ?? (await this.opts.core.accessor.get(IWorkspaceService).get(summary.workspaceId))?.root;
+      const cwd = summary.cwd ?? (await this.opts.core.accessor.get(IProjectService).get(summary.workspaceId))?.root;
       if (cwd === undefined) return undefined;
-      session = toWireSession(summary, cwd, factsOverride ?? resolveSessionFacts(this.opts.core, sessionId));
+      const workspaceRoot = await workspaceRootOf(this.opts.core, summary.workspaceId);
+      session = toWireSession(
+        { ...summary, workspaceRoot },
+        cwd,
+        factsOverride ?? resolveSessionFacts(this.opts.core, sessionId),
+      );
     }
     if (change === 'archived') {
       session = {
@@ -752,7 +793,7 @@ export class SessionEventBroadcaster {
   }
 
   private sendGlobal(event: Event): void {
-    const { agentId: _agentId, sessionId: _sessionId, time, ...fields } = event;
+    const { agentId: _agentId, sessionId: _sessionId, time, ...fields } = this.withCurrentPendingInteraction(event);
     const envelope = {
       ...fields,
       event_created_at: time !== undefined ? new Date(time).toISOString() : new Date().toISOString(),
@@ -762,6 +803,16 @@ export class SessionEventBroadcaster {
         target.send(envelope, 'immediate');
       } catch {
       }
+    }
+  }
+
+  private withCurrentPendingInteraction(event: Event): Event {
+    if (event.type !== 'session' || event.change !== 'updated') return event;
+    try {
+      const { pendingInteraction } = resolveSessionFacts(this.opts.core, event.session.id);
+      return { ...event, session: { ...event.session, pending_interaction: pendingInteraction } };
+    } catch {
+      return event;
     }
   }
 
@@ -959,13 +1010,13 @@ function sessionLifecyclePayload(
   return { sessionId: candidate.sessionId, workspaceId: candidate.workspaceId, session: candidate.session };
 }
 
-function workspaceLifecyclePayload(payload: unknown): Workspace | undefined {
+function workspaceLifecyclePayload(payload: unknown): Project | undefined {
   if (typeof payload !== 'object' || payload === null) return undefined;
   const candidate = (payload as { workspace?: unknown }).workspace;
   if (typeof candidate !== 'object' || candidate === null || Array.isArray(candidate)) {
     return undefined;
   }
-  const ws = candidate as Partial<Workspace>;
+  const ws = candidate as Partial<Project>;
   if (typeof ws.id !== 'string' || ws.id.length === 0) return undefined;
   if (typeof ws.root !== 'string' || ws.root.length === 0) return undefined;
   if (typeof ws.name !== 'string') return undefined;
@@ -986,7 +1037,7 @@ function workspaceLifecyclePayload(payload: unknown): Workspace | undefined {
 
 function workspaceDeletedPayload(
   payload: unknown,
-): { workspaceId: string; root: string; workspace?: Workspace } | undefined {
+): { workspaceId: string; root: string; workspace?: Project } | undefined {
   if (typeof payload !== 'object' || payload === null) return undefined;
   const candidate = payload as { workspaceId?: unknown; root?: unknown; workspace?: unknown };
   if (typeof candidate.workspaceId !== 'string' || candidate.workspaceId.length === 0) {
@@ -996,7 +1047,7 @@ function workspaceDeletedPayload(
   return {
     workspaceId: candidate.workspaceId,
     root: candidate.root,
-    workspace: candidate.workspace as Workspace | undefined,
+    workspace: candidate.workspace as Project | undefined,
   };
 }
 

@@ -106,6 +106,7 @@ export interface LlmCredentialProvider {
   canRecover?(error: unknown): boolean;
   invalidate?(): void;
   rotation?(): LlmKeyRotationController | undefined;
+  readonly keyCount?: number;
 }
 
 export interface LlmFileInput {
@@ -121,12 +122,18 @@ export interface UploadedMedia {
   readonly expiresAt?: number;
 }
 
+export class MediaUploadFailedError extends Error {}
+
 export interface LlmFiles {
   readonly kinds: ReadonlySet<MediaKind>;
   readonly upload: (
     file: LlmFileInput,
     ctx: { readonly endpoint: ResolvedEndpoint; readonly signal: AbortSignal },
   ) => Promise<UploadedMedia>;
+  readonly hasFailed?: (
+    id: string,
+    ctx: { readonly endpoint: ResolvedEndpoint; readonly signal: AbortSignal },
+  ) => Promise<boolean>;
 }
 
 export interface LlmEndpoint {

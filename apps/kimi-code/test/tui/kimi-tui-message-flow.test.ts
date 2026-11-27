@@ -2,8 +2,6 @@ import assert from 'node:assert/strict';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { createServer } from 'node:http';
-import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 
@@ -24,6 +22,7 @@ import {
   type GoalSnapshot,
   type Session,
 } from '@moonshot-ai/kimi-code-sdk';
+import { call, startFakeModel } from '@moonshot-ai/testkit/model';
 import { resetSurveyPopupConfigCache } from '@moonshot-ai/kimi-code-product/session-rating/node';
 import chalk from 'chalk';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -180,6 +179,7 @@ interface MessageDriver {
   skillVariantPathForCommand(commandName: string, tokenStart: number): string | undefined;
   clearQueuedMessages(): void;
   closeSession(reason: string): Promise<void>;
+  deferUserMessages: boolean;
   setSession(session: unknown): Promise<void>;
   switchToSession(session: Session, statusMessage: string): Promise<void>;
   reloadCurrentSessionView(session: Session, statusMessage: string): Promise<void>;
@@ -3110,14 +3110,21 @@ describe('KimiTUI message flow', () => {
     expect(harness.createSession).toHaveBeenCalledTimes(1);
   });
 
-  it('lists MCP servers before the lazy session via the workspace view (v2 engine)', async () => {
+  it.each([
+    ['the project directory', {}, undefined],
+    [
+      'the directory of --environment-cwd',
+      { environment: 'local', environmentCwd: '/tmp/proj-a/src' },
+      { environmentId: 'local', environmentCwd: '/tmp/proj-a/src' },
+    ],
+  ])('lists MCP servers of %s before the lazy session via the workspace view (v2 engine)', async (_label, startupOptions, environment) => {
     const session = makeSession({ id: 'ses-lazy' });
     const listWorkspaceMcpServers = vi.fn(async () => [
       { name: 'my-mcp', status: 'connected', transport: 'stdio', tools: [] },
     ]);
     const startupInput: KimiTUIStartupInput = {
       ...makeStartupInput(),
-      cliOptions: { ...makeStartupInput().cliOptions },
+      cliOptions: { ...makeStartupInput().cliOptions, ...startupOptions },
     };
     const { driver, harness } = await makeDriver(
       session,
@@ -3128,7 +3135,7 @@ describe('KimiTUI message flow', () => {
     driver.handleUserInput('/mcp');
 
     await vi.waitFor(() => {
-      expect(listWorkspaceMcpServers).toHaveBeenCalledWith('/tmp/proj-a');
+      expect(listWorkspaceMcpServers).toHaveBeenCalledWith('/tmp/proj-a', environment);
     });
     expect(harness.createSession).not.toHaveBeenCalled();
     expect(session.listMcpServers).not.toHaveBeenCalled();
@@ -6388,11 +6395,7 @@ command = "vim"
     const compactingSend = vi.fn();
     compacting.driver.handleUserInput('held for compaction');
     compacting.driver.sessionEventHandler.handleEvent(
-      { type: 'loop.drained', agentId: 'main', sessionId: 'ses-1' } as Event,
-      compactingSend,
-    );
-    compacting.driver.sessionEventHandler.handleEvent(
-      { type: 'loop.idle', agentId: 'main', sessionId: 'ses-1' } as Event,
+      { type: 'turn.ended', agentId: 'main', sessionId: 'ses-1', turnId: 4, reason: 'completed', continuation: 'none' } as Event,
       compactingSend,
     );
     expect(compactingSend).not.toHaveBeenCalled();
@@ -8690,68 +8693,12 @@ command = "vim"
       Buffer.from('00000020667479706d703432000000006d70343269736f6d', 'hex'),
     );
 
-    let notifyUploadStarted!: () => void;
-    const uploadStarted = new Promise<void>((resolve) => {
-      notifyUploadStarted = resolve;
-    });
-    let uploadAborted = false;
-    const server = createServer((req, res) => {
-      void (async () => {
-        for await (const _chunk of req) {
-        }
-        if (req.url === '/v1/files') {
-          notifyUploadStarted();
-          res.on('close', () => {
-            if (!res.writableEnded) uploadAborted = true;
-          });
-          return;
-        }
-        if (req.url === '/v1/chat/completions') {
-          const chunks = [
-            {
-              id: 'chatcmpl-mock',
-              object: 'chat.completion.chunk',
-              created: 1,
-              model: 'mock',
-              choices: [
-                {
-                  index: 0,
-                  delta: {
-                    role: 'assistant',
-                    tool_calls: [
-                      {
-                        index: 0,
-                        id: 'call_video_1',
-                        type: 'function',
-                        function: { name: 'ReadMediaFile', arguments: '{"path":"clip.mp4"}' },
-                      },
-                    ],
-                  },
-                  finish_reason: null,
-                },
-              ],
-            },
-            {
-              id: 'chatcmpl-mock',
-              object: 'chat.completion.chunk',
-              created: 1,
-              model: 'mock',
-              choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }],
-              usage: { prompt_tokens: 10, completion_tokens: 4, total_tokens: 14 },
-            },
-          ];
-          res.writeHead(200, { 'content-type': 'text/event-stream' });
-          res.end(`${chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join('')}data: [DONE]\n\n`);
-          return;
-        }
-        res.writeHead(404);
-        res.end();
-      })().catch(() => {
-        res.destroy();
-      });
-    });
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-    const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`;
+    const model = await startFakeModel();
+    model.holdUploads();
+    model
+      .route('video-upload', () => true)
+      .script(call('ReadMediaFile', { path: 'clip.mp4' }, { id: 'call_video_1' }));
+    const baseUrl = model.baseUrl;
     await writeFile(
       join(homeDir, 'config.toml'),
       `
@@ -8791,14 +8738,16 @@ capabilities = ["image_in", "video_in"]
       driver.sessionEventHandler.startSubscription();
 
       driver.handleUserInput('watch clip.mp4');
-      await uploadStarted;
+      await vi.waitFor(() => {
+        expect(model.uploads()).toHaveLength(1);
+      });
       driver.state.editor.onEscape?.();
 
       await vi.waitFor(() => {
         expect(driver!.state.appState.streamingPhase).toBe('idle');
       });
       await vi.waitFor(() => {
-        expect(uploadAborted).toBe(true);
+        expect(model.uploads()[0]?.state).toBe('aborted');
       });
       expect(driver.state.activitySpinner).toBeNull();
       const previousSessionId = driver.getCurrentSessionId();
@@ -8811,16 +8760,12 @@ capabilities = ["image_in", "video_in"]
       expect(driver.state.appState.streamingPhase).toBe('idle');
       expect(driver.state.livePane.mode).toBe('idle');
       expect(driver.state.activitySpinner).toBeNull();
+      model.verify();
     } finally {
       driver?.state.activitySpinner?.instance.stop();
       await driver?.closeSession('test').catch(() => {});
       await harness?.close();
-      server.closeAllConnections();
-      await new Promise<void>((resolve) => {
-        server.close(() => {
-          resolve();
-        });
-      });
+      await model.close();
     }
   }, 60_000);
 
@@ -8875,7 +8820,7 @@ capabilities = ["image_in", "video_in"]
       driver.handleUserInput('first');
 
       driver.sessionEventHandler.handleEvent(
-        { ...main, type: 'turn.ended', turnId: 2, reason: 'completed' } as Event,
+        { ...main, type: 'turn.ended', turnId: 2, reason: 'completed', continuation: 'turn' } as Event,
         handoffQueued,
       );
       await vi.advanceTimersByTimeAsync(100);
@@ -8895,14 +8840,7 @@ capabilities = ["image_in", "video_in"]
         handoffQueued,
       );
       driver.sessionEventHandler.handleEvent(
-        { ...main, type: 'turn.ended', turnId: 3, reason: 'completed', stopReason: 'notify' } as Event,
-        handoffQueued,
-      );
-      await vi.advanceTimersByTimeAsync(0);
-      expect(handoffQueued).not.toHaveBeenCalled();
-
-      driver.sessionEventHandler.handleEvent(
-        { ...main, type: 'loop.drained' } as Event,
+        { ...main, type: 'turn.ended', turnId: 3, reason: 'completed', stopReason: 'notify', continuation: 'none' } as Event,
         handoffQueued,
       );
       await vi.advanceTimersByTimeAsync(0);
@@ -8910,12 +8848,32 @@ capabilities = ["image_in", "video_in"]
       expect(handoffQueued).toHaveBeenCalledOnce();
       expect(handoffQueued).toHaveBeenCalledWith(expect.objectContaining({ text: 'first' }));
       expect(driver.state.queuedMessages.map((item) => item.text)).toEqual(['second']);
+      expect(driver.state.terminalState.notificationKeys.has('turn-complete:3')).toBe(false);
 
       driver.sessionEventHandler.handleEvent(
-        { ...main, type: 'loop.idle' } as Event,
+        { ...main, type: 'turn.started', turnId: 4, origin: { kind: 'user' } } as Event,
         handoffQueued,
       );
-      expect(driver.state.terminalState.notificationKeys.has('turn-complete:3')).toBe(false);
+      driver.sessionEventHandler.handleEvent(
+        { ...main, type: 'turn.ended', turnId: 4, reason: 'completed', continuation: 'none' } as Event,
+        handoffQueued,
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      expect(handoffQueued).toHaveBeenCalledTimes(2);
+      expect(handoffQueued).toHaveBeenLastCalledWith(expect.objectContaining({ text: 'second' }));
+      expect(driver.state.terminalState.notificationKeys.has('turn-complete:4')).toBe(false);
+
+      driver.sessionEventHandler.handleEvent(
+        { ...main, type: 'turn.started', turnId: 5, origin: { kind: 'user' } } as Event,
+        handoffQueued,
+      );
+      driver.sessionEventHandler.handleEvent(
+        { ...main, type: 'turn.ended', turnId: 5, reason: 'completed', continuation: 'none' } as Event,
+        handoffQueued,
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      expect(handoffQueued).toHaveBeenCalledTimes(2);
+      expect(driver.state.terminalState.notificationKeys.has('turn-complete:5')).toBe(true);
 
       const raced = await makeDriver();
       raced.driver.state.appState.loopLifecycleEvents = true;
@@ -8923,7 +8881,7 @@ capabilities = ["image_in", "video_in"]
       const racedSend = vi.fn();
       raced.driver.handleUserInput('requeue for compaction');
       raced.driver.sessionEventHandler.handleEvent(
-        { ...main, type: 'loop.drained' } as Event,
+        { ...main, type: 'turn.ended', turnId: 1, reason: 'completed', continuation: 'none' } as Event,
         racedSend,
       );
       raced.driver.state.appState.isCompacting = true;
@@ -8943,35 +8901,56 @@ capabilities = ["image_in", "video_in"]
       const staleSend = vi.fn();
       stale.driver.handleUserInput('new work');
       stale.driver.sessionEventHandler.handleEvent(
-        { ...main, type: 'loop.drained' } as Event,
+        { ...main, type: 'turn.ended', turnId: 1, reason: 'completed', continuation: 'none' } as Event,
         staleSend,
       );
       await vi.advanceTimersByTimeAsync(0);
+      expect(staleSend).toHaveBeenCalledOnce();
       stale.driver.state.appState.streamingPhase = 'waiting';
       stale.driver.sessionEventHandler.handleEvent(
-        { ...main, type: 'loop.idle' } as Event,
+        { ...main, type: 'turn.ended', turnId: 1, reason: 'completed', continuation: 'none' } as Event,
         staleSend,
       );
+      await vi.advanceTimersByTimeAsync(0);
+      expect(staleSend).toHaveBeenCalledOnce();
       expect(stale.driver.state.appState.streamingPhase).toBe('waiting');
 
       const versioned = await makeDriver();
       versioned.driver.state.appState.loopLifecycleEvents = true;
       versioned.driver.state.appState.streamingPhase = 'waiting';
       versioned.driver.sessionEventHandler.handleEvent(
-        { ...main, type: 'loop.drained', generation: 7 } as Event,
+        { ...main, type: 'turn.ended', turnId: 7, reason: 'completed', continuation: 'background' } as Event,
         vi.fn(),
       );
+      expect(versioned.driver.state.appState.streamingPhase).toBe('idle');
       versioned.driver.state.appState.streamingPhase = 'waiting';
       versioned.driver.sessionEventHandler.handleEvent(
-        { ...main, type: 'loop.idle', generation: 6 } as Event,
+        { ...main, type: 'turn.ended', turnId: 6, reason: 'completed', continuation: 'none' } as Event,
         vi.fn(),
       );
       expect(versioned.driver.state.appState.streamingPhase).toBe('waiting');
       versioned.driver.sessionEventHandler.handleEvent(
-        { ...main, type: 'loop.idle', generation: 7 } as Event,
+        { ...main, type: 'turn.ended', turnId: 8, reason: 'completed', continuation: 'none' } as Event,
         vi.fn(),
       );
       expect(versioned.driver.state.appState.streamingPhase).toBe('idle');
+
+      const switched = await makeDriver();
+      switched.driver.state.appState.loopLifecycleEvents = true;
+      switched.driver.state.appState.streamingPhase = 'waiting';
+      switched.driver.sessionEventHandler.handleEvent(
+        { ...main, type: 'turn.ended', turnId: 7, reason: 'completed', continuation: 'none' } as Event,
+        vi.fn(),
+      );
+      expect(switched.driver.state.appState.streamingPhase).toBe('idle');
+      (switched.driver as unknown as { resetSessionRuntime(): void }).resetSessionRuntime();
+      switched.driver.state.appState.loopLifecycleEvents = true;
+      switched.driver.state.appState.streamingPhase = 'waiting';
+      switched.driver.sessionEventHandler.handleEvent(
+        { ...main, type: 'turn.ended', turnId: 1, reason: 'completed', continuation: 'none' } as Event,
+        vi.fn(),
+      );
+      expect(switched.driver.state.appState.streamingPhase).toBe('idle');
     } finally {
       vi.useRealTimers();
     }
@@ -11394,6 +11373,90 @@ capabilities = ["image_in", "video_in"]
 
     expect(session.startBtw).not.toHaveBeenCalled();
     expect(stripSgr(renderTranscript(driver))).toContain('LLM not set');
+  });
+
+  it('blocks prompts, inline skills, and plugin commands when the session model is not configured', async () => {
+    const activatePluginCommand = vi.fn(async () => {});
+    const session = makeSession({ activatePluginCommand });
+    const { driver } = await makeDriver(session);
+    const skillDriver = driver as unknown as { skillCommandMap: Map<string, string> };
+    skillDriver.skillCommandMap.set('review', 'review');
+    driver.pluginCommandMap.set('demo:run', 'demo');
+    driver.state.appState.model = 'removed-model';
+
+    driver.handleUserInput('hello after removal');
+    driver.handleUserInput('/review');
+    driver.handleUserInput('/demo:run');
+    driver.handleUserInput('/btw side question');
+    driver.handleUserInput('/init');
+
+    await vi.waitFor(() => {
+      expect(stripSgr(renderTranscript(driver))).toContain(
+        'Error: Model "removed-model" is not configured in config.toml. Use /model to select an available model.',
+      );
+    });
+    expect(session.prompt).not.toHaveBeenCalled();
+    expect(session.promptWithSkills).not.toHaveBeenCalled();
+    expect(activatePluginCommand).not.toHaveBeenCalled();
+    expect(session.startBtw).not.toHaveBeenCalled();
+    expect(driver.state.btwPanelContainer.children).toHaveLength(0);
+    expect(session.init).not.toHaveBeenCalled();
+    expect(driver.deferUserMessages).toBe(false);
+
+    driver.state.appState.availableModels['removed-model'] = {
+      provider: 'test',
+      model: 'removed-wire',
+      maxContextSize: 100,
+    };
+    driver.handleUserInput('hello after re-adding');
+
+    await vi.waitFor(() => {
+      expect(session.prompt).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('blocks input routed to an open /btw panel when the session model becomes unavailable', async () => {
+    const { driver, session } = await makeDriver();
+    await openBtwPanel(driver, session);
+    session.prompt.mockClear();
+    driver.state.appState.model = 'removed-model';
+
+    driver.handleUserInput('follow up in btw');
+
+    await vi.waitFor(() => {
+      expect(stripSgr(renderTranscript(driver))).toContain(
+        'Error: Model "removed-model" is not configured in config.toml. Use /model to select an available model.',
+      );
+    });
+    expect(session.prompt).not.toHaveBeenCalled();
+  });
+
+  it('does not close the active session when switching to the same session instance', async () => {
+    const { driver, session } = await makeDriver();
+
+    await driver.setSession(session);
+
+    expect(session.close).not.toHaveBeenCalled();
+  });
+
+  it('shows the resume warning when switching to a session whose model is unavailable', async () => {
+    const { driver } = await makeDriver();
+    const resumed = makeSession({
+      id: 'ses-removed',
+      getResumeState: vi.fn(() => ({
+        sessionMetadata: {},
+        agents: {},
+        warning:
+          'Session model "removed-model" is not configured in config.toml. Use /model to select an available model.',
+      })),
+    });
+
+    await driver.switchToSession(resumed as unknown as Session, 'Resumed session (ses-removed).');
+
+    expect(stripSgr(renderTranscript(driver))).toContain(
+      'Warning: Session model "removed-model" is not configured in config.toml. Use /model to select an available model.',
+    );
+    expect(stripSgr(renderTranscript(driver))).toContain('Resumed session (ses-removed).');
   });
 
   it('recomputes contextUsage when a status update carries contextTokens without it', async () => {

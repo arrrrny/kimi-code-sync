@@ -98,6 +98,21 @@ describe('replies', () => {
     expect(model.callId(0, 0)).toBe('call_0_0');
   });
 
+  it.each([true, false])('returns the scripted request ID with stream=%s', async (stream) => {
+    const model = fakeModel();
+    model.script({ ...say('done'), headers: { 'x-request-id': 'example-request' } });
+    const response = await clientOf(model).chat.completions.create({
+      model: 'testkit-model',
+      messages: [{ role: 'user', content: 'hello' }],
+      tools: TOOLS,
+      stream,
+    }).asResponse();
+    expect(response.headers.get('x-request-id')).toBe('example-request');
+    expect(response.headers.get('content-type')).toContain(stream ? 'text/event-stream' : 'application/json');
+    expect(await response.text()).toContain('done');
+    model.verify();
+  });
+
   it('emits parallel calls in order, or interleaves their argument pieces', async () => {
     const model = fakeModel();
     const parallel = batch(call('Bash', { command: 'a' }, { argumentChunks: 2 }), call('Bash', { command: 'b' }, { argumentChunks: 2 }));
@@ -131,6 +146,58 @@ describe('replies', () => {
     expect(message).toMatchObject({ content: 'Sure', reasoning_content: 'why' });
     expect(completion.choices[0]?.message.tool_calls?.[0]).toMatchObject({ id: 'call_0_0', function: { name: 'Bash', arguments: '{"command":"pwd"}' } });
     expect(completion.choices[0]?.finish_reason).toBe('tool_calls');
+  });
+});
+
+describe('disconnects', () => {
+  it('can report usage before dropping the connection', async () => {
+    const model = fakeModel();
+    model.script(disconnect(withUsage({ input: 4, output: 2 }, say('partial')), { afterUsage: true }));
+    const chunks: ChatCompletionChunk[] = [];
+    await expect(async () => {
+      for await (const chunk of await clientOf(model).chat.completions.create({ model: 'testkit-model', messages: [{ role: 'user', content: 'hi' }], tools: TOOLS, stream: true })) chunks.push(chunk);
+    }).rejects.toThrow();
+    expect(contentOf(chunks)).toBe('partial');
+    expect(chunks.at(-1)).toMatchObject({ choices: [{ finish_reason: null }], usage: { prompt_tokens: 4, completion_tokens: 2 } });
+    expect(model.request(0).state).toBe('cut');
+  });
+});
+
+describe('file uploads', () => {
+  it('stores an uploaded file, answers with a ready file object and serves it back by ID', async () => {
+    const model = fakeModel();
+    const client = clientOf(model);
+    const uploaded = await client.files.create({
+      file: new File([new Uint8Array([1, 2, 3])], 'clip.mp4', { type: 'video/mp4' }),
+      purpose: 'video' as never,
+    });
+    expect(uploaded).toMatchObject({ id: 'file-0', object: 'file', filename: 'clip.mp4', purpose: 'video', status: 'ok' });
+    expect(model.uploads()).toEqual([
+      expect.objectContaining({ index: 0, id: 'file-0', filename: 'clip.mp4', purpose: 'video', fileContentType: 'video/mp4', state: 'stored' }),
+    ]);
+    expect(model.uploads()[0]?.contentType).toContain('multipart/form-data');
+    expect(await client.files.retrieve('file-0')).toMatchObject({ id: 'file-0', status: 'ok' });
+    model.verify();
+  });
+
+  it('keeps a held upload open until the client gives up, and records it as aborted', async () => {
+    const model = fakeModel();
+    model.holdUploads();
+    const controller = new AbortController();
+    const upload = clientOf(model).files.create(
+      { file: new File([new Uint8Array([1])], 'clip.mp4', { type: 'video/mp4' }), purpose: 'video' as never },
+      { signal: controller.signal },
+    );
+    await expect.poll(() => model.uploads()[0]?.state).toBe('held');
+    controller.abort();
+    await expect(upload).rejects.toThrow();
+    await expect.poll(() => model.uploads()[0]?.state).toBe('aborted');
+  });
+
+  it('reports a request for a file that was never uploaded', async () => {
+    const model = fakeModel();
+    await expect(clientOf(model).files.retrieve('file-7')).rejects.toThrow();
+    expect(() => model.verify()).toThrow(/asked for a file that was never uploaded/);
   });
 });
 

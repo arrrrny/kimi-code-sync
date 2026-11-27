@@ -13,6 +13,7 @@ import { LLM_NOT_SET_MESSAGE, NO_ACTIVE_SESSION_MESSAGE } from '../constant/kimi
 import { isAbortError } from '../utils/errors';
 import { formatErrorMessage } from '../utils/event-payload';
 import { buildExportMarkdown } from '../utils/export-markdown';
+import { hasUnavailableSessionModel } from '../utils/model-switch';
 import { sessionWorkDir } from '../utils/session-work-dir';
 import type { SlashCommandHost } from './dispatch';
 
@@ -244,6 +245,7 @@ export async function handleInitCommand(host: SlashCommandHost): Promise<void> {
     host.showError(LLM_NOT_SET_MESSAGE);
     return;
   }
+  if (hasUnavailableSessionModel(host)) return;
 
   host.deferUserMessages = true;
   host.beginSessionRequest();

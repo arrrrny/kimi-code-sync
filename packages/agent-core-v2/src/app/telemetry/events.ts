@@ -1,6 +1,7 @@
+import type { DegradedLocation } from '#/app/git/workTree';
 import type { PromptPredictionCancelReason } from '#/features/promptPrediction/promptPrediction';
 import type { TowerExitReason } from '#/features/tower/tower';
-import type { SessionCloseReason } from '#/workspace/sessionLifecycle/sessionLifecycle';
+import type { SessionCloseReason } from '#/project/sessionLifecycle/sessionLifecycle';
 
 import type { TelemetryPrimitive } from './telemetry';
 
@@ -200,6 +201,15 @@ export interface PermissionPolicyDecisionEvent {
   tool_name: string;
   permission_mode: TelemetryPermissionMode;
   decision: 'approve' | 'deny' | 'ask';
+  command_family?: string;
+  command_count?: number;
+  executable_name?: string;
+  read_only_rejection?:
+    | 'parse_failed'
+    | 'unsupported_structure'
+    | 'unsupported_command'
+    | 'unsafe_arguments'
+    | 'path_check_failed';
   [key: string]: TelemetryPrimitive;
 }
 
@@ -234,7 +244,7 @@ export interface PlanResolvedEvent {
 
 export interface TowerModeEnterEvent {
   outcome: 'entered' | 'rejected';
-  reason?: 'not-main-agent' | 'experiment-off' | 'feature-not-assembled' | 'owned-by-live-session';
+  reason?: 'not-main-agent' | 'experiment-off' | 'feature-not-assembled' | 'tools-disabled' | 'owned-by-live-session';
 }
 
 export interface TowerModeExitEvent {
@@ -540,7 +550,6 @@ export interface FsSuggestNodeFallbackEvent {
 export interface SubagentCreatedEvent {
   subagent_name: string;
   run_in_background: boolean;
-  fork: boolean;
   agent_id: string;
   parent_agent_id: string;
   parent_tool_call_id: string;
@@ -739,11 +748,15 @@ export interface SessionIndexMirrorGiveUpEvent {
   consecutive_failures: number;
 }
 
-export interface WorkspaceTrustChangedEvent {
+export interface ProjectLocateDegradedEvent {
+  reason: DegradedLocation['reason'];
+}
+
+export interface ProjectTrustChangedEvent {
   trusted: boolean;
 }
 
-export interface WorkspaceTrustReadFailedEvent {
+export interface ProjectTrustReadFailedEvent {
   error_type: string;
 }
 
@@ -977,6 +990,10 @@ export const telemetryEventDefinitions = {
       tool_name: 'Tool being gated',
       permission_mode: 'Active permission mode',
       decision: 'Policy decision',
+      command_family: 'Approved read-only command family, with a supported subcommand when available; multiple for compound commands',
+      command_count: 'Number of commands in an approved compound read-only invocation',
+      executable_name: 'Normalized executable basename considered by read-only analysis',
+      read_only_rejection: 'Coarse reason static read-only analysis did not approve the command',
     },
   }),
   permission_approval_result: defineAgentTelemetryEvent<PermissionApprovalResultEvent>({
@@ -1457,13 +1474,12 @@ export const telemetryEventDefinitions = {
     properties: {
       subagent_name: 'Profile name of the subagent',
       run_in_background: 'Whether the subagent runs in the background',
-      fork: 'Whether the subagent was forked with a snapshot of the parent conversation history',
       agent_id: 'Child agent id',
       parent_agent_id: 'Parent (caller) agent id',
       parent_tool_call_id: "Tool call id of the launching call in the parent agent; '' when not launched from a tool call",
       model: 'Model alias the subagent binds to (secondary-model choice or inherited caller model); omitted when no binding was resolved',
       model_source:
-        "How the bound model was chosen: 'inherited' = caller's own model (no pool or fork), 'secondary_pool' = [secondary_model.models] pool pick; omitted when no binding resolution happened (e.g. resume)",
+        "How the bound model was chosen: 'inherited' = caller's own model (no pool), 'secondary_pool' = [secondary_model.models] pool pick; omitted when no binding resolution happened (e.g. resume)",
     },
   }),
   mcp_connected: defineTelemetryEvent<McpConnectedEvent>({
@@ -1710,12 +1726,17 @@ export const telemetryEventDefinitions = {
       consecutive_failures: 'Number of consecutive write failures that triggered the give-up',
     },
   }),
-  workspace_trust_changed: defineTelemetryEvent<WorkspaceTrustChangedEvent>({
+  project_locate_degraded: defineTelemetryEvent<ProjectLocateDegradedEvent>({
+    owner: 'kimi-code',
+    comment: 'Resolving the implicit project for a directory found a .git entry it could not verify, so the directory stays its own project.',
+    properties: { reason: 'Why the checkout was not grouped: unreadable git metadata or a pointer that fails verification' },
+  }),
+  workspace_trust_changed: defineTelemetryEvent<ProjectTrustChangedEvent>({
     owner: 'kimi-code',
     comment: 'A workspace is trusted or untrusted.',
     properties: { trusted: 'Whether the workspace is now trusted' },
   }),
-  workspace_trust_read_failed: defineTelemetryEvent<WorkspaceTrustReadFailedEvent>({
+  workspace_trust_read_failed: defineTelemetryEvent<ProjectTrustReadFailedEvent>({
     owner: 'kimi-code',
     comment: 'Reading the workspace trust record fails and the error is propagated to the caller.',
     properties: { error_type: 'Classified error category' },

@@ -288,16 +288,6 @@ importers:
         version: 4.3.6
 
   apps/kimi-code:
-    dependencies:
-      chokidar:
-        specifier: ^4.0.3
-        version: 4.0.3
-      qrcode:
-        specifier: ^1.5.4
-        version: 1.5.4
-      ws:
-        specifier: ^8.18.0
-        version: 8.20.0
     devDependencies:
       '@moonshot-ai/acp-server':
         specifier: workspace:^
@@ -362,6 +352,9 @@ importers:
       chalk:
         specifier: ^5.4.1
         version: 5.6.2
+      chokidar:
+        specifier: ^4.0.3
+        version: 4.0.3
       cli-highlight:
         specifier: ^2.1.11
         version: 2.1.11
@@ -380,6 +373,9 @@ importers:
       postject:
         specifier: 1.0.0-alpha.6
         version: 1.0.0-alpha.6
+      qrcode:
+        specifier: ^1.5.4
+        version: 1.5.4
       semver:
         specifier: ^7.7.4
         version: 7.7.4
@@ -389,6 +385,9 @@ importers:
       tsx:
         specifier: ^4.21.0
         version: 4.21.0
+      ws:
+        specifier: ^8.18.0
+        version: 8.20.0
       yazl:
         specifier: ^3.3.1
         version: 3.3.1
@@ -631,6 +630,9 @@ importers:
         specifier: ^5
         version: 5.0.14(@types/react@19.2.14)(immer@11.1.11)(react@19.2.5)(use-sync-external-store@1.6.0(react@19.2.5))
     devDependencies:
+      '@moonshot-ai/testkit':
+        specifier: workspace:^
+        version: link:../../packages/testkit
       '@tailwindcss/vite':
         specifier: 4.1.18
         version: 4.1.18(vite@6.4.2(@types/node@22.19.17)(jiti@2.6.1)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.1))
@@ -1060,6 +1062,9 @@ importers:
       '@fontsource-variable/schibsted-grotesk':
         specifier: ^5.3.0
         version: 5.3.0
+      '@noble/hashes':
+        specifier: ^2.0.0
+        version: 2.4.0
       diff:
         specifier: 9.0.0
         version: 9.0.0
@@ -1260,9 +1265,15 @@ importers:
       fastify:
         specifier: ^5.1.0
         version: 5.8.5
+      light-my-request:
+        specifier: ^6.6.0
+        version: 6.6.0
       pino:
         specifier: ^9.5.0
         version: 9.14.0
+      proper-lockfile:
+        specifier: ^4.1.2
+        version: 4.1.2
       semver:
         specifier: ^7.7.4
         version: 7.7.4
@@ -1285,6 +1296,9 @@ importers:
       '@types/bcryptjs':
         specifier: ^2.4.6
         version: 2.4.6
+      '@types/proper-lockfile':
+        specifier: ^4.1.4
+        version: 4.1.4
       '@types/semver':
         specifier: ^7.7.0
         version: 7.7.1
@@ -1310,6 +1324,9 @@ importers:
       '@moonshot-ai/kap-server':
         specifier: workspace:^
         version: link:../kap-server
+      '@moonshot-ai/testkit':
+        specifier: workspace:^
+        version: link:../testkit
       '@types/ws':
         specifier: ^8.18.0
         version: 8.18.1
@@ -1370,6 +1387,9 @@ importers:
       '@moonshot-ai/klient':
         specifier: workspace:^
         version: link:../klient
+      '@moonshot-ai/testkit':
+        specifier: workspace:^
+        version: link:../testkit
       '@types/yazl':
         specifier: ^2.4.6
         version: 2.4.6
@@ -1389,6 +1409,9 @@ importers:
         specifier: 4.3.6
         version: 4.3.6
     devDependencies:
+      '@moonshot-ai/testkit':
+        specifier: workspace:^
+        version: link:../testkit
       '@types/proper-lockfile':
         specifier: ^4.1.4
         version: 4.1.4
@@ -1427,6 +1450,9 @@ importers:
         specifier: 4.3.6
         version: 4.3.6
     devDependencies:
+      '@moonshot-ai/testkit':
+        specifier: workspace:^
+        version: link:../testkit
       '@types/semver':
         specifier: ^7.7.0
         version: 7.7.1
@@ -1502,6 +1528,24 @@ importers:
       vitest:
         specifier: 4.1.4
         version: 4.1.4(@types/node@24.19.2)(@vitest/coverage-v8@4.1.4)(jsdom@30.0.1(@noble/hashes@2.4.0))(msw@2.15.0(@types/node@24.19.2)(typescript@6.0.2))(vite@6.4.2(@types/node@24.19.2)(jiti@2.6.1)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.1))
+
+  tests/e2e:
+    devDependencies:
+      '@agentclientprotocol/sdk':
+        specifier: ^1.3.0
+        version: 1.3.0(zod@4.3.6)
+      '@moonshot-ai/pi-tui':
+        specifier: workspace:^
+        version: link:../../packages/pi-tui
+      '@moonshot-ai/testkit':
+        specifier: workspace:^
+        version: link:../../packages/testkit
+      '@playwright/test':
+        specifier: 1.63.0
+        version: 1.63.0
+      node-pty:
+        specifier: ^1.1.0
+        version: 1.1.0
 
   tests/scenarios:
     devDependencies:

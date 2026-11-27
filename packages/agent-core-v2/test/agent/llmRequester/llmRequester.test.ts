@@ -1,5 +1,4 @@
 import { providerHttpError } from '../../harness/index';
-import { TOOL_SELECT_FLAG_ENV } from '#/agent/toolSelect/flag';
 import type {
   Message,
   StreamedMessagePart,
@@ -91,7 +90,6 @@ describe('LLMRequester service migration coverage', () => {
     ];
 
     beforeEach(() => {
-      vi.stubEnv(TOOL_SELECT_FLAG_ENV, '1');
       shouldVerifyResume = true;
       ctx = createTestAgent();
       llmRequester = ctx.get(IAgentLoopService).requester;
@@ -444,11 +442,14 @@ describe('LLMRequester service migration coverage', () => {
         output: 'moon-result',
       });
 
-      expect(protocolEvents(ctx, 'tool.call.delta').map((event) => event.args)).toEqual([
-        { time: expect.any(Number), agentId: 'main', turnId: 0, toolCallId: 'call_lookup', name: 'Lookup', argumentsPart: undefined },
-        { time: expect.any(Number), agentId: 'main', turnId: 0, toolCallId: 'call_lookup', argumentsPart: '{"query"' },
-        { time: expect.any(Number), agentId: 'main', turnId: 0, toolCallId: 'call_lookup', argumentsPart: ':"moon"}' },
-      ]);
+      const deltas = protocolEvents(ctx, 'tool.call.delta').map((event) => event.args as { argumentsPart?: string });
+      expect(deltas[0]).toEqual({ time: expect.any(Number), agentId: 'main', turnId: 0, toolCallId: 'call_lookup', name: 'Lookup', argumentsPart: '' });
+      const pieces = deltas.slice(1);
+      expect(pieces.length).toBeGreaterThan(1);
+      for (const piece of pieces) {
+        expect(piece).toEqual({ time: expect.any(Number), agentId: 'main', turnId: 0, toolCallId: 'call_lookup', argumentsPart: expect.any(String) });
+      }
+      expect(pieces.map((piece) => piece.argumentsPart).join('')).toBe('{"query":"moon"}');
       expect(protocolEvents(ctx, 'toolCall').at(-1)?.args).toEqual({
         turnId: 0,
         toolCallId: 'call_lookup',
@@ -458,6 +459,7 @@ describe('LLMRequester service migration coverage', () => {
       ctx.mockNextResponse({ type: 'text', text: 'The lookup result is moon-result.' });
       await ctx.untilTurnEnd();
     });
+
   });
 
   describe('request failure logging', () => {

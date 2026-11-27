@@ -41,6 +41,7 @@ const mocks = vi.hoisted(() => ({
   >(async () => ({ ok: true })),
   setGlobalShortcut: vi.fn(() => true),
   showMainWindow: vi.fn(),
+  markRendererUiMounted: vi.fn(),
   setVibrancyEnabled: vi.fn(),
   setColorScheme: vi.fn(),
   setPreventSystemSleep: vi.fn(),
@@ -191,6 +192,7 @@ vi.mock('../../../src/main/window/main-window', () => ({
   showMainWindow: mocks.showMainWindow,
   applyWindowVibrancy: mocks.applyWindowVibrancy,
   markQuitting: mocks.markQuitting,
+  markRendererUiMounted: mocks.markRendererUiMounted,
   sendToRenderer: vi.fn(),
 }));
 vi.mock('../../../src/main/browser/browser-view', () => ({
@@ -343,6 +345,8 @@ vi.mock('../../../src/main/shell/dock-icon', () => ({
 }));
 vi.mock('../../../src/main/diagnostics/log', () => ({
   log: { error: vi.fn() },
+  logStartup: vi.fn(),
+  uptimeMs: () => 0,
   redactUrlForLog: vi.fn((url: string) => url),
 }));
 vi.mock('../../../src/main/diagnostics/renderer-log', () => ({ createRendererLogWriter: vi.fn(() => vi.fn()) }));
@@ -382,6 +386,28 @@ beforeEach(() => {
   mocks.getMainWindow.mockReturnValue(null);
   mocks.isPowerSaveBlockerEnabled.mockReturnValue(false);
   registerIpcHandlers();
+});
+
+describe('startup mount notification', () => {
+  it('forwards mounts from the current main frame, including subsequent mounts', () => {
+    const frame = { url: 'app://renderer/index.html' };
+    const contents = { mainFrame: frame };
+    mocks.getMainWindow.mockReturnValue({ isDestroyed: () => false, webContents: contents });
+    const report = listener(IPC.startupMilestone);
+    const mounted = { milestone: 'ui-mounted' };
+    const source = { sender: contents, senderFrame: frame };
+
+    report({ sender: {}, senderFrame: frame }, mounted);
+    report({ sender: contents, senderFrame: { url: frame.url } }, mounted);
+    report({ sender: contents, senderFrame: null }, mounted);
+    report(source, { milestone: 'ui-ready' });
+    report(source, { milestone: 'other' });
+    expect(mocks.markRendererUiMounted).not.toHaveBeenCalled();
+
+    report(source, mounted);
+    report(source, mounted);
+    expect(mocks.markRendererUiMounted.mock.calls).toEqual([[frame.url], [frame.url]]);
+  });
 });
 
 describe('screenshot sender isolation', () => {
@@ -833,7 +859,7 @@ describe('native browser IPC', () => {
         homeDir: home,
         port: 0,
         logLevel: 'silent',
-        env: { ...process.env, KIMI_CODE_EXPERIMENTAL_TOOL_SELECT: '1', KIMI_CODE_EXPERIMENTAL_PERSISTENCE_MINIDB_READMODEL: 'false', KIMI_CODE_EXPERIMENTAL_SEARCH_WORKER: 'false' },
+        env: { ...process.env, KIMI_CODE_EXPERIMENTAL_PERSISTENCE_MINIDB_READMODEL: 'false', KIMI_CODE_EXPERIMENTAL_SEARCH_WORKER: 'false' },
       });
       registration = registerDesktopBrowserMcp(server.core, browser.config, access);
       const sessions = server.core.accessor.get(core.ISessionManager);
@@ -1674,11 +1700,20 @@ describe('quitConfirmResponse', () => {
     const mainWebContents = {};
     mocks.getMainWindow.mockReturnValue({ isDestroyed: () => false, webContents: mainWebContents });
     handler(IPC.quitConfirmResponse)({ sender: mainWebContents }, { choice: 'quit', requestId: 1 });
-    expect(mocks.resolveQuitConfirmResponse).toHaveBeenCalledWith('quit', 1);
+    expect(mocks.resolveQuitConfirmResponse).toHaveBeenCalledWith('quit', 1, false);
     handler(IPC.quitConfirmResponse)({ sender: mainWebContents }, { choice: 'cancel', requestId: 2 });
-    expect(mocks.resolveQuitConfirmResponse).toHaveBeenCalledWith('cancel', 2);
+    expect(mocks.resolveQuitConfirmResponse).toHaveBeenCalledWith('cancel', 2, false);
     handler(IPC.quitConfirmResponse)({ sender: mainWebContents }, { choice: 'unavailable', requestId: 3 });
-    expect(mocks.resolveQuitConfirmResponse).toHaveBeenCalledWith('unavailable', 3);
+    expect(mocks.resolveQuitConfirmResponse).toHaveBeenCalledWith('unavailable', 3, false);
+  });
+
+  it('forwards the continue choice only when it is exactly true', () => {
+    const mainWebContents = {};
+    mocks.getMainWindow.mockReturnValue({ isDestroyed: () => false, webContents: mainWebContents });
+    handler(IPC.quitConfirmResponse)({ sender: mainWebContents }, { choice: 'quit', requestId: 4, continueSessions: true });
+    expect(mocks.resolveQuitConfirmResponse).toHaveBeenLastCalledWith('quit', 4, true);
+    handler(IPC.quitConfirmResponse)({ sender: mainWebContents }, { choice: 'quit', requestId: 5, continueSessions: 'yes' });
+    expect(mocks.resolveQuitConfirmResponse).toHaveBeenLastCalledWith('quit', 5, false);
   });
 
   it('ignores invalid payloads and foreign senders', () => {

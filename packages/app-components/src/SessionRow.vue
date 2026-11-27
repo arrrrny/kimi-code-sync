@@ -2,8 +2,8 @@
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type { Session } from '@moonshot-ai/app-core/client/types';
-import { copyTextToClipboard } from '@moonshot-ai/app-core/lib';
-import { Badge, Icon, IconButton, Menu, MenuItem, Spinner, Tooltip, useImeComposition } from '@moonshot-ai/app-ui';
+import { copyTextToClipboard, sessionLink, sessionLinksSupported } from '@moonshot-ai/app-core/lib';
+import { Badge, Icon, IconButton, Menu, MenuItem, Spinner, StatusDot, Tooltip, useImeComposition } from '@moonshot-ai/app-ui';
 import { applySessionEmoji, splitSessionEmoji } from '@moonshot-ai/app-core/lib';
 import SessionEmojiPicker from './SessionEmojiPicker.vue';
 import WorkspaceIcon from './WorkspaceIcon.vue';
@@ -382,17 +382,24 @@ function positionMenuAtCursor(e: MouseEvent): void {
   };
 }
 
-const copiedId = ref(false);
-const copyFailed = ref(false);
-async function copySessionId(): Promise<void> {
-  const ok = await copyTextToClipboard(props.session.id);
-  copiedId.value = ok;
-  copyFailed.value = !ok;
+const sessionLinkCopyable = sessionLinksSupported();
+type CopyTarget = 'id' | 'link';
+const copied = ref<CopyTarget | null>(null);
+const copyFailed = ref<CopyTarget | null>(null);
+async function copyFromMenu(target: CopyTarget): Promise<void> {
+  const ok = await copyTextToClipboard(target === 'id' ? props.session.id : sessionLink(props.session.id));
+  copied.value = ok ? target : null;
+  copyFailed.value = ok ? null : target;
   setTimeout(() => {
-    copiedId.value = false;
-    copyFailed.value = false;
+    copied.value = null;
+    copyFailed.value = null;
     closeMenu();
   }, 1500);
+}
+
+function copyLabel(target: CopyTarget, idleLabel: string): string {
+  if (copyFailed.value === target) return t('sidebar.copyFailed');
+  return copied.value === target ? t('sidebar.copied') : idleLabel;
 }
 
 function forkRow(): void {
@@ -555,7 +562,7 @@ function openPullRequest(): void {
         <span v-if="!hasStatus" class="ts">{{ session.time }}</span>
         <span v-else-if="showBusySpinner || showUnreadDot" class="st">
           <Spinner v-if="showBusySpinner" size="sm" />
-          <span v-else class="unread-dot" data-testid="session-unread" />
+          <StatusDot v-else status="unread" data-testid="session-unread" />
         </span>
         <span v-if="!renaming" class="ha">
           <template v-if="stateTag === 'done'">
@@ -621,8 +628,8 @@ function openPullRequest(): void {
     <!-- Right-click dropdown — teleported to <body> and position:fixed so it
          escapes the `overflow: hidden` on the collapsing `.group-sessions` list. -->
     <Teleport to="body">
-      <Transition name="menu-pop">
-        <Menu ref="menuRef" v-if="menuOpen" class="menu anchored-menu" :style="menuStyle" @click.stop>
+      <Transition name="ui-menu-pop">
+        <Menu ref="menuRef" v-if="menuOpen" class="menu ui-menu-floating" :style="menuStyle" @click.stop>
         <MenuItem @click="openPickerFromMenu">
           <Icon name="emoji" size="sm" />
           {{ t('sidebar.setEmoji') }}
@@ -656,15 +663,13 @@ function openPullRequest(): void {
           {{ t('sidebar.rename') }}
         </MenuItem>
         <MenuItem separator />
-        <MenuItem :danger="copyFailed" @click="copySessionId">
+        <MenuItem :danger="copyFailed === 'id'" @click="copyFromMenu('id')">
           <Icon name="copy" size="sm" />
-          {{
-            copyFailed
-              ? t('sidebar.copyFailed')
-              : copiedId
-                ? t('sidebar.copied')
-                : t('sidebar.copySessionId')
-          }}
+          {{ copyLabel('id', t('sidebar.copySessionId')) }}
+        </MenuItem>
+        <MenuItem v-if="sessionLinkCopyable" :danger="copyFailed === 'link'" @click="copyFromMenu('link')">
+          <Icon name="link" size="sm" />
+          {{ copyLabel('link', t('sidebar.copySessionLink')) }}
         </MenuItem>
         <MenuItem @click="exportRow">
           <Icon name="download" size="sm" />
@@ -682,11 +687,11 @@ function openPullRequest(): void {
     <!-- Emoji picker — teleported like the right-click menu so the collapsing
          `.group-sessions` list's `overflow: hidden` can't clip it. -->
     <Teleport to="body">
-      <Transition name="menu-pop">
+      <Transition name="ui-menu-pop">
         <SessionEmojiPicker
           v-if="pickerOpen"
           ref="pickerRef"
-          class="picker anchored-menu"
+          class="picker ui-menu-floating"
           :style="pickerStyle"
           :current="emojiSplit.emoji"
           :removable="emojiSplit.rest.length > 0"
@@ -754,13 +759,6 @@ function openPullRequest(): void {
 .se.has-compact-pr:hover .act {
   min-width: calc(2 * var(--icon-button-sm) + 2px - (var(--se-pad-x) - var(--sb-action-inset, 3px)));
 }
-.unread-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: var(--radius-full);
-  background: var(--color-accent);
-}
-
 .ha .complete-btn:hover {
   color: var(--color-success);
 }
@@ -770,7 +768,7 @@ function openPullRequest(): void {
   --sb-fade-len: 16px;
   --sb-fade-l: 0px;
   color: inherit;
-  font-size: var(--ui-font-size-sm);
+  font-size: var(--text-sm);
   font-weight: 450;
   line-height: var(--leading-tight);
   user-select: none;
@@ -1036,7 +1034,7 @@ function openPullRequest(): void {
 .sessions .se.flat + .se.flat {
   margin-top: var(--space-05);
 }
-.sessions .se .rename-input { border-radius: var(--radius-sm); font-family: var(--sans); }
+.sessions .se .rename-input { border-radius: var(--radius-sm); font-family: var(--font-ui); }
 </style>
 
 <style src="./lib/anchored-menu.css"></style>

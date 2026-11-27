@@ -9,7 +9,14 @@ export {
   type TomlValue,
 } from '#/fixtures/config';
 export { CLI_BUILD_ENV, KIMI_SERVICE_URL, kimiCliBuild, kimiCliCommand, kimiCliEnv, kimiServiceStubs, type KimiCliBuild } from '#/fixtures/cli';
-export { isolateProcessEnv, TEST_ENV_DEFAULTS, testEnv, type TestEnvOptions } from '#/fixtures/env';
+export { isolateProcessEnv, TEST_ENV_DEFAULTS, testEnv, UNIT_TEST_SWITCHES, type TestEnvOptions } from '#/fixtures/env';
+export {
+  bashPathOf,
+  createGitRepository,
+  createGitWorktree,
+  type GitRepositoryOptions,
+  type GitWorktreeLayout,
+} from '#/fixtures/git';
 export {
   describeDifferences,
   expectGolden,
@@ -41,6 +48,7 @@ export {
 } from '#/fixtures/process';
 export { repoPath } from '#/fixtures/repo';
 export { createNormalizer, FIXED_TIME, normalize, type NormalizeOptions, type Normalizer } from '#/fixtures/normalize';
+export { contentDigest, directoryChanges, snapshotDirectory, type DirectoryChange, type DirectorySnapshot } from '#/fixtures/snapshot';
 export { TIMEOUTS } from '#/fixtures/timeouts';
 export {
   deferred,

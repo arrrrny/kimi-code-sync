@@ -7,7 +7,7 @@ import { serverEndpointLabel } from '../../api/config';
 import { useDialogFocus } from '@moonshot-ai/app-components';
 import { useConfirmDialog } from '@moonshot-ai/app-client/composables';
 import LanguageSwitcher from './LanguageSwitcher.vue';
-import { BrowserTabTitleSetting, FontSettingsPage, FontSettingsRow, useSettingsSubpage } from '@moonshot-ai/app-components';
+import { BrowserTabTitleSetting, DefaultToolsSetting, FontSettingsPage, FontSettingsRow, GlobalAgentsMdSetting, useSettingsSubpage } from '@moonshot-ai/app-components';
 import type { FontTarget } from '@moonshot-ai/app-core';
 import ShortcutsPanel from './ShortcutsPanel.vue';
 import type { ShortcutActionId } from '../../../shared/action-ids';
@@ -33,7 +33,7 @@ import DockIconPicker from './DockIconPicker.vue';
 import BrowserSettingsTab from '../browser/BrowserSettingsTab.vue';
 import { copyTextToClipboard, hasDesktopBridge, isLinuxDesktop, isMacosDesktop, isRcLocation, prefersNativeTitleBar, providerDisplayName } from '@moonshot-ai/app-core/lib';
 import { useContextInspector, useSessionMentions, useSidebarTabs } from '@moonshot-ai/app-core';
-import { configStore, hostsStore } from '@moonshot-ai/app-client/stores';
+import { configStore, hostsStore, workspacesStore } from '@moonshot-ai/app-client/stores';
 import { useActivityRunFolding, usePasteImageAutoMention, useRunningSendMode, useTurnFolding, type RunningSendMode, type SettingsHighlightKey } from '@moonshot-ai/app-client';
 import { useVibrancy } from '../../composables/useVibrancy';
 import { usePreventSystemSleep } from '../../composables/usePreventSystemSleep';
@@ -46,7 +46,7 @@ import type { AppConfig, AppModel, ManagedQuotaResult, ManagedUserInfo, Thinking
 import PlanUsageCard from './PlanUsageCard.vue';
 import { SecondaryModelPicker } from '@moonshot-ai/app-components';
 import { PlanUpgradeCard } from '@moonshot-ai/app-components';
-import { Badge, Button, Dialog, Icon, IconButton, SegmentedControl, Select, Switch } from '@moonshot-ai/app-ui';
+import { Avatar, Badge, Button, Dialog, Icon, IconButton, SegmentedControl, Select, Switch } from '@moonshot-ai/app-ui';
 import type { BrowserSettingsSection } from '../../../shared/browser-data';
 import {
   visibleSettingsTabs,
@@ -93,6 +93,12 @@ const notifyUserEnabled = computed(() => configStore().experimentalFlags['notify
 
 async function onNotifyUserChange(on: boolean): Promise<void> {
   await configStore().setNotifyUserEnabled(on);
+}
+
+const promptPredictionEnabled = computed(() => configStore().experimentalFlags['prompt_prediction'] === true);
+
+async function onPromptPredictionChange(on: boolean): Promise<void> {
+  await configStore().setPromptPredictionEnabled(on);
 }
 
 function onColorScheme(scheme: ColorScheme): void {
@@ -237,15 +243,6 @@ const accountName = computed(() => {
 
 const accountLevel = computed(() => props.managedUserInfo?.userLevelName?.trim() ?? '');
 
-const avatarLoadFailed = ref(false);
-watch(
-  () => props.managedUserInfo?.avatar,
-  () => {
-    avatarLoadFailed.value = false;
-  },
-);
-const showAvatar = computed(() => Boolean(props.managedUserInfo?.avatar) && !avatarLoadFailed.value);
-
 const accountSubtitle = computed(() =>
   signedIn.value ? t('settings.signedIn') : t('settings.signedOutHint'),
 );
@@ -349,7 +346,7 @@ const { isConfirmOpen, confirm } = useConfirmDialog();
 function handleKeydown(e: KeyboardEvent): void {
   if (e.key === 'Escape' && !e.defaultPrevented && !isConfirmOpen.value && !remoteControl.conflictDialogOpen.value && !runtimeEnvironmentOpen.value) {
     e.stopPropagation();
-    emit('close');
+    void requestClose();
   }
 }
 onMounted(() => {
@@ -668,18 +665,40 @@ function toggleAutoSessionTitle(): void {
   emit('updateConfig', { autoSessionTitle: !enabled } as Partial<AppConfig>);
 }
 
-function setTab(tab: SettingsTab): void {
+const globalAgentsMdSettingRef = ref<InstanceType<typeof GlobalAgentsMdSetting> | null>(null);
+const globalAgentsMdOpen = ref(false);
+const defaultToolsSettingRef = ref<InstanceType<typeof DefaultToolsSetting> | null>(null);
+const defaultToolsOpen = ref(false);
+
+async function setTab(tab: SettingsTab): Promise<void> {
   if (tab !== activeTab.value) {
+    if (globalAgentsMdOpen.value && !(await globalAgentsMdSettingRef.value?.confirmDiscard())) return;
+    if (defaultToolsOpen.value && !(await defaultToolsSettingRef.value?.confirmDiscard())) return;
     clearHighlightTimer();
     highlightedSetting.value = null;
   }
   activeTab.value = tab;
 }
 
+async function confirmDiscard(): Promise<boolean> {
+  if (globalAgentsMdOpen.value && !(await globalAgentsMdSettingRef.value?.confirmDiscard())) return false;
+  if (defaultToolsOpen.value && !(await defaultToolsSettingRef.value?.confirmDiscard())) return false;
+  return true;
+}
+
+async function requestClose(): Promise<void> {
+  if (!(await confirmDiscard())) return;
+  emit('close');
+}
+
 const bodyRef = ref<HTMLElement | null>(null);
 const fontPage = useSettingsSubpage<FontTarget>(() => bodyRef.value);
 const fontPageTarget = fontPage.page;
-watch(activeTab, () => fontPage.reset());
+watch(activeTab, () => {
+  fontPage.reset();
+  globalAgentsMdSettingRef.value?.reset();
+  defaultToolsSettingRef.value?.reset();
+});
 
 const client = useKimiWebClient();
 
@@ -715,21 +734,29 @@ watch(
   { immediate: true },
 );
 
-const archiveWorkspaces = computed<string[]>(() => {
-  const set = new Set<string>();
-  for (const s of archivedItems.value) set.add(s.cwd);
-  return Array.from(set).sort((a, b) => a.localeCompare(b));
+function archiveWorkspaceOf(session: AppSession): { id: string; label: string; path?: string } {
+  const id = workspacesStore().workspaceIdForSession(session);
+  const workspace = workspacesStore().workspaces.find((w) => w.id === id);
+  if (workspace === undefined) return { id: session.cwd, label: session.cwd };
+  const shortPath = workspacesStore().workspaceById.get(id)?.shortPath ?? workspace.root;
+  return { id, label: workspace.name, path: hostsStore().workspacePathLabel({ shortPath, hostId: workspace.hostId }, t) };
+}
+
+const archiveWorkspaces = computed(() => {
+  const workspaces = new Map(archivedItems.value.map(archiveWorkspaceOf).map((workspace) => [workspace.id, workspace]));
+  return Array.from(workspaces.values(), ({ id, label, path }) => ({ value: id, label, description: path }))
+    .sort((a, b) => a.label.localeCompare(b.label));
 });
 const archiveWorkspaceSelectOptions = computed(() => [
   { value: 'all', label: t('settings.archivedAllWorkspaces') },
-  ...archiveWorkspaces.value.map((workspace) => ({ value: workspace, label: workspace })),
+  ...archiveWorkspaces.value,
 ]);
 
 const filteredArchived = computed<AppSession[]>(() => {
   const q = archiveQuery.value.trim().toLowerCase();
   let rows = archivedItems.value.filter((s) => s.archived === true && !client.isSessionDeleted(s.id));
   if (archiveWsFilter.value !== 'all') {
-    rows = rows.filter((s) => s.cwd === archiveWsFilter.value);
+    rows = rows.filter((s) => archiveWorkspaceOf(s).id === archiveWsFilter.value);
   }
   if (q) rows = rows.filter((s) => s.title.toLowerCase().includes(q));
   rows = rows.slice();
@@ -745,14 +772,15 @@ const filteredArchived = computed<AppSession[]>(() => {
   return rows;
 });
 
-const groupedArchived = computed<{ cwd: string; items: AppSession[] }[]>(() => {
-  const map = new Map<string, AppSession[]>();
+const groupedArchived = computed<{ id: string; label: string; path?: string; items: AppSession[] }[]>(() => {
+  const map = new Map<string, { id: string; label: string; path?: string; items: AppSession[] }>();
   for (const s of filteredArchived.value) {
-    const list = map.get(s.cwd) ?? [];
-    list.push(s);
-    map.set(s.cwd, list);
+    const workspace = archiveWorkspaceOf(s);
+    const group = map.get(workspace.id) ?? { ...workspace, items: [] };
+    group.items.push(s);
+    map.set(workspace.id, group);
   }
-  return Array.from(map.entries()).map(([cwd, items]) => ({ cwd, items }));
+  return Array.from(map.values());
 });
 
 async function onRestore(id: string): Promise<void> {
@@ -775,10 +803,12 @@ function archiveTime(iso: string): string {
   const pad = (n: number): string => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
+
+defineExpose({ confirmDiscard });
 </script>
 
 <template>
-  <Dialog :open="true" :close-on-esc="false" forward-esc :aria-label="t('settings.title')" size="xl" height="fixed" :panel-class="'settings-dialog'" :panel-style="fontPage.fitHeight.value === null ? undefined : { height: `${fontPage.fitHeight.value}px` }" :padded="false" level="grouped" @close="emit('close')">
+  <Dialog :open="true" :close-on-esc="false" forward-esc :aria-label="t('settings.title')" size="xl" height="fixed" :panel-class="'settings-dialog'" :panel-style="fontPage.fitHeight.value === null ? undefined : { height: `${fontPage.fitHeight.value}px` }" :padded="false" level="grouped" @close="requestClose">
     <div ref="dialogRef" class="sd">
       <nav class="settings-tabs" role="tablist" :aria-label="t('settings.title')">
         <header class="settings-tabs-header">
@@ -803,7 +833,7 @@ function archiveTime(iso: string): string {
 
       <section class="settings-region">
         <header class="settings-region-header">
-          <IconButton size="sm" :label="t('settings.close')" :tooltip="t('settings.close')" @click="emit('close')">
+          <IconButton size="sm" :label="t('settings.close')" :tooltip="t('settings.close')" @click="requestClose">
             <Icon name="close" size="md" />
           </IconButton>
         </header>
@@ -1051,10 +1081,7 @@ function archiveTime(iso: string): string {
             <h3 class="sec-title">{{ t('settings.account') }}</h3>
             <div class="settings-group">
             <div class="account-row">
-              <span class="account-avatar" aria-hidden="true">
-                <img v-if="showAvatar" :src="props.managedUserInfo?.avatar" alt="" @error="avatarLoadFailed = true" />
-                <Icon v-else name="user" size="md" />
-              </span>
+              <Avatar :src="props.managedUserInfo?.avatar" size="lg" shape="circle" aria-hidden="true" />
               <span class="account-meta">
                 <span class="account-name-row">
                   <span class="account-name">{{ accountName }}</span>
@@ -1076,6 +1103,7 @@ function archiveTime(iso: string): string {
         </section>
 
         <section v-show="activeTab === 'agent'" class="panel">
+          <div v-show="!defaultToolsOpen && !globalAgentsMdOpen" class="panel-sections">
           <section class="sec">
             <div class="sec-head">
               <h3 class="sec-title">{{ t('settings.agentDefaults') }}</h3>
@@ -1152,7 +1180,11 @@ function archiveTime(iso: string): string {
             </div>
             </div>
           </section>
+          </div>
 
+          <GlobalAgentsMdSetting v-show="!defaultToolsOpen" ref="globalAgentsMdSettingRef" @open-change="globalAgentsMdOpen = $event" />
+
+          <div v-show="!defaultToolsOpen && !globalAgentsMdOpen" class="panel-sections">
           <section v-if="config" class="sec">
             <div class="sec-head">
               <h3 class="sec-title">{{ t('settings.secondaryModelSection') }}</h3>
@@ -1262,6 +1294,9 @@ function archiveTime(iso: string): string {
             </div>
             </div>
           </section>
+          </div>
+
+          <DefaultToolsSetting v-show="!globalAgentsMdOpen" ref="defaultToolsSettingRef" @open-change="defaultToolsOpen = $event" />
         </section>
 
         <section v-show="activeTab === 'advanced'" class="panel">
@@ -1463,6 +1498,17 @@ function archiveTime(iso: string): string {
                 @update:model-value="setContextInspectorEnabled"
               />
             </div>
+            <div class="row">
+              <span class="rlabel">
+                {{ t('settings.lab.promptPrediction') }}
+                <span class="hint">{{ t('settings.lab.promptPredictionHint') }}</span>
+              </span>
+              <Switch
+                :model-value="promptPredictionEnabled"
+                :label="t('settings.lab.promptPrediction')"
+                @update:model-value="onPromptPredictionChange"
+              />
+            </div>
             </div>
           </section>
         </section>
@@ -1504,10 +1550,11 @@ function archiveTime(iso: string): string {
 
           <template v-else>
             <div v-if="groupedArchived.length > 0" class="archive-list">
-              <section v-for="g in groupedArchived" :key="g.cwd" class="archive-card">
+              <section v-for="g in groupedArchived" :key="g.id" class="archive-card">
                 <div class="archive-workspace">
                   <Icon name="folder-closed" size="md" />
-                  <span class="path">{{ g.cwd }}</span>
+                  <span class="path">{{ g.label }}</span>
+                  <span v-if="g.path" class="path hint">{{ g.path }}</span>
                   <span class="count">{{ t('settings.archivedSessionsCount', { count: g.items.length }) }}</span>
                 </div>
                 <div class="setting-card">
@@ -1564,7 +1611,7 @@ function archiveTime(iso: string): string {
   </Dialog>
 </template>
 
-<style scoped src="./settings-common.css"></style>
+<style scoped src="@moonshot-ai/app-components/settings-common.css"></style>
 
 <style scoped>
 .sd {
@@ -1670,23 +1717,6 @@ function archiveTime(iso: string): string {
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-4);
-}
-.account-avatar {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  flex: none;
-  border-radius: 50%;
-  background: var(--color-surface-sunken);
-  color: var(--color-text-muted);
-}
-.account-avatar img {
-  width: 100%;
-  height: 100%;
-  border-radius: 50%;
-  object-fit: cover;
 }
 .account-name-row {
   display: flex;
