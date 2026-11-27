@@ -7606,7 +7606,7 @@ command = "vim"
     });
   });
 
-  it('steers messages queued before a WaitFor starts into the running turn', async () => {
+  it('steers messages queued before a WaitFor starts into the running turn one at a time', async () => {
     const { driver, session } = await makeDriver();
     driver.state.appState.streamingPhase = 'waiting';
     driver.handleUserInput('first note');
@@ -7616,7 +7616,11 @@ command = "vim"
     startWaitFor(driver);
 
     expect(session.steer).toHaveBeenCalledTimes(1);
-    expect(session.steer).toHaveBeenCalledWith('first note\n\nsecond note', { promptId: expect.any(String) });
+    expect(session.steer).toHaveBeenCalledWith('first note', { promptId: expect.any(String) });
+    await vi.waitFor(() => {
+      expect(session.steer).toHaveBeenCalledTimes(2);
+    });
+    expect(session.steer).toHaveBeenNthCalledWith(2, 'second note', { promptId: expect.any(String) });
     await vi.waitFor(() => {
       expect(driver.state.queuedMessages).toEqual([]);
     });
@@ -8262,7 +8266,12 @@ command = "vim"
 
         press(driver, 'next objective', '\r');
 
-        expect(session.steer).toHaveBeenCalledExactlyOnceWith('queued objective\n\nnext objective', { promptId: expect.any(String) });
+        expect(session.steer).toHaveBeenCalledTimes(1);
+        expect(session.steer).toHaveBeenCalledWith('queued objective', { promptId: expect.any(String) });
+        await vi.waitFor(() => {
+          expect(session.steer).toHaveBeenCalledTimes(2);
+        });
+        expect(session.steer).toHaveBeenNthCalledWith(2, 'next objective', { promptId: expect.any(String) });
         await vi.waitFor(() => {
           expect(driver.state.queuedMessages).toEqual([]);
         });
@@ -8492,7 +8501,12 @@ command = "vim"
     driver.state.appState.isCompacting = false;
     driver.handleUserInput('objective two');
 
-    expect(session.steer).toHaveBeenCalledWith('objective one\n\nobjective two', { promptId: expect.any(String) });
+    expect(session.steer).toHaveBeenCalledTimes(1);
+    expect(session.steer).toHaveBeenCalledWith('objective one', { promptId: expect.any(String) });
+    await vi.waitFor(() => {
+      expect(session.steer).toHaveBeenCalledTimes(2);
+    });
+    expect(session.steer).toHaveBeenNthCalledWith(2, 'objective two', { promptId: expect.any(String) });
     expect(session.prompt).not.toHaveBeenCalled();
     await vi.waitFor(() => {
       expect(driver.state.queuedMessages).toEqual([]);
@@ -9160,7 +9174,7 @@ capabilities = ["image_in", "video_in"]
     await vi.waitFor(() => { expect(driver.state.queuedMessages).toEqual([]); });
   });
 
-  it('releases every queued use of shared media after a batched steer', async () => {
+  it('releases every queued use of shared media after steering them one at a time', async () => {
     const session = makeSession();
     const { driver, harness } = await makeDriver(session);
     driver.state.appState.model = 'k2';
@@ -9174,7 +9188,9 @@ capabilities = ["image_in", "video_in"]
 
     driver.state.editor.onCtrlS?.();
 
-    expect(session.steer).toHaveBeenCalledOnce();
+    await vi.waitFor(() => {
+      expect(session.steer).toHaveBeenCalledTimes(2);
+    });
     driver.sessionEventHandler.handleEvent(
       { type: 'turn.ended', agentId: 'main', turnId: 1, reason: 'completed' } as Event,
       () => {},
@@ -9269,7 +9285,7 @@ capabilities = ["image_in", "video_in"]
     expect(queued.videoAttachmentIds).toEqual([attachment.id]);
   });
 
-  it('steers consecutive image-only messages without a whitespace-only separator part', async () => {
+  it('steers consecutive image-only messages one at a time without a separator part', async () => {
     const session = makeSession();
     const { driver } = await makeDriver(session);
     driver.state.appState.model = 'k2';
@@ -9299,13 +9315,14 @@ capabilities = ["image_in", "video_in"]
 
     driver.state.editor.onCtrlS?.();
 
-    expect(session.steer).toHaveBeenCalledWith(
-      [imagePart(first.bytes), imagePart(second.bytes)],
-      { promptId: expect.any(String) },
-    );
+    await vi.waitFor(() => {
+      expect(session.steer).toHaveBeenCalledTimes(2);
+    });
+    expect(session.steer).toHaveBeenNthCalledWith(1, [imagePart(first.bytes)], { promptId: expect.any(String) });
+    expect(session.steer).toHaveBeenNthCalledWith(2, [imagePart(second.bytes)], { promptId: expect.any(String) });
   });
 
-  it('steers a media item followed by plain text with a blank-line separator', async () => {
+  it('steers a media item followed by plain text one at a time', async () => {
     const session = makeSession();
     const { driver } = await makeDriver(session);
     driver.state.appState.model = 'k2';
@@ -9328,14 +9345,17 @@ capabilities = ["image_in", "video_in"]
 
     driver.state.editor.onCtrlS?.();
 
-    expect(session.steer).toHaveBeenCalledWith([
+    await vi.waitFor(() => {
+      expect(session.steer).toHaveBeenCalledTimes(2);
+    });
+    expect(session.steer).toHaveBeenNthCalledWith(1, [
       { type: 'text', text: 'look ' },
       { type: 'image_url', imageUrl: { url: 'data:image/png;base64,qrs=' } },
-      { type: 'text', text: '\n\nfocus on tests' },
     ], { promptId: expect.any(String) });
+    expect(session.steer).toHaveBeenNthCalledWith(2, 'focus on tests', { promptId: expect.any(String) });
   });
 
-  it('steers plain text followed by a media item with a blank-line separator', async () => {
+  it('steers plain text followed by a media item one at a time', async () => {
     const session = makeSession();
     const { driver } = await makeDriver(session);
     driver.state.appState.model = 'k2';
@@ -9355,8 +9375,11 @@ capabilities = ["image_in", "video_in"]
 
     driver.state.editor.onCtrlS?.();
 
-    expect(session.steer).toHaveBeenCalledWith([
-      { type: 'text', text: 'hello\n\n' },
+    await vi.waitFor(() => {
+      expect(session.steer).toHaveBeenCalledTimes(2);
+    });
+    expect(session.steer).toHaveBeenNthCalledWith(1, 'hello', { promptId: expect.any(String) });
+    expect(session.steer).toHaveBeenNthCalledWith(2, [
       { type: 'image_url', imageUrl: { url: 'data:image/png;base64,qrs=' } },
     ], { promptId: expect.any(String) });
   });
