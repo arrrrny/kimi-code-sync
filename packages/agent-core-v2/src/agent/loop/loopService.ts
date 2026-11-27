@@ -79,6 +79,7 @@ import {
   type SystemPromptContext,
 } from '#/agent/profile/profile';
 import type {
+  LlmEndpoint,
   LlmRequest as CoreLlmRequest,
   LlmRequestModel,
   ModelCapability as LlmModelCapability,
@@ -739,12 +740,12 @@ export class AgentLoopService extends Disposable implements IAgentLoopService {
   ): PreparedCoreRequest {
     const resolved = this.resolveRequest(options, rest, source, config);
     const mediaPolicy = this.mediaPolicyFactory(resolved.model, resolved.request);
-    const hostPolicy = this.corePolicy(resolved, mediaPolicy);
     const base = mergeFields(contentsOf(resolved.request) as Fields, {
       profile: { systemPrompt: resolved.systemPrompt, tools: resolved.tools },
       content: { messages: resolved.messages, usedTokens: resolved.usedContextTokens },
     } as Fields);
     const request = mergeFields(base, rest as Fields) as unknown as CoreLlmRequest;
+    const hostPolicy = this.corePolicy(resolved, mediaPolicy, request.endpoint);
     return {
       resolved,
       request: {
@@ -755,7 +756,11 @@ export class AgentLoopService extends Disposable implements IAgentLoopService {
     };
   }
 
-  private corePolicy(request: ResolvedRequestContext, mediaPolicy: AgentMediaPolicy): LlmPolicy {
+  private corePolicy(
+    request: ResolvedRequestContext,
+    mediaPolicy: AgentMediaPolicy,
+    endpoint: LlmEndpoint | undefined,
+  ): LlmPolicy {
     return {
       retry: {
         maxAttemptsPerStep:
@@ -764,7 +769,7 @@ export class AgentLoopService extends Disposable implements IAgentLoopService {
             : this.config.get<LoopControl>(LOOP_CONTROL_SECTION)?.maxAttemptsPerStep,
         infiniteRetry: this.infiniteRetryEnabled,
       },
-      retryables: [isAuthRejection],
+      retryables: (endpoint?.credentials?.keyCount ?? 0) < 2 ? [] : [isAuthRejection],
       recoveries: [
         credentialRecovery,
         keyRotationRecovery,

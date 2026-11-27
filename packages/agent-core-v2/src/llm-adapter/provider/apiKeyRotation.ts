@@ -120,5 +120,8 @@ export function createKeyedCredentialProvider(args: {
   return {
     resolve: () => credentialOf(args.providers.get(args.providerName), args.fallbackApiKey),
     rotation: () => rotationFor(args.providers, args.providerName),
+    get keyCount() {
+      return keyEntries(args.providers.get(args.providerName)).length;
+    },
   };
 }

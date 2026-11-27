@@ -166,6 +166,9 @@ export class ProtocolAdapterRegistry implements IProtocolAdapterRegistry {
               canRecover: (error) => model.endpoint.credentials?.canRecover?.(error) === true,
               invalidate: () => model.endpoint.credentials?.invalidate?.(),
               rotation: () => model.endpoint.credentials?.rotation?.(),
+              get keyCount() {
+                return model.endpoint.credentials?.keyCount;
+              },
             },
       fetch:
         protocolBase.usesEndpointFetch === false

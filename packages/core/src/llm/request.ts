@@ -106,6 +106,7 @@ export interface LlmCredentialProvider {
   canRecover?(error: unknown): boolean;
   invalidate?(): void;
   rotation?(): LlmKeyRotationController | undefined;
+  readonly keyCount?: number;
 }
 
 export interface LlmFileInput {
