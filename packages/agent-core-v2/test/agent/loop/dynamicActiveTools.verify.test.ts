@@ -38,6 +38,7 @@ test('keeps turn and operation request tools frozen at the loop-start baseline',
   await agent.rpc.prompt({ input: [{ type: 'text', text: 'first' }] });
   await agent.untilTurnEnd();
   const first = toolNames(model.requests('main')[0]!);
+  const frozenTools = loop.baselineTools();
   expect(first).toContain('Read');
 
   loop.update({ activeToolNames: [...first] });
@@ -65,7 +66,7 @@ test('keeps turn and operation request tools frozen at the loop-start baseline',
   userTools.unregister('UserMid');
   const signal = new AbortController().signal;
   const requester = await loop.requester.prepareOperation(
-    { source: () => ({ type: 'operation', requestKind: 'verify_active_tools' }) },
+    { source: () => ({ type: 'operation', requestKind: 'verify_active_tools' }), tools: frozenTools },
     signal,
   );
   await requester.generate(
@@ -108,6 +109,7 @@ test('keeps the compaction-style operation request prefix-aligned with the turn 
   await agent.untilTurnEnd();
   expect(model.requests('main')).toHaveLength(2);
   const turn = model.requests('main')[1]!;
+  const frozenTools = loop.baselineTools();
 
   loop.update({ activeToolNames: [...toolNames(turn), 'Lookup'] });
   loop.removeActiveTool('Read');
@@ -117,7 +119,7 @@ test('keeps the compaction-style operation request prefix-aligned with the turn 
   const messages = historyFromContext([...loop.history(), instruction]);
   const signal = new AbortController().signal;
   const requester = await loop.requester.prepareOperation(
-    { source: () => ({ type: 'operation', requestKind: 'full_compaction' }) },
+    { source: () => ({ type: 'operation', requestKind: 'full_compaction' }), tools: frozenTools },
     signal,
   );
   await requester.generate({ content: { messages }, profile: {} }, { signal });

@@ -396,7 +396,7 @@ import {
   v2MetaToSessionMeta,
   v2SummaryToSessionSummary,
 } from '#/v2/session-mapper';
-import { SessionEventWiring } from '#/v2/session-wiring';
+import { readStatusModelContext, SessionEventWiring } from '#/v2/session-wiring';
 import type {
   CreatedWorktree,
   CreateWorktreeInput,
@@ -2388,7 +2388,10 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
     // compaction-ratio overrides and capability snapshot.
     const profile = agent.accessor.get(IAgentLoopService).data();
     const capability = profile.modelCapabilities ?? profileService.data().modelCapabilities;
-    const maxContextTokens = capability.max_input_tokens ?? capability.max_context_tokens;
+    let maxContextTokens = capability.max_input_tokens ?? capability.max_context_tokens;
+    if (maxContextTokens === undefined || maxContextTokens <= 0) {
+      maxContextTokens = readStatusModelContext(agent).maxContextTokens;
+    }
     const contextTokens = context.tokenCount;
     const contextUsage = maxContextTokens > 0 ? contextTokens / maxContextTokens : 0;
     const hasUsage =

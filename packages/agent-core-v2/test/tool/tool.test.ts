@@ -3948,7 +3948,7 @@ describe('AgentSwarm tool execution contract', () => {
           runInBackground: false,
           signal,
           timeout: DEFAULT_SUBAGENT_TIMEOUT_MS,
-          plan: { profileName: 'explore', model: 'mock-model', modelSource: 'inherited', thinking: 'off' },
+          plan: { fork: false, profileName: 'explore', model: 'mock-model', modelSource: 'inherited', thinking: 'off' },
         },
         {
           kind: 'spawn',
@@ -3962,7 +3962,7 @@ describe('AgentSwarm tool execution contract', () => {
           runInBackground: false,
           signal,
           timeout: DEFAULT_SUBAGENT_TIMEOUT_MS,
-          plan: { profileName: 'explore', model: 'mock-model', modelSource: 'inherited', thinking: 'off' },
+          plan: { fork: false, profileName: 'explore', model: 'mock-model', modelSource: 'inherited', thinking: 'off' },
         },
       ],
     });
@@ -4025,11 +4025,11 @@ describe('AgentSwarm tool execution contract', () => {
         tasks: [
           expect.objectContaining({
             kind: 'spawn',
-            plan: { profileName: 'explore', model: 'provider/fast', modelSource: 'secondary_pool', thinking: undefined },
+            plan: { fork: false, profileName: 'explore', model: 'provider/fast', modelSource: 'secondary_pool', thinking: undefined },
           }),
           expect.objectContaining({
             kind: 'spawn',
-            plan: { profileName: 'explore', model: 'provider/fast', modelSource: 'secondary_pool', thinking: undefined },
+            plan: { fork: false, profileName: 'explore', model: 'provider/fast', modelSource: 'secondary_pool', thinking: undefined },
           }),
         ],
       }),
@@ -4228,7 +4228,7 @@ describe('AgentSwarm tool execution contract', () => {
           runInBackground: false,
           signal,
           timeout: DEFAULT_SUBAGENT_TIMEOUT_MS,
-          plan: { profileName: 'explore', model: 'mock-model', modelSource: 'inherited', thinking: 'off' },
+          plan: { fork: false, profileName: 'explore', model: 'mock-model', modelSource: 'inherited', thinking: 'off' },
         },
       ],
     });

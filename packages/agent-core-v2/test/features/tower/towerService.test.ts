@@ -18,6 +18,7 @@ import { IAgentReminderService } from '#/features/reminder/reminderService';
 import { createReminderStub } from '../reminder/stubs';
 import type { ContextMessage } from '#/agent/contextMemory/types';
 import { IAgentLoopService } from '#/agent/loop/loop';
+import { IAgentProfileService } from '#/agent/profile/profile';
 import { TurnStarted } from '#/agent/loop/turnEvents';
 import { TurnEnded } from '#/agent/loop/turnOps';
 import { PromptSubmitted } from '#/agent/prompt/promptEvents';
@@ -122,6 +123,14 @@ function registerTowerToolServices(target: TestInstantiationService): void {
     target.set(tool.id, new SyncDescriptor(tool.ctor));
   }
   target.set(IAgentToolRegistryService, new SyncDescriptor(AgentToolRegistryService));
+  target.stub(IAgentProfileService, {
+    data: () => ({ profileName: undefined, modelAlias: undefined, thinkingLevel: undefined }),
+    getSessionModelOverride: () => undefined,
+  } as unknown as IAgentProfileService);
+  target.stub(IConfigService, {
+    get: () => undefined,
+    onDidChangeConfiguration: () => ({ dispose: () => {} }),
+  } as unknown as IConfigService);
 }
 
 function registeredTowerToolNames(target: TestInstantiationService): string[] {
@@ -1321,6 +1330,7 @@ describe('AgentTowerService', () => {
   it('publishes towerMode:false when the flag is disabled through a live config change', async () => {
     let fireConfigChanged: () => void = () => {};
     ix.stub(IConfigService, {
+      get: () => undefined,
       onDidChangeConfiguration: (handler: () => void) => {
         fireConfigChanged = handler;
         return { dispose: () => {} };

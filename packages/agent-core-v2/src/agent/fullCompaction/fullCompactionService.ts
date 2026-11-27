@@ -1021,11 +1021,11 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
         this.flags.enabled(COMPACTION_HANDOFF_FLAG_ID) &&
         !historySafeToCompact(this.loopService.rawHistory(), originalRaw)
       ) {
-        const active = this._compacting;
-        if (active !== null) {
-          this.cancelActive(active);
+        const current = this._compacting;
+        if (current !== null) {
+          this.cancelActive(current);
         }
-        throw compactionCancelledReason(active);
+        throw compactionCancelledReason(current);
       }
       const recoveryFooter = this.renderRecoveryFooter(wireLines);
       const summaryText = buildCompactionSummaryText(summary);

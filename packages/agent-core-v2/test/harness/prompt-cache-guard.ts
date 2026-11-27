@@ -188,10 +188,6 @@ function findStableBreak(previous: RecordedRequest, next: RecordedRequest): unkn
 }
 
 function findHistoryBreak(previous: RecordedRequest, next: RecordedRequest): unknown {
-  // Special case: an invalid-tool-arguments correction is a deliberate one-shot
-  // cache sacrifice. The retry policy appends it temporarily and never persists
-  // it, so the next request legitimately drops it; strip it from the recorded
-  // baseline instead of reporting a prefix break.
   const history = previous.correctionTail
     ? previous.call.history.slice(0, -1)
     : previous.call.history;
