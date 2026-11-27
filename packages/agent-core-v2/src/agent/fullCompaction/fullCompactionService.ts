@@ -587,7 +587,9 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
   private async afterStep(signal?: AbortSignal, turnId?: number): Promise<void> {
     this.consecutiveOverflowCompactions = 0;
     if (this.strategy.checkAfterStep && this.checkAutoCompaction(false)) {
-      await this.block(signal, turnId);
+      if (!this.strategy.shouldBlock(this.tokenCountWithPending())) {
+        await this.block(signal, turnId);
+      }
     }
   }
 

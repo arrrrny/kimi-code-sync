@@ -35,6 +35,7 @@ import { getProviderDefinition } from '#/llm-adapter/provider/provider-definitio
 import { ISessionRequestAttributionService } from '#/session/requestAttribution/requestAttribution';
 import { IBootstrapService } from '#/app/bootstrap/bootstrap';
 import { credentialRecovery } from '@moonshot-ai/core/llm/policy/credentials';
+import { isAuthRejection } from '@moonshot-ai/core/llm/policy/recovery';
 import { keyRotationRecovery } from '#human/credentials/keyRotationRecovery';
 import { createFallbackModelRecovery } from '#/session/fallback/recovery';
 import { IFlagService } from '#/app/flag/flag';
@@ -763,6 +764,7 @@ export class AgentLoopService extends Disposable implements IAgentLoopService {
             : this.config.get<LoopControl>(LOOP_CONTROL_SECTION)?.maxAttemptsPerStep,
         infiniteRetry: this.infiniteRetryEnabled,
       },
+      retryables: [isAuthRejection],
       recoveries: [
         credentialRecovery,
         keyRotationRecovery,
