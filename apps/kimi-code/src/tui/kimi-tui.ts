@@ -2594,12 +2594,6 @@ export class KimiTUI {
         return;
       }
       const group = [first];
-      if (first.inlineSkillActivations === undefined) {
-        while (pending[0] !== undefined && pending[0].inlineSkillActivations === undefined) {
-          const next = pending.shift()!;
-          if (this.state.queuedMessages.includes(next)) group.push(next);
-        }
-      }
       for (const message of group) this.steeringQueuedMessages.add(message);
       const queuedRequest: QueuedSteerRequest = {
         promptId: randomUUID(),
