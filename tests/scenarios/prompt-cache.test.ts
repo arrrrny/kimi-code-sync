@@ -130,7 +130,7 @@ async function compact(kap: Kap, model: FakeModel, sessionId: string, summary: s
 
 describe.each(PROFILES)('one session with $name', ({ options, roleMetadata, mcp, takesEffect }) => {
   const test = base.extend<ScenarioFixtures>(scenarioFixtures({ ...withAutoCompaction(options), modelOptions: { reportCachedTokens: true } }));
-  const handoff = options.env?.KIMI_CODE_EXPERIMENTAL_FLAG === '1';
+  const handoff = options.env?.['KIMI_CODE_EXPERIMENTAL_FLAG'] === '1';
 
   test('keeps every main request and every request of a subagent on the prompt cache prefix through a retry, compaction, a restart, an automatic compaction and a subagent', async ({ kap, model }) => {
     const session = await kap.createSession();
