@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IDisposable } from '#/_base/di/lifecycle';
 import { toErrorMessage } from '#/_base/errors/errorMessage';
 import { Event } from '#/_base/event';
+import { WarningIssued } from '#/agent/profile/profileOps';
 import type { AgentLoopRequestObserver, AgentRequestObservation } from '#/agent/loop/requestObservation';
 import type { ContextMessage, PromptOrigin } from '#/agent/contextMemory/types';
 import type { LoopRecordedEvent } from '#/agent/contextMemory/loopEventFold';
@@ -33,7 +34,6 @@ import {
   ThinkingDelta,
   TurnStarted,
   TurnStepInterrupted,
-  TurnStepStarted,
 } from '#/agent/loop/turnEvents';
 import { TurnEnded } from '#/agent/loop/turnOps';
 import { runAgentTurn } from '#/session/subagent/runAgentTurn';
@@ -51,7 +51,6 @@ import { ISessionUsageService } from '#/session/usage/sessionUsage';
 import type { ProviderConfig } from '#/provider-catalog/provider/provider';
 
 import {
-  agentService,
   appService,
   configServices,
   createTestAgent,
@@ -581,8 +580,8 @@ describe('Agent loop', () => {
       for (const request of requests.slice(3)) {
         const recoveries = request.policy?.recoveries;
         const resolvedRecoveries = typeof recoveries === 'function' ? recoveries() : recoveries;
-        expect(resolvedRecoveries).toHaveLength(4);
-        expect(resolvedRecoveries?.[3]).toBe(loopRecovery);
+        expect(resolvedRecoveries).toHaveLength(6);
+        expect(resolvedRecoveries?.[5]).toBe(loopRecovery);
         const retryables = request.policy?.retryables;
         expect(typeof retryables === 'function' ? retryables() : retryables).toEqual([
           derivedRetryable,
@@ -784,8 +783,9 @@ describe('Agent loop', () => {
       for (const request of requests.slice(operationRequestStart, operationRequestStart + 4)) {
         const recoveries = request.policy?.recoveries;
         const resolvedRecoveries = typeof recoveries === 'function' ? recoveries() : recoveries;
-        expect(resolvedRecoveries?.[3]).toBe(liveRecovery);
-        expect(resolvedRecoveries?.[4]).toBe(loopRecovery);
+        expect(resolvedRecoveries).toHaveLength(7);
+        expect(resolvedRecoveries?.[5]).toBe(liveRecovery);
+        expect(resolvedRecoveries?.[6]).toBe(loopRecovery);
         const retryables = request.policy?.retryables;
         expect(typeof retryables === 'function' ? retryables() : retryables).toEqual([
           liveRetryable,
@@ -2258,6 +2258,17 @@ describe('Agent loop', () => {
     await expect(resumed.result).resolves.toMatchObject({ type: 'completed', steps: 1 });
     expect(loop.snapshot().hasPendingRequests).toBe(false);
     expect(loop.snapshot().state).toBe('idle');
+  });
+
+  it('routes the wire compatibility cancelFromUser onto cancel', () => {
+    const cancel = vi.spyOn(loop, 'cancel').mockReturnValue(true);
+
+    loop.cancelFromUser();
+    expect(cancel).toHaveBeenLastCalledWith(undefined);
+    loop.cancelFromUser(1);
+    expect(cancel).toHaveBeenLastCalledWith({ turnId: 1 });
+
+    cancel.mockRestore();
   });
 
   it('preserves explicit queue semantics across programmatic and user cancellation', async () => {
@@ -3821,3 +3832,186 @@ function deferred(): { readonly promise: Promise<void>; readonly resolve: () => 
   });
   return { promise, resolve };
 }
+
+describe('Agent loop api key rotation notice', () => {
+  it('reports the provider and the new key without leaking the key value', async () => {
+    const maxAttemptsPerStep = 3;
+    const ctx = createTestAgent({
+      initialConfig: {
+        loopControl: { maxAttemptsPerStep },
+        providers: {
+          'test-provider': {
+            type: 'kimi',
+            apiKey: 'sk-legacy-key',
+            baseUrl: 'https://api.example.test/v1',
+            rotateKeys: true,
+            activeApiKeyId: 'k1',
+            apiKeys: {
+              k1: { key: 'sk-live-SECRET-ONE', name: 'primary' },
+              k2: { key: 'sk-live-SECRET-TWO', name: 'personal' },
+            },
+          },
+        },
+      },
+    } as unknown as TestAgentOptions);
+    try {
+      await ctx.restorePersisted();
+      const warnings: WarningIssued[] = [];
+      const subscription = ctx.get(IEventBus).subscribe((event) => {
+        if (event instanceof WarningIssued) warnings.push(event);
+      });
+      for (let i = 0; i < maxAttemptsPerStep; i += 1) {
+        ctx.mockNextProviderResponse(providerHttpError(429, 'slow down', { retryAfterMs: 1 }));
+      }
+      ctx.mockNextResponse({ type: 'text', text: 'answered on the next key' });
+
+      await ctx.rpc.prompt({ input: [{ type: 'text', text: 'hello' }] });
+      await ctx.untilTurnEnd();
+      subscription.dispose();
+
+      const rotations = warnings.filter((warning) => warning.code === 'api-key-rotation');
+      expect(rotations).toHaveLength(1);
+      expect(rotations[0]?.message).toContain('test-provider');
+      expect(rotations[0]?.message).toContain('personal');
+      expect(rotations[0]?.message).toContain('k2');
+      expect(rotations[0]?.message).not.toContain('sk-live-SECRET-ONE');
+      expect(rotations[0]?.message).not.toContain('sk-live-SECRET-TWO');
+      expect(rotations[0]?.message).not.toContain('sk-legacy-key');
+    } finally {
+      await ctx.dispose();
+    }
+  });
+
+  it('reports that every configured key was tried once the cycle is exhausted', async () => {
+    const maxAttemptsPerStep = 3;
+    const ctx = createTestAgent({
+      initialConfig: {
+        loopControl: { maxAttemptsPerStep },
+        providers: {
+          'test-provider': {
+            type: 'kimi',
+            apiKey: 'sk-legacy-key',
+            baseUrl: 'https://api.example.test/v1',
+            rotateKeys: true,
+            activeApiKeyId: 'k1',
+            apiKeys: {
+              k1: { key: 'sk-live-SECRET-ONE', name: 'primary' },
+              k2: { key: 'sk-live-SECRET-TWO', name: 'personal' },
+            },
+          },
+        },
+      },
+    } as unknown as TestAgentOptions);
+    try {
+      await ctx.restorePersisted();
+      const warnings: WarningIssued[] = [];
+      const subscription = ctx.get(IEventBus).subscribe((event) => {
+        if (event instanceof WarningIssued) warnings.push(event);
+      });
+      for (let i = 0; i < maxAttemptsPerStep * 2; i += 1) {
+        ctx.mockNextProviderResponse(providerHttpError(429, 'slow down', { retryAfterMs: 1 }));
+      }
+
+      await ctx.rpc.prompt({ input: [{ type: 'text', text: 'hello' }] });
+      await ctx.untilTurnEnd();
+      subscription.dispose();
+
+      const exhausted = warnings.filter(
+        (warning) =>
+          warning.code === 'api-key-rotation' &&
+          warning.message.includes('all 2 configured keys were tried'),
+      );
+      expect(exhausted).toHaveLength(1);
+      expect(exhausted[0]?.message).toContain('test-provider');
+      expect(exhausted[0]?.message).not.toContain('sk-live-SECRET-ONE');
+      expect(exhausted[0]?.message).not.toContain('sk-live-SECRET-TWO');
+      expect(exhausted[0]?.message).not.toContain('sk-legacy-key');
+    } finally {
+      await ctx.dispose();
+    }
+  });
+
+  it('rotates to the next key when the provider reports the token is invalid', async () => {
+    const maxAttemptsPerStep = 3;
+    const ctx = createTestAgent({
+      initialConfig: {
+        loopControl: { maxAttemptsPerStep },
+        providers: {
+          'test-provider': {
+            type: 'kimi',
+            apiKey: 'sk-legacy-key',
+            baseUrl: 'https://api.example.test/v1',
+            rotateKeys: true,
+            activeApiKeyId: 'k1',
+            apiKeys: {
+              k1: { key: 'sk-live-SECRET-ONE', name: 'primary' },
+              k2: { key: 'sk-live-SECRET-TWO', name: 'personal' },
+              k3: { key: 'sk-live-SECRET-THREE', name: 'backup' },
+            },
+          },
+        },
+      },
+    } as unknown as TestAgentOptions);
+    try {
+      await ctx.restorePersisted();
+      const warnings: WarningIssued[] = [];
+      const subscription = ctx.get(IEventBus).subscribe((event) => {
+        if (event instanceof WarningIssued) warnings.push(event);
+      });
+      ctx.mockNextProviderResponse(providerHttpError(401, 'invalid authentication token'));
+      ctx.mockNextResponse({ type: 'text', text: 'answered on the next key' });
+
+      await ctx.rpc.prompt({ input: [{ type: 'text', text: 'hello' }] });
+      await ctx.untilTurnEnd();
+      subscription.dispose();
+
+      const rotations = warnings.filter((warning) => warning.code === 'api-key-rotation');
+      expect(rotations).toHaveLength(1);
+      expect(rotations[0]?.message).toContain('personal');
+      expect(rotations[0]?.message).toContain('k2');
+      expect(rotations[0]?.message).not.toContain('sk-live-SECRET-ONE');
+      expect(rotations[0]?.message).not.toContain('sk-live-SECRET-TWO');
+    } finally {
+      await ctx.dispose();
+    }
+  });
+
+  it('does not rotate a rejected credential when the provider has rotation turned off', async () => {
+    const maxAttemptsPerStep = 3;
+    const ctx = createTestAgent({
+      initialConfig: {
+        loopControl: { maxAttemptsPerStep },
+        providers: {
+          'test-provider': {
+            type: 'kimi',
+            apiKey: 'sk-legacy-key',
+            baseUrl: 'https://api.example.test/v1',
+            rotateKeys: false,
+            activeApiKeyId: 'k1',
+            apiKeys: {
+              k1: { key: 'sk-live-SECRET-ONE', name: 'primary' },
+              k2: { key: 'sk-live-SECRET-TWO', name: 'personal' },
+            },
+          },
+        },
+      },
+    } as unknown as TestAgentOptions);
+    try {
+      await ctx.restorePersisted();
+      const warnings: WarningIssued[] = [];
+      const subscription = ctx.get(IEventBus).subscribe((event) => {
+        if (event instanceof WarningIssued) warnings.push(event);
+      });
+      ctx.mockNextProviderResponse(providerHttpError(401, 'invalid authentication token'));
+
+      await ctx.rpc.prompt({ input: [{ type: 'text', text: 'hello' }] });
+      await ctx.untilTurnEnd();
+      subscription.dispose();
+
+      expect(ctx.llmCalls).toHaveLength(1);
+      expect(warnings.filter((warning) => warning.code === 'api-key-rotation')).toHaveLength(0);
+    } finally {
+      await ctx.dispose();
+    }
+  });
+});

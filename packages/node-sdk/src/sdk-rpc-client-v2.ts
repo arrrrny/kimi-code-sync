@@ -171,6 +171,7 @@ import {
   IAgentEnvironmentBindingService,
   IAgentEnvironmentService,
   IAgentLoopService,
+  IAgentProfileService,
   IAgentPermissionModeService,
   IAgentPermissionRulesService,
   IAgentPluginCommandService,
@@ -253,6 +254,7 @@ import {
   type ProjectInstance,
   type ProjectInstanceLease,
 } from '@moonshot-ai/agent-core-v2';
+import type { SessionModelOverrides } from '@moonshot-ai/agent-core-v2/agent/profile/profile';
 import {
   RPCError,
   type AgentHandle,
@@ -291,6 +293,10 @@ import {
   type SessionPromptWithSkillsRpcInput,
   type SetSessionModelRpcInput,
   type SetSessionModelRpcResult,
+  type SetSessionModelOverrideRpcInput,
+  type GetSessionModelOverrideRpcInput,
+  type SetSessionCompactionTriggerRatioRpcInput,
+  type SetSessionCompactionTokenBudgetRpcInput,
   type SetSessionPermissionRpcInput,
   type SetSessionPlanModeRpcInput,
   type SetSessionSwarmModeRpcInput,
@@ -1105,6 +1111,15 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
     }
     await this.klient.global.config.replaceSections({ sections });
     return this.getConfig();
+  }
+
+  override supportsAtomicSectionReplace(): boolean {
+    return true;
+  }
+
+  override async replaceConfigSections(sections: Record<string, unknown>): Promise<void> {
+    await this.configReady;
+    await this.klient.global.config.replaceSections({ sections });
   }
 
   override async importCustomRegistry(
@@ -2197,6 +2212,21 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
     return agent.setModel(input.model);
   }
 
+  override async setSessionModelOverride(input: SetSessionModelOverrideRpcInput): Promise<void> {
+    const agent = await this.agentFacade(input.sessionId);
+    await agent.setSessionModelOverride(input.kind, input.alias);
+  }
+
+  override async getSessionModelOverride(input: GetSessionModelOverrideRpcInput): Promise<string | undefined> {
+    const agent = await this.agentFacade(input.sessionId);
+    return agent.getSessionModelOverride(input.kind);
+  }
+
+  override async getAllSessionModelOverrides(input: SessionIdRpcInput): Promise<SessionModelOverrides> {
+    const agent = await this.agentFacade(input.sessionId);
+    return agent.getAllSessionModelOverrides();
+  }
+
   /**
    * Through the agent scope (`IAgentLoopService.setThinking`) — no klient
    * facade exists. Same registry-driven strictness as v1's
@@ -2207,6 +2237,30 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
   override async setThinking(input: SetSessionThinkingRpcInput): Promise<void> {
     const agent = await this.agentScope(input.sessionId);
     agent.accessor.get(IAgentLoopService).setThinking(input.effort);
+  }
+
+  /**
+   * Through the agent scope (`IAgentProfileService.setCompactionTriggerRatio`),
+   * same shape as `setThinking`: no klient facade exists. The profile service
+   * validates the [0.25, 0.99] range and rejects with `model.config_invalid`.
+   */
+  override async setCompactionTriggerRatio(
+    input: SetSessionCompactionTriggerRatioRpcInput,
+  ): Promise<void> {
+    const agent = await this.agentScope(input.sessionId);
+    agent.accessor.get(IAgentProfileService).setCompactionTriggerRatio(input.ratio);
+  }
+
+  /**
+   * Through the agent scope (`IAgentProfileService.setCompactionTokenBudget`).
+   * The profile service validates the input (positive integer ≥ 1) and
+   * multiplies by 1 000 to convert "thousands of tokens" to raw tokens.
+   */
+  override async setCompactionTokenBudget(
+    input: SetSessionCompactionTokenBudgetRpcInput,
+  ): Promise<void> {
+    const agent = await this.agentScope(input.sessionId);
+    agent.accessor.get(IAgentProfileService).setCompactionTokenBudget(input.tokens);
   }
 
   override async setPermission(input: SetSessionPermissionRpcInput): Promise<void> {
@@ -2329,8 +2383,16 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
       facade.getPlan(),
       facade.getUsage(),
     ]);
+    const profileService = agent.accessor.get(IAgentProfileService);
+    // The model binding lives on the loop service (the profile adapter applies
+    // `setModel`/`setThinking` there); the profile service carries the fork's
+    // compaction-ratio overrides and capability snapshot.
     const profile = agent.accessor.get(IAgentLoopService).data();
-    const { maxContextTokens } = readStatusModelContext(agent);
+    const capability = profile.modelCapabilities ?? profileService.data().modelCapabilities;
+    let maxContextTokens = capability.max_input_tokens ?? capability.max_context_tokens;
+    if (maxContextTokens === undefined || maxContextTokens <= 0) {
+      maxContextTokens = readStatusModelContext(agent).maxContextTokens;
+    }
     const contextTokens = context.tokenCount;
     const contextUsage = maxContextTokens > 0 ? contextTokens / maxContextTokens : 0;
     const hasUsage =
@@ -2342,12 +2404,41 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
       planMode: plan !== null,
       swarmMode: agent.accessor.get(IAgentSwarmService).isActive,
       towerMode: agent.accessor.get(IAgentTowerService).isActive,
+      // Effective auto-compaction trigger ratio (override ?? config). Both new
+      // fields are spread conditionally so a session with neither override nor
+      // config keeps the exact v1 status shape — strict-equality getStatus
+      // parity tests must not see extra keys. Reads through the model-less
+      // accessors so getStatus keeps working on model-less sessions.
+      ...(profileService.getEffectiveCompactionTriggerRatio() !== undefined
+        ? { compactionTriggerRatio: profileService.getEffectiveCompactionTriggerRatio() }
+        : {}),
+      ...(profileService.getCompactionTriggerRatioOverride() !== undefined
+        ? { compactionTriggerRatioOverridden: true }
+        : {}),
+      ...(profileService.getEffectiveCompactionTokenBudget() !== undefined
+        ? { compactionTokenBudget: profileService.getEffectiveCompactionTokenBudget() }
+        : {}),
+      ...(profileService.getCompactionTokenBudgetOverride() !== undefined
+        ? { compactionTokenBudgetOverridden: true }
+        : {}),
       loopLifecycleEvents: true,
       contextTokens,
       maxContextTokens,
       contextUsage,
       usage: hasUsage ? usage : undefined,
     };
+  }
+
+  /**
+   * Alias-only read: the bound model alias from the agent's profile, the same
+   * value `getStatus` reports as `model`. The profile lives in the local
+   * scope, so this costs none of the context/plan/usage round-trips
+   * `getStatus` aggregates — a bulk loop over many sessions pays for the
+   * difference.
+   */
+  override async getModelAlias(input: SessionIdRpcInput): Promise<string | undefined> {
+    const agent = await this.agentScope(input.sessionId);
+    return agent.accessor.get(IAgentLoopService).data().modelAlias;
   }
 
   /**
@@ -3375,4 +3466,3 @@ const NOTHING_GATED: Omit<WorkspaceTrustInfo, 'trusted' | 'projectRoot'> = {
   warnings: [],
   instructionSources: { agentsMdPaths: [], skills: [], agentProfiles: [], paths: [] },
 };
-

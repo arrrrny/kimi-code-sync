@@ -69,9 +69,9 @@ import {
   type KimiSlashCommand,
   type SkillListSession,
 } from './commands';
+import { rotateToNextFavoriteModel, applyTranscriptPresentation, runQueuedModelSwitch } from './commands/config';
 import * as slashCommands from './commands/dispatch';
 import { resolveHostUserInput, skillVariantPathsForInput } from './commands/resolve';
-import { applyTranscriptPresentation, runQueuedModelSwitch } from './commands/config';
 import { promptSshPassword } from './commands/prompts';
 import { CacheHintController } from './controllers/cache-hint-controller';
 import { BannerComponent } from './components/chrome/banner';
@@ -93,6 +93,11 @@ import { CompactionComponent } from './components/dialogs/compaction';
 import { HelpPanelComponent, keyboardShortcuts } from './components/dialogs/help-panel';
 import { QuestionDialogComponent } from './components/dialogs/question-dialog';
 import { SessionPickerComponent, type SessionRow, type SessionsScope } from './components/dialogs/session-picker';
+import {
+  MessageQueueManagerComponent,
+  MessageQueueEditDialogComponent,
+  type MessageQueueAction,
+} from './components/dialogs/message-queue-manager';
 import { TrustPromptComponent, type TrustPromptChoice } from './components/dialogs/trust-prompt';
 import {
   FileMentionProvider,
@@ -372,6 +377,7 @@ function createInitialAppState(input: KimiTUIStartupInput): AppState {
     upgrade: input.tuiConfig.upgrade,
     statusLine: input.tuiConfig.statusLine,
     markdown: input.tuiConfig.markdown,
+    favoriteModels: input.tuiConfig.favoriteModels ?? [],
     transcript: input.tuiConfig.transcript,
     availableModels: {},
     availableProviders: {},
@@ -1563,6 +1569,12 @@ export class KimiTUI {
     void slashCommands.handlePlanCommand(this, next ? 'on' : 'off');
   }
 
+  /** Alt+M: rotate the session model through the favorite models (see
+   * commands/config.ts `rotateToNextFavoriteModel`). */
+  rotateFavoriteModels(): void {
+    void rotateToNextFavoriteModel(this);
+  }
+
   handleInputModeChange(mode: 'prompt' | 'bash'): void {
     this.setAppState({ inputMode: mode });
     this.surveyController.notifyInputModeChanged(mode);
@@ -1863,7 +1875,10 @@ export class KimiTUI {
       this.state.appState.streamingPhase !== 'idle' ||
       this.state.appState.isCompacting
     ) {
-      this.enqueueMessage(text, enqueueOptions);
+      this.enqueueMessage(
+        text,
+        delivery === 'queue' ? { ...enqueueOptions, holdUntilTurnEnds: true } : enqueueOptions,
+      );
       this.updateQueueDisplay();
       this.state.ui.requestRender();
       return;
@@ -2778,12 +2793,6 @@ export class KimiTUI {
         return;
       }
       const group = [first];
-      if (first.inlineSkillActivations === undefined) {
-        while (pending[0] !== undefined && pending[0].inlineSkillActivations === undefined) {
-          const next = pending.shift()!;
-          if (this.state.queuedMessages.includes(next)) group.push(next);
-        }
-      }
       for (const message of group) this.steeringQueuedMessages.add(message);
       const queuedRequest: QueuedSteerRequest = {
         promptId: randomUUID(),
@@ -4189,11 +4198,11 @@ export class KimiTUI {
   private createTranscriptComponent(entry: TranscriptEntry): Component | null {
     if (entry.compactionData !== undefined) {
       const data = entry.compactionData;
-      const block = new CompactionComponent(this.state.ui, data.instruction);
+      const block = new CompactionComponent(this.state.ui, data.instruction, data.model);
       if (data.result === 'cancelled') {
         block.markCanceled();
       } else {
-        block.markDone(data.tokensBefore, data.tokensAfter, data.summary);
+        block.markDone(data.tokensBefore, data.tokensAfter, data.summary, data.handoffPath);
         if (this.state.transcriptContainer.toolOutputExpanded) {
           block.setExpanded(true);
         }
@@ -4910,6 +4919,130 @@ export class KimiTUI {
 
   openTasksBrowser(): void {
     void this.tasksBrowserController.show();
+  }
+
+  openMessageQueueManager(): void {
+    const messages = this.state.queuedMessages;
+    if (messages.length === 0) {
+      this.showStatus('No queued messages.');
+      return;
+    }
+    if (this.state.appState.streamingPhase === 'idle' || this.state.appState.isCompacting) {
+      this.showStatus('No running turn to send into.');
+      return;
+    }
+    this.mountMessageQueueManager(messages);
+  }
+
+  private mountMessageQueueManager(messages: readonly QueuedMessage[]): void {
+    const showManager = (msgs: readonly QueuedMessage[]): void => {
+      this.state.editorReplacementMounted = true;
+      this.mountEditorReplacement(
+        new MessageQueueManagerComponent({
+          messages: msgs,
+          onAction: (action) => this.handleMessageQueueAction(action),
+          onCancel: () => {
+            this.restoreEditor();
+          },
+        }),
+      );
+      this.state.ui.requestRender();
+    };
+
+    showManager(messages);
+  }
+
+  private handleMessageQueueAction(
+    action: MessageQueueAction,
+  ): readonly QueuedMessage[] | void {
+    switch (action.kind) {
+      case 'send-selected': {
+        const message = this.state.queuedMessages[action.index];
+        if (message === undefined) return this.state.queuedMessages;
+        if (!isPromptQueuedMessage(message)) {
+          this.showStatus('Only a prompt can be sent; a barrier runs in order.');
+          return this.state.queuedMessages;
+        }
+        const session = this.session;
+        if (session === undefined || !this.canManuallySteer()) {
+          this.showStatus('No running turn to send into.');
+          return this.state.queuedMessages;
+        }
+        this.state.queuedMessages.splice(action.index, 1);
+        this.steeringQueuedMessages.add(message);
+        this.updateQueueDisplay();
+        this.steerMessage(
+          session,
+          [toSteerInputItem(message)],
+          (outcome) => {
+            this.steeringQueuedMessages.delete(message);
+            if (this.session !== session) return;
+            if (outcome === 'failed') {
+              const at = Math.min(action.index, this.state.queuedMessages.length);
+              this.state.queuedMessages.splice(at, 0, message);
+              this.showStatus('Could not send that message; it is still queued.');
+            } else {
+              if (outcome === 'steered') this.programStatus.markUserSteer();
+              if (this.state.queuedMessages.length === 0) this.restoreEditor();
+            }
+            this.updateQueueDisplay();
+          },
+          true,
+        );
+        return this.state.queuedMessages;
+      }
+      case 'send-all': {
+        this.steerQueuedMessagesIntoRunningTurn(true);
+        this.restoreEditor();
+        return [];
+      }
+      case 'delete': {
+        this.state.queuedMessages.splice(action.index, 1);
+        return this.state.queuedMessages;
+      }
+      case 'move': {
+        const messages = this.state.queuedMessages;
+        const targetIndex = action.direction === 'up' ? action.index - 1 : action.index + 1;
+        if (targetIndex < 0 || targetIndex >= messages.length) {
+          return messages;
+        }
+        // Steering only ever sends what sits before the first compaction /
+        // model-switch barrier, so swapping a message across that boundary
+        // would change what a later steer sends.
+        const firstBarrier = messages.findIndex(isQueuedCompactionBarrier);
+        if (action.index === firstBarrier || targetIndex === firstBarrier) {
+          this.showStatus('A compaction or model-switch barrier keeps its place.');
+          return messages;
+        }
+        const [msg] = messages.splice(action.index, 1);
+        if (msg !== undefined) {
+          messages.splice(targetIndex, 0, msg);
+        }
+        return messages;
+      }
+      case 'edit': {
+        const msg = this.state.queuedMessages[action.index];
+        if (msg === undefined) return;
+        this.state.editorReplacementMounted = true;
+        this.mountEditorReplacement(
+          new MessageQueueEditDialogComponent({
+            message: msg,
+            index: action.index,
+            onDone: (result) => {
+              if (result.kind === 'save') {
+                const current = this.state.queuedMessages[result.index];
+                if (current !== undefined) {
+                  this.state.queuedMessages[result.index] = { ...current, text: result.text };
+                }
+              }
+              this.mountMessageQueueManager(this.state.queuedMessages);
+            },
+          }),
+        );
+        this.state.ui.requestRender();
+        return;
+      }
+    }
   }
 
   focusNotifyPanel(): boolean {

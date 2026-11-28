@@ -21,6 +21,7 @@
     "apps/*/scripts/",
     "docs/smoke-archive/",
     "packages/pi-tui/",
+    "apps/kimi-inspect/",
     "*.generated.ts"
   ],
   "jsPlugins": [

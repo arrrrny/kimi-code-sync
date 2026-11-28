@@ -27,6 +27,7 @@ import { IAgentEnvironmentBindingService } from '#/agent/environmentBinding/envi
 import { ToolAccesses, type ExecutableTool } from '#/tool/toolContract';
 import { IAgentToolRegistryService } from '#/agent/toolRegistry/toolRegistry';
 import { IAgentLoopService } from '#/agent/loop/loop';
+import { IAgentProfileService } from '#/agent/profile/profile';
 import { agentContextOf, IAgentScopeContext } from '#/agent/scopeContext/scopeContext';
 import { IAgentUserToolService, type UserToolRegistration } from '#/agent/userTool/userTool';
 import { IAgentSwarmService } from '#/features/swarm/agent/swarm';
@@ -279,11 +280,20 @@ function createAgentLifecycleStub(options: AgentLifecycleStubOptions = {}): Agen
             scope: (subKey?: string) => subKey ?? '',
           } as never;
         }
+        if (serviceId === IAgentProfileService) {
+          return {
+            _serviceBrand: undefined,
+            data: () => ({ profileName: profileByAgentId.get(agentId) }),
+            getSessionModelOverride: () => undefined,
+            setSessionModelOverride: () => {},
+          } as never;
+        }
         if (serviceId === IAgentLoopService) {
           const loop = stubLoopWithHooks();
           return {
             ...loop,
             data: () => ({ ...loop.data(), profileName: profileByAgentId.get(agentId) }),
+            getSessionModelOverride: () => undefined,
           } as never;
         }
         if (serviceId === IAgentEnvironmentBindingService) {
@@ -2230,7 +2240,7 @@ describe('Agent tool execution contract', () => {
     expect(lifecycle.create).toHaveBeenCalledTimes(1);
   });
 
-  it('accepts a pool that gained a "primary" key through a runtime config edit', async () => {
+  it('rejects a pool that gained the reserved "primary" key through a runtime config edit', async () => {
     const lifecycle = createAgentLifecycleStub({ createAgentIds: ['agent-child'] });
     const context = createAgentToolContext(
       lifecycle,
@@ -2246,7 +2256,7 @@ describe('Agent tool execution contract', () => {
     );
     await (context.get(IConfigService) as StubConfigService).replace(SECONDARY_MODEL_SECTION, {
       defaultModel: 'primary',
-      models: { primary: 'ordinary alias' },
+      models: { primary: 'reserved word' },
     });
 
     const result = await executeAgentTool(context, {
@@ -2254,12 +2264,9 @@ describe('Agent tool execution contract', () => {
       description: 'Find cause',
     });
 
-    expect(result.isError).toBeFalsy();
-    expect(lifecycle.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        binding: expect.objectContaining({ model: 'primary' }),
-      }),
-    );
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain('[secondary_model.models] key "primary" is reserved');
+    expect(lifecycle.create).not.toHaveBeenCalled();
   });
 
   it('points at the [secondary_model.models] config when the bound alias stops resolving', async () => {
@@ -3942,7 +3949,7 @@ describe('AgentSwarm tool execution contract', () => {
           runInBackground: false,
           signal,
           timeout: DEFAULT_SUBAGENT_TIMEOUT_MS,
-          plan: { profileName: 'explore', model: 'mock-model', modelSource: 'inherited', thinking: 'off' },
+          plan: { fork: false, profileName: 'explore', model: 'mock-model', modelSource: 'inherited', thinking: 'off' },
         },
         {
           kind: 'spawn',
@@ -3956,7 +3963,7 @@ describe('AgentSwarm tool execution contract', () => {
           runInBackground: false,
           signal,
           timeout: DEFAULT_SUBAGENT_TIMEOUT_MS,
-          plan: { profileName: 'explore', model: 'mock-model', modelSource: 'inherited', thinking: 'off' },
+          plan: { fork: false, profileName: 'explore', model: 'mock-model', modelSource: 'inherited', thinking: 'off' },
         },
       ],
     });
@@ -4019,11 +4026,11 @@ describe('AgentSwarm tool execution contract', () => {
         tasks: [
           expect.objectContaining({
             kind: 'spawn',
-            plan: { profileName: 'explore', model: 'provider/fast', modelSource: 'secondary_pool', thinking: undefined },
+            plan: { fork: false, profileName: 'explore', model: 'provider/fast', modelSource: 'secondary_pool', thinking: undefined },
           }),
           expect.objectContaining({
             kind: 'spawn',
-            plan: { profileName: 'explore', model: 'provider/fast', modelSource: 'secondary_pool', thinking: undefined },
+            plan: { fork: false, profileName: 'explore', model: 'provider/fast', modelSource: 'secondary_pool', thinking: undefined },
           }),
         ],
       }),
@@ -4222,7 +4229,7 @@ describe('AgentSwarm tool execution contract', () => {
           runInBackground: false,
           signal,
           timeout: DEFAULT_SUBAGENT_TIMEOUT_MS,
-          plan: { profileName: 'explore', model: 'mock-model', modelSource: 'inherited', thinking: 'off' },
+          plan: { fork: false, profileName: 'explore', model: 'mock-model', modelSource: 'inherited', thinking: 'off' },
         },
       ],
     });

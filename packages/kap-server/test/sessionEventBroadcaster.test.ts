@@ -2512,4 +2512,21 @@ describe('sessionEventMessageSchema', () => {
       sessionEventMessageSchema.safeParse(frame({ type: 'invalidated', kind: 'capabilities' })).success,
     ).toBe(false);
   });
+
+  it('rejects compaction.completed, which is not a session push event', () => {
+    expect(
+      sessionEventMessageSchema.safeParse(
+        frame({
+          type: 'compaction.completed',
+          result: {
+            summary: 'Compacted.',
+            compactedCount: 4,
+            tokensBefore: 900,
+            tokensAfter: 120,
+            handoffPath: '/home/sessions/w/s/agents/a/handoff/2026-09-25T10-00-00-000-001.md',
+          },
+        }),
+      ).success,
+    ).toBe(false);
+  });
 });

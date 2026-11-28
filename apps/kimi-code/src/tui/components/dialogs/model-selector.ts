@@ -17,7 +17,7 @@ import {
   type DockLayout,
   type DockPart,
 } from '#/tui/components/chrome/dock-section';
-import { CURRENT_MARK, SELECT_POINTER } from '#/tui/constant/symbols';
+import { CURRENT_MARK, FAVORITE_MARK, SELECT_POINTER } from '#/tui/constant/symbols';
 import { currentTheme } from '#/tui/theme';
 import {
   focusOnUnfocusedMouse,
@@ -28,6 +28,7 @@ import {
   type MouseRowRegion,
 } from '#/tui/utils/mouse-hit-test';
 import { SearchableList } from '#/tui/utils/searchable-list';
+import { printableChar } from '#/tui/utils/printable-key';
 
 import type { ChoiceOption } from './choice-picker';
 
@@ -83,6 +84,9 @@ export interface ModelSelectorOptions {
   readonly warning?: string;
   readonly thinkingControl?: boolean;
   readonly effortDescriptions?: Readonly<Record<string, string>>;
+  readonly favoriteAliases?: ReadonlySet<string>;
+  readonly onToggleFavorite?: (alias: string) => void;
+  readonly emptyMessage?: string;
   readonly onSelect: (selection: ModelSelection) => void;
   readonly onSessionOnlySelect?: (selection: ModelSelection) => void;
   readonly onCancel: () => void;
@@ -204,6 +208,25 @@ export class ModelSelectorComponent extends DockSection implements Focusable {
         return;
       }
       this.opts.onCancel();
+      return;
+    }
+
+    const ch = printableChar(data);
+    if ((ch === 'A' || ch === 'R') && this.opts.onToggleFavorite !== undefined) {
+      const selected = this.selectedChoice();
+      if (selected !== undefined) {
+        const isFavorite = this.opts.favoriteAliases?.has(selected.alias) ?? false;
+        if ((ch === 'A') !== isFavorite) this.opts.onToggleFavorite(selected.alias);
+      }
+      return;
+    }
+    if (ch === 'S' && this.opts.onSessionOnlySelect !== undefined) {
+      const selected = this.selectedChoice();
+      if (selected === undefined) return;
+      this.opts.onSessionOnlySelect({
+        alias: selected.alias,
+        thinking: commitEffort(selected, this.effectiveEffort(selected)),
+      });
       return;
     }
 
@@ -345,7 +368,8 @@ export class ModelSelectorComponent extends DockSection implements Focusable {
     hintParts.push('↑↓ navigate');
     if (searchable && view.query.length > 0) hintParts.push('Backspace clear');
     hintParts.push('Enter select');
-    if (this.opts.onSessionOnlySelect !== undefined) hintParts.push('Alt+S session-only');
+    if (this.opts.onToggleFavorite !== undefined) hintParts.push('Shift+A favorite · Shift+R unfavorite');
+    if (this.opts.onSessionOnlySelect !== undefined) hintParts.push('Shift+S session-only');
     hintParts.push('Esc cancel');
 
     const lines: string[] = [
@@ -372,7 +396,9 @@ export class ModelSelectorComponent extends DockSection implements Focusable {
     const view = this.list.view();
     if (view.items.length === 0) {
       this.choiceRegions = [];
-      const emptyLines = [currentTheme.fg('textMuted', '   No matches')];
+      const emptyLines = [
+        currentTheme.fg('textMuted', `   ${this.opts.emptyMessage ?? 'No matches'}`),
+      ];
       if (unpaged) {
         while (emptyLines.length < this.minBodyRows) emptyLines.push('');
       }
@@ -383,10 +409,15 @@ export class ModelSelectorComponent extends DockSection implements Focusable {
     const end = unpaged ? view.items.length : view.page.end;
 
     const nameCap = Math.max(8, Math.floor(width * 0.5));
+    const favoriteAliases = this.opts.favoriteAliases;
+    const starWidth = (alias: string): number =>
+      favoriteAliases !== undefined && favoriteAliases.has(alias) ? 2 : 0;
     let nameWidth = 0;
     for (let i = start; i < end; i++) {
       const choice = view.items[i];
-      if (choice !== undefined) nameWidth = Math.max(nameWidth, visibleWidth(choice.name));
+      if (choice !== undefined) {
+        nameWidth = Math.max(nameWidth, visibleWidth(choice.name) + starWidth(choice.alias));
+      }
     }
     nameWidth = Math.min(nameWidth, nameCap);
 
@@ -398,14 +429,18 @@ export class ModelSelectorComponent extends DockSection implements Focusable {
       const row = lines.length;
       const isSelected = i === view.selectedIndex;
       const isCurrent = choice.alias === this.opts.currentValue;
+      const isFavorite = favoriteAliases !== undefined && favoriteAliases.has(choice.alias);
       const pointer = isSelected ? SELECT_POINTER : ' ';
-      const truncatedName = truncateToWidth(choice.name, nameWidth, '…');
-      const namePad = ' '.repeat(Math.max(0, nameWidth - visibleWidth(truncatedName)));
+      const truncatedName = truncateToWidth(choice.name, nameWidth - starWidth(choice.alias), '…');
+      const star = isFavorite ? ' ' + currentTheme.fg('warning', FAVORITE_MARK) : '';
+      const namePad = ' '.repeat(
+        Math.max(0, nameWidth - visibleWidth(truncatedName) - starWidth(choice.alias)),
+      );
       let line = currentTheme.fg(isSelected ? 'primary' : 'textDim', `  ${pointer} `);
       line +=
         (isSelected
           ? currentTheme.boldFg('primary', truncatedName)
-          : currentTheme.fg('text', truncatedName)) + namePad;
+          : currentTheme.fg('text', truncatedName)) + star + namePad;
       line += '  ' + currentTheme.fg('textMuted', choice.provider);
       if (isCurrent) {
         line += ' ' + currentTheme.fg('success', CURRENT_MARK);

@@ -17,6 +17,7 @@ import {
   isImageFormatError,
   isRecoverableRequestStructureError,
   isRetryableGenerateError,
+  isTerminalProviderApiError,
   llmMessageFromError,
   normalizeAPIStatusError,
   throwIfAbortError,
@@ -133,6 +134,52 @@ describe('isRetryableGenerateError', () => {
       isRetryableGenerateError(new APIEmptyResponseError('empty', { finishReason: 'completed' })),
     ).toBe(true);
     expect(isRetryableGenerateError(new APIEmptyResponseError('empty'))).toBe(true);
+  });
+});
+
+describe('isTerminalProviderApiError', () => {
+  it('admits terminal 4xx provider errors without a dedicated repair path', () => {
+    expect(isTerminalProviderApiError(new APIStatusError(400, 'Provider returned error', false))).toBe(
+      true,
+    );
+    expect(isTerminalProviderApiError(new APIStatusError(404, 'model not found', false))).toBe(true);
+    expect(isTerminalProviderApiError(new APIStatusError(422, 'Nope', false))).toBe(true);
+  });
+
+  it('excludes retryable, auth, quota, and dedicated-repair error classes', () => {
+    expect(isTerminalProviderApiError(new APIStatusError(401, 'Unauthorized', false))).toBe(false);
+    expect(isTerminalProviderApiError(new APIStatusError(403, 'Forbidden', false))).toBe(false);
+    expect(isTerminalProviderApiError(new APIStatusError(408, 'Request timeout', true))).toBe(false);
+    expect(isTerminalProviderApiError(new APIStatusError(409, 'Conflict', false))).toBe(false);
+    expect(isTerminalProviderApiError(new APIProviderRateLimitError('Too many requests'))).toBe(
+      false,
+    );
+    expect(isTerminalProviderApiError(new APIProviderQuotaExhaustedError('quota exhausted'))).toBe(
+      false,
+    );
+    expect(isTerminalProviderApiError(new APIProviderOverloadedError(529, 'Overloaded'))).toBe(
+      false,
+    );
+    expect(
+      isTerminalProviderApiError(new APIContextOverflowError(400, 'context length exceeded')),
+    ).toBe(false);
+    expect(
+      isTerminalProviderApiError(normalizeAPIStatusError(413, 'context length exceeded')),
+    ).toBe(false);
+    expect(isTerminalProviderApiError(new APIStatusError(413, 'request entity too large', false))).toBe(
+      false,
+    );
+    expect(
+      isTerminalProviderApiError(new APIStatusError(400, 'unexpected `tool_result` block', false)),
+    ).toBe(false);
+    expect(isTerminalProviderApiError(new APIStatusError(500, 'Internal', true))).toBe(false);
+    expect(isTerminalProviderApiError(new APIConnectionError('Connection error.'))).toBe(false);
+    expect(
+      isTerminalProviderApiError(
+        new APIEmptyResponseError('filtered', { finishReason: 'filtered' }),
+      ),
+    ).toBe(false);
+    expect(isTerminalProviderApiError(new Error('boom'))).toBe(false);
   });
 });
 

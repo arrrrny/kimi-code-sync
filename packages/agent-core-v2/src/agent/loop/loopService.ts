@@ -24,6 +24,9 @@ import { IAgentToolSelectService } from '#/agent/toolSelect/toolSelect';
 import { ISessionRequestAttributionService } from '#/session/requestAttribution/requestAttribution';
 import { IBootstrapService } from '#/app/bootstrap/bootstrap';
 import { credentialRecovery } from '@moonshot-ai/core/llm/policy/credentials';
+import { keyRotationRecovery } from '#human/credentials/keyRotationRecovery';
+import { createFallbackModelRecovery } from '#/session/fallback/recovery';
+import { IFlagService } from '#/app/flag/flag';
 import { IAgentToolExecutorService } from '#/agent/toolExecutor/toolExecutor';
 import { agentTaskInfo } from '#/agent/task/handler';
 import { IAgentTaskHistoryService } from '#/agent/task/taskService';
@@ -70,6 +73,7 @@ import type {
   ThinkingEffort,
 } from '@moonshot-ai/core/llm/request';
 import type { ModelCapability } from '#/provider-catalog/capability';
+import type { Model } from '#/provider-catalog/model/catalog';
 import {
   requesterContents,
   type InitializedLlmRequester,
@@ -79,6 +83,8 @@ import { createLlmRequesterExecution } from '@moonshot-ai/core/llm/policy/policy
 import { resolveMaxOutputTokens } from '#/provider-catalog/model/completion-budget';
 import type { ModelOverrides } from '#/provider-catalog/model/model.types';
 import { getProviderDefinition } from '#/provider-catalog/provider/provider-definition';
+import { createKeyedCredentialProvider } from '#/provider-catalog/provider/apiKeyRotation';
+import { resolveModelAuthMaterial } from '#/provider-catalog/model/model-auth';
 import { THINKING_SECTION } from '#/app/kosongConfig/configSection';
 import { IProviderDiscoveryService } from '#/app/kosongConfig/discovery';
 import { ISessionAgentProfileCatalog } from '#/session/sessionAgentProfileCatalog/sessionAgentProfileCatalog';
@@ -133,6 +139,7 @@ import {
   type TurnStartingEvent,
 } from '@moonshot-ai/core/loop/index';
 import { createLoopHookRegistry } from '@moonshot-ai/core/hook/loop/registry';
+import { createRawLoopRequester } from '@moonshot-ai/core/loop/requester';
 import { LoopJournal, type LoopJournalSnapshot } from './journal';
 import { AgentPromptProjection } from './promptProjection';
 import { AgentTurnProjection, loopLastRequestIdKey } from './turnProjection';
@@ -191,6 +198,7 @@ export class AgentLoopService extends Disposable implements IAgentLoopService {
     @IAgentToolExecutorService private readonly toolExecutor: IAgentToolExecutorService,
     @IAgentToolRegistryService _toolRegistry: IAgentToolRegistryService,
     @IConfigService private readonly config: IConfigService,
+    @IFlagService private readonly flags: IFlagService,
     @IEventDispatcher private readonly dispatcher: IEventDispatcher,
     @IEventBus events: IEventBus,
     @IAgentScopeContext private readonly scopeContext: IAgentScopeContext,
@@ -404,10 +412,10 @@ export class AgentLoopService extends Disposable implements IAgentLoopService {
     };
   }
 
-  private bindRequester(config: RequestConfigSnapshot): InitializedLlmRequester {
+  private bindRequester(config: RequestConfigSnapshot, maxOutputSize?: number): InitializedLlmRequester {
     const resolved = config.resolved;
-    const model = this.providerCatalog.get(resolved.modelAlias);
-    const maxOutputTokens = this.resolveMaxOutputTokens(resolved.maxOutputSize);
+    const model = this.withProviderEndpoint(this.providerCatalog.get(resolved.modelAlias));
+    const maxOutputTokens = this.resolveMaxOutputTokens(maxOutputSize ?? resolved.maxOutputSize);
     const spec = {
       ...model.spec,
       maxContextSize: resolved.model.maxContextSize,
@@ -435,6 +443,37 @@ export class AgentLoopService extends Disposable implements IAgentLoopService {
         },
       },
     });
+  }
+
+  private withProviderEndpoint(model: Model): Model {
+    const provider = this.providerCatalog.getProviderConfig(model.providerName);
+    if (provider === undefined) return model;
+    const endpoint = {
+      ...model.endpoint,
+      proxyUrl: provider.proxyUrl ?? model.endpoint.proxyUrl,
+    };
+    const record = this.providerCatalog.getModelRecord(model.id);
+    if (record === undefined) return { ...model, endpoint };
+    const auth = resolveModelAuthMaterial({
+      modelId: model.id,
+      model: record,
+      provider,
+      providerName: model.providerName,
+    });
+    if (auth.apiKey === undefined || Object.keys(provider.apiKeys ?? {}).length === 0) {
+      return { ...model, endpoint };
+    }
+    return {
+      ...model,
+      endpoint: {
+        ...endpoint,
+        credentials: createKeyedCredentialProvider({
+          providers: this.providerCatalog,
+          providerName: model.providerName,
+          fallbackApiKey: auth.apiKey,
+        }),
+      },
+    };
   }
 
   private wantsRequestMetadata(request: LlmRequest): boolean {
@@ -592,10 +631,6 @@ export class AgentLoopService extends Disposable implements IAgentLoopService {
       } else if (restoredTools !== undefined) {
         tools = [...restoredTools];
       } else {
-        // Non-negotiable product decision: a new loop freezes its top-level tool baseline once,
-        // after waiting at most startup_wait_ms for initial MCP discovery. Tools of servers that
-        // are still connecting at the deadline stay out of the baseline (without cancelling the
-        // connection); they are only announced later and are never appended to top-level tools.
         tools = this.toolSelect.initialTools();
       }
       const taskHistory = this.instantiation.invokeFunction((accessor) => accessor.get(IAgentTaskHistoryService));
@@ -665,6 +700,12 @@ export class AgentLoopService extends Disposable implements IAgentLoopService {
     });
     this.loop = loop;
     loop.policy.addRecovery(credentialRecovery);
+    loop.policy.addRecovery(keyRotationRecovery);
+    loop.policy.addRecovery(createFallbackModelRecovery({
+      config: this.config,
+      flags: this.flags,
+      resolveSwap: (current, alias, thinking) => this.rebuildModelRequest(current, alias, thinking),
+    }));
     loop.policy.addRecovery(createStructureRecovery(this.projector));
     loop.policy.addResolver(createToolSelectResolver(this.toolSelect));
     registerAgentMediaTools(loop.policy);
@@ -735,6 +776,65 @@ export class AgentLoopService extends Disposable implements IAgentLoopService {
     for (const completion of completions) loop.recordNotification(completion);
     this.drainPendingToLoop();
     this.maybeSettle();
+  }
+
+  resolveModelContextFor(modelAlias: string): ProfileModelContext {
+    return this.profileAdapter.resolveModelContextFor(modelAlias);
+  }
+
+  private requestConfigSnapshotFor(modelAlias: string): RequestConfigSnapshot {
+    return {
+      resolved: this.resolveModelContextFor(modelAlias),
+      params: this.resolveRequestParams(),
+      systemPrompt: this.getSystemPrompt(),
+      maxCompletionTokensCap: this.config.get<ModelOverrides>('modelOverrides')?.maxCompletionTokens,
+    };
+  }
+
+  requesterForModel(modelAlias?: string, maxOutputSize?: number): FullLoopLlmRequester {
+    const loop = this.loop;
+    if (loop === undefined) throw new BugIndicatingError('Agent loop is not started');
+    const config = modelAlias === undefined
+      ? this.requestConfigSnapshot()
+      : this.requestConfigSnapshotFor(modelAlias);
+    return createRawLoopRequester(
+      () => this.bindRequester(config, maxOutputSize),
+      () => this.rawHistory(),
+      () => loop.state.profile,
+      () => loop.policy.asPolicy(),
+      () => this.observer,
+    );
+  }
+
+  private rebuildModelRequest(
+    current: LlmRequest,
+    alias: string,
+    thinking: ThinkingEffort | undefined,
+  ): Pick<LlmRequest, 'model' | 'protocol' | 'endpoint'> {
+    const resolved = this.resolveModelContextFor(alias);
+    const model = this.providerCatalog.get(alias);
+    const params: InitializedLlmRequestPart = {
+      ...this.resolveRequestParams(),
+      model: {
+        ...current.model,
+        spec: {
+          ...model.spec,
+          maxContextSize: resolved.model.maxContextSize,
+          maxInputSize: resolved.model.maxInputSize,
+        },
+        ...(thinking === undefined ? {} : { thinking: { effort: thinking } }),
+      },
+    };
+    const rebuilt = this.providerCatalog.createRequester(
+      this.withProviderEndpoint(model),
+      params,
+      this.requesterExecution,
+    ).request({
+      content: current.content,
+      profile: current.profile,
+      policy: current.policy,
+    });
+    return { model: rebuilt.model, protocol: rebuilt.protocol, endpoint: rebuilt.endpoint };
   }
 
   private get infiniteRetryEnabled(): boolean {
@@ -1163,6 +1263,10 @@ export class AgentLoopService extends Disposable implements IAgentLoopService {
       return true;
     }
     return this.cancelActiveTurn(target?.turnId, cancellation);
+  }
+
+  cancelFromUser(turnId?: number): void {
+    this.cancel(turnId === undefined ? undefined : { turnId });
   }
 
   detachTool(task: LoopDetachedTask, text?: string): void {

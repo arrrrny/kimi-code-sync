@@ -124,6 +124,7 @@
         "kimi-code-app"
         "@moonshot-ai/kimi-code"
         "kimi-code"
+        "@moonshot-ai/kimi-inspect"
         "@moonshot-ai/vis"
         "@moonshot-ai/vis-server"
         "@moonshot-ai/vis-web"
@@ -181,7 +182,7 @@
               inherit (finalAttrs) pname version src pnpmWorkspaces;
               inherit pnpm;
               fetcherVersion = 5;
-              hash = "sha256-il3ytNAPoCFqHrw/2wToEKVR53ghdPXT07fIhY9LAZk=";
+              hash = "sha256-JbjwUlsEsyiSbzAzPry03enAZdE9rgNMavsOASNaYK4=";
             };
 
             nativeBuildInputs = [

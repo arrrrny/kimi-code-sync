@@ -172,9 +172,9 @@ describe('QueuePaneComponent', () => {
       stripAnsi(pane.render(120).at(-1) ?? '').trim();
 
     docked.setOptions(options(3));
-    expect(hint(docked)).toBe('↑ to edit · ctrl-s to steer immediately');
+    expect(hint(docked)).toBe('↑ to edit · alt-q manage · ctrl-s to steer immediately');
     docked.setOptions(options(5));
-    expect(hint(docked)).toBe('5 queued · ↑ to edit · ctrl-s to steer immediately');
-    expect(hint(inlinePane(options(5)))).toBe('↑ to edit · ctrl-s to steer immediately');
+    expect(hint(docked)).toBe('5 queued · ↑ to edit · alt-q manage · ctrl-s to steer immediately');
+    expect(hint(inlinePane(options(5)))).toBe('↑ to edit · alt-q manage · ctrl-s to steer immediately');
   });
 });

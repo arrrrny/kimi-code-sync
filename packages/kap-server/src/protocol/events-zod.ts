@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { isoDateTimeSchema } from '@moonshot-ai/agent-core-v2/_base/utils/isoDateTime';
+import type { CompactionResult } from '@moonshot-ai/agent-core-v2/agent/fullCompaction/types';
 
 import { capabilityInstallProgressSchema } from './rest-capability';
 import { configResponseSchema } from './rest-config';
@@ -107,6 +108,52 @@ export type HostSnapshot = z.infer<typeof hostSnapshotSchema>;
 export const hostChangedEventSchema = z.object({
   type: z.literal('event.host.changed'),
   hosts: z.array(hostSnapshotSchema),
+});
+
+export const diUnitChangedEventSchema = z.object({
+  type: z.literal('event.di.unit_changed'),
+  scope: z.string().min(1),
+  token: z.string().min(1),
+  state: z.enum(['Pending', 'Activating', 'Active', 'Unloading', 'Failed']),
+  error: z.string().optional(),
+});
+
+export const compactionResultSchema = z.object({
+  summary: z.string(),
+  contextSummary: z.string().optional(),
+  compactedCount: z.number(),
+  tokensBefore: z.number(),
+  tokensAfter: z.number(),
+  keptUserMessageCount: z.number().optional(),
+  keptHeadUserMessageCount: z.number().optional(),
+  droppedCount: z.number().optional(),
+  handoffPath: z.string().optional(),
+}) satisfies z.ZodType<CompactionResult>;
+
+export const compactionStartedEventSchema = z.object({
+  type: z.literal('compaction.started'),
+  agentId: z.string(),
+  trigger: z.string(),
+  instruction: z.string().optional(),
+  model: z.string().optional(),
+  model_display: z.string().optional(),
+});
+
+export const compactionBlockedEventSchema = z.object({
+  type: z.literal('compaction.blocked'),
+  agentId: z.string(),
+  turnId: z.number().optional(),
+});
+
+export const compactionCancelledEventSchema = z.object({
+  type: z.literal('compaction.cancelled'),
+  agentId: z.string(),
+});
+
+export const compactionCompletedEventSchema = z.object({
+  type: z.literal('compaction.completed'),
+  agentId: z.string(),
+  result: compactionResultSchema,
 });
 
 export const hostGlobalEventSchema = hostChangedEventSchema.extend(eventCreatedAt);

@@ -1,213 +1,413 @@
-# 仓库级 Agent 指南
+<!-- fleet-agents-pointer:begin -->
+# ⚠️ FLEET RULES — LOAD ~/.agents/AGENTS.md FIRST
 
-用和用户相同的语言回复。
+Before applying any rule in this file, load and follow `~/.agents/AGENTS.md`
+— the fleet-level rules file every machine carries (synced from
+`arrrrny/skills`, the single source of truth, by `sync-skills` inside
+`kimi-code-update`, 3x/day). It owns the fleet-wide HARD RULES: the
+skills-sync rule (every merge-PR task must check the repo's exposed skills —
+create or update them on exported-behavior changes — and auto-PR them to
+`arrrrny/skills`), the English-only response rule, the GitHub account
+spelling (`arrrrny` = a + exactly 4 r's + ny), and the machine bootstrap
+contract (`arrrrny/scripts` + `arrrrny/skills`). Future fleet-wide rule
+changes are made ONCE in that file — never by editing every repo. Where this
+file and the fleet file disagree, the fleet file wins unless this file is
+MORE restrictive for this repo.
+<!-- fleet-agents-pointer:end -->
+# ⚠️ LANGUAGE RULE — MANDATORY
 
-这是一个为 agent 协作开发构建的 TypeScript monorepo。根目录的 `AGENTS.md` 只放热路径规则：项目地图、硬约束和工作流要求，也就是每个任务都需要知道的东西。
+<!-- misfire-rule:begin -->
+## ZURAFFA MISFIRE RULE (HARD, NON-NEGOTIABLE — HARDCODED TOP RULE)
 
-## 工作原则
+**On ANY misfire (test failure, compilation error, runtime crash, unexpected output) related to zuraffa:**
 
-- 用第一性原理思考：从真实需求、代码事实和验证结果出发；目标不清楚时，先和用户讨论。
-- 从代码确认当前行为。除非用户明确要求，或各级 `AGENTS.md` 指向了特定设计文档，否则不要为理解实现去读一般的 Markdown。文档与代码冲突时，先核对需求和已发布的契约。实现违反契约就修实现，文档确已过时就随改动更正。
-- 改代码之前，先读相关代码和最新的约束，并遵守目录树里离改动最近的 `AGENTS.md`。
-- 改动保持聚焦，不要顺手夹带无关的重构。
-- 提交时不要加任何 co-author 署名；也不要在提交说明、PR 描述或任何说明文字里透露 agent 的身份。
+1. **STOP IMMEDIATELY** on the first misfire.
+2. **Report the issue** to zuraffa GitHub (`arrrrny/zuraffa`) with: the command that failed, expected vs actual output, and root cause.
+3. **Continue with a workaround** to make the task pass (e.g., skip the failing test, use an alternative approach, or mock the failing component).
+4. **Add a comment** in the code explaining the workaround applied and linking to the zuraffa GitHub issue.
 
-## 项目地图
+**On ANY misfire related to the repo itself (not zuraffa):**
 
-- `apps/kimi-code`：CLI / TUI 应用，TUI 主路径通过 `@moonshot-ai/kimi-code-sdk` 使用核心能力。
-- `apps/desktop`：Electron 桌面应用，与浏览器 Web UI 共用 `apps/desktop/src/renderer`；Web 产物在 CLI 构建时同步，见 `apps/kimi-code/AGENTS.md`。
-- `apps/vis`、`apps/vis/server`、`apps/vis/web`：会话和回放的可视化调试工具。
-- `apps/vscode`：VS Code 扩展。
-- `docs`：用户文档站（VitePress），中文和英文页面分别在 `docs/zh/` 和 `docs/en/`。
-- `packages/agent-core-v2`：DI × Scope 的 agent 引擎（kap-server 背后的 v2 移植版），包括 `src/remote` 下的远程执行栈。
-- `packages/core`：不依赖 DI 的 Loop、LLM、工具和 Store 运行时；LLM 模块的设计指南是 `packages/agent-core-v2/docs/en/llm.md`。
-- `packages/node-sdk`：公开的 TypeScript SDK 和 harness。
-- `packages/oauth`：Kimi OAuth 和托管认证工具。
-- `packages/telemetry`：共享的客户端遥测基础设施。
-- `packages/session-import`：把外部会话转换成一条用户消息的独立 Node.js 模块，不依赖引擎或 UI；调用方提供目标会话的附件目录和上下文预算。
-- `packages/kap-server`：Kimi Code 服务端，基于 `@moonshot-ai/agent-core-v2`，通过 REST（`/api/v1`）和 WebSocket（`/api/v1/ws`）对外提供 Kimi Agent Protocol（KAP），详见 `packages/kap-server/AGENTS.md` 和 `packages/kap-server/docs/kap.md`。内部反射 RPC 接口 `/api/v1/debug/*` 只在打开 `--debug-endpoints` 且服务绑定回环地址时启用，并要求 bearer 认证。
-- `packages/remote-control`：Kimi Remote Control 隧道客户端，把本机注册到中继并转发本地服务的流量，带全机范围的单实例锁；由 kap-server（`/api/v1/remote-control` 开关）和 CLI（`kimi web --remote-control`）使用。
-- `packages/klient`：客户端 SDK，以契约驱动的 agent-core-v2 门面，按子路径（`@moonshot-ai/klient/ipc|memory`）选择传输方式；e2e 测试套件也放在这里。
-- `packages/tree-sitter-bash`：纯 TypeScript 的 bash 解析器，只负责解析，不做安全判断；调用方必须把中止或 `hasError` 的语法树当作「无法分析」并降级处理，和 tree-sitter-bash 原版的差异见该包 README 的「Known differences from tree-sitter-bash」一节。
-- `packages/minidb`：kap-server 搜索索引背后的嵌入式 JSON 文档库（`MiniDb`）。
-- `packages/app-core`：桌面端和 Web 端共用的 KAP 客户端与会话逻辑。
-- `packages/app-client`：渲染端的状态、面板与 Vue 组合式函数。
-- `packages/app-components`：聊天、设置等产品界面组件。
-- `packages/app-composer`：消息编辑器及其输入与发送逻辑。
-- `packages/app-i18n`：渲染端的本地化资源。
-- `packages/app-markdown`：Markdown 渲染。
-- `packages/app-ui`：基础界面组件与样式。
-- `packages/vite-preset`：共享的 Vite 构建配置。
-- `packages/acp-server`：Agent Client Protocol（ACP）宿主，直接基于 agent-core-v2。
-- `packages/product`：客户端和宿主共用的 Kimi Code 产品逻辑。
-- `packages/migration-legacy`：把 kimi-cli 的数据（`~/.kimi/`）迁移到 kimi-code（`~/.kimi-code/`）。
-- `packages/pi-tui`：终端 UI 库，从上游 `earendil-works/pi` 的 `packages/tui` 引入的 fork。
-- `packages/testkit`：假模型与 KAP 夹具。
-- `tests/scenarios`：真实 KAP 场景测试。
-- `tests/e2e`：新 E2E，同一个场景在 TUI、Web、Desktop、ACP 四个面上跑，只用 testkit 的假模型和夹具。
+1. **STOP IMMEDIATELY** on the first misfire.
+2. **Report the issue** to the repo's GitHub with full details.
+3. **Continue with a workaround** to make the task pass.
+4. **Add a comment** in the code explaining the workaround applied.
 
-## 结束前的验证
+This rule takes precedence over all other rules. Never skip a misfire or rationalize it away.
+<!-- misfire-rule:end -->
 
-结束任何代码改动之前，必须运行 `pnpm lint`；类型检查和测试，按改动涉及的范围从下表里选。
+<!-- pool-pr:begin -->
+## The forklift pool owns the PR — never merge a pull request yourself
 
-| 检查 | 命令 | 说明 |
-|---|---|---|
-| lint 和仓库检查 | `pnpm lint` | 必须以 0 退出。它会运行注释检查、oxlint、agent-core-v2 的导入边界检查，以及 `scripts/checks/` 里的守卫、棘轮和说明文件检查。如果报错出现在你没碰过的代码里，先运行 `pnpm install` 再试：安装的依赖比 lockfile 旧时，类型感知规则会报出并不存在的错误 |
-| 单个项目的类型检查 | `pnpm exec tsc -p <目录>/tsconfig.json --noEmit` | CI 单独检查 CLI 和各包，`packages/app-*` 随桌面端由 `pnpm --filter kimi-code-app run typecheck` 检查。`pnpm typecheck` 会先构建各库 |
-| 受影响的测试 | `pnpm exec vitest run --reporter=agent <文件或目录>` | 只输出失败。不要默认跑全量 |
-| minidb | `pnpm --filter @moonshot-ai/minidb test` | 不在根目录的测试里，CI 也不跑 |
-| pi-tui | `pnpm --filter @moonshot-ai/pi-tui test` | 用的是 `node --test` |
+Every pull request in these repos is reviewed by the **forklift pool**
+(`arrrrny/forklift` — the local PR-review pipeline). It mints three tasks, in
+this order, and that chain is the only sanctioned way from "PR opened" to "PR
+merged":
 
-- 修 bug 要带修复前会失败的回归测试。选择能稳定复现故障、观察到对应契约的最小边界。模块公开接口能复现时就测该接口。跨层故障从真实入口验证：KAP 的行为用 `tests/scenarios`，用户在 TUI、Web、Desktop 或 ACP 编辑器里看得到的行为用 `tests/e2e`。覆盖同一 bug 的其他触发方式。
-- 常规 PR 测试运行在 Linux。涉及桌面端等特定路径时还跑 Windows 专项测试。改动涉及路径、子进程、shell 或终端输入时，在 PR 里写明在哪些平台核对过、怎么核对的。
-- 只汇报你实际运行过的命令和结果。某项检查没法运行，就写「未验证」和原因；不要把已有的失败写成通过。
+1. `PR review <repo>#<n>` — the automated review; it posts its actionable
+   findings on the PR.
+2. `Apply review fixes <repo>#<n>` — one fixes round, pushed onto the PR's
+   branch.
+3. `Merge PR <repo>#<n>` — the merge itself; the task refuses while reviewer
+   findings are still unaddressed.
 
-## 环境要求
+**Never merge or close a PR by hand, and never merge one because it "looks
+finished".** A hand merge lands the code while findings are still open: the
+pool's fixes task is then killed by its closed-PR guard — the dispatcher log
+says `…#<n> is closed — cancelled, no agent started` — and every finding the
+review posted is dropped with nobody to own it. That is not a review, it is a
+race the pipeline cannot win.
 
-- **Node.js**：`>=24.15.0`（来自根 `package.json` 的 `engines`；`.nvmrc` 是 `24.15.0`，nvm / fnm / mise 用它选择推荐的最低版本）。
-- **pnpm**：`10.33.0`（来自根 `package.json` 的 `packageManager`）。
-- Node 版本不满足时，`pnpm install` 会失败，因为 `.npmrc` 设置了 `engine-strict=true`。
+**Wait for the pool, and read the pool for the state.** The three task rows are
+the truth; the PR page is not:
 
-## Monorepo 工作区维护
+```bash
+# the pool's board — loopback, IPv4-only (never `localhost`)
+curl -s http://127.0.0.1:8888/tasks \
+  | jq -r '.[] | select(.title | test("PR review|Apply review fixes|Merge PR")) \
+          | [.title, .status, .id] | @tsv'
+```
 
-- `pnpm-workspace.yaml` 是工作区成员的唯一依据，但 `flake.nix` 里也有**硬编码**的 `workspacePaths` 和 `workspaceNames` 列表。
-- **每次新增或删除工作区包，都必须同时更新 `pnpm-workspace.yaml` 和 `flake.nix`。每个包都要更新，包括没有被任何包依赖的叶子包、测试包和 e2e 包。**
-  - `pnpm-workspace.yaml` 用通配符（`packages/*`、`apps/*`），大多数包会自动加入；`flake.nix` 完全是手写的，遗漏都出在这里。
-  - `flake.nix` 的 `workspacePaths` 漏了路径，Nix 构建的 `src` 文件集会静默丢掉这些文件。
-  - `flake.nix` 的 `workspaceNames` 漏了名字，`pnpmConfigHook` 会失败，因为这个工作区的依赖不会被拉取。
-- `scripts/check-nix-workspace.mjs` 只校验 `@moonshot-ai/kimi-code` 的传递依赖闭包。即使检查通过，也要手动核对闭包外的包。
+One row per stage. `status` is one of `queued`, `running`, `done`, `failed`,
+`needsInput`, `cancelled`, `paused`. The PR is done when the
+`Merge PR <repo>#<n>` row reads `done`. A fixes row that reads `failed` or
+`cancelled` means the PR was **not** reviewed-and-fixed: read the row's
+`errorMessage`, fix the cause, and let the pipeline requeue it (relabelling a
+failed task requeues it in the same call — `POST /tasks/<id>/label`).
 
-## 通用编码规则
+**An agent can simply wait for the whole process** — poll the board above until
+the `Merge PR` row is terminal. Everything else is the pool's job: it drives
+the review, the fixes round and the merge.
+<!-- pool-pr:end -->
 
-- JS/TS 代码里不写注释。`pnpm lint`（`scripts/check-comments.mjs`）会拒绝所有注释，只放行工具指令（`@ts-*`、`oxlint-`/`eslint-` 禁用指令、`prettier-ignore` 等）、shebang、`/// <reference>`，以及 JS 文件里只有一个标签的 JSDoc `@type` 类型断言。用命名、类型和结构表达代码在做什么；要表达一条约束，就把它变成类型、测试或 lint 规则，而不是写一段注释。
-- `.commentignore`（gitignore 语法）里列出的路径不受这项检查约束。除非用户要求，不要动这些文件里现有的注释；只有用户要求时，才往 `.commentignore` 里加条目。
-- 可选的对象属性，类型里不需要再额外允许 `undefined`。
-  - 是：`interface Options { user?: User }`
-  - 否：`interface Options { user?: User | undefined }`
-- 只有一个参数的内部方法，不要为了风格统一改成 options 对象。
-- 只按抽象层级拆分函数：每个函数读起来是同一个层级的叙述（Step-down Rule）；不增加新抽象层级的包装函数，尤其是只有一个调用点的，应该内联而不是抽出来。
-- 除了包自己的 `index.ts`，其他 `index.ts` 优先写成 `export * from './module';`。
-- 除非用户明确要求，不要为了对外兼容牺牲代码质量。但行为不能悄悄改变：每项行为变化都写进 PR 的行为变化表；破坏性改动走 changeset 并升 `major`；写 `major` 之前，先停下来等用户确认（见「工作流要求」里的 changeset 规则）。
+<!-- tmp-clone:begin -->
+## Work in a `/tmp` clone — never in `~/Developer`
 
-## 测试
+Every piece of work on a PR or an issue happens in its own clone under `/tmp`,
+and that clone dies with the task:
 
-- 先读[测试指南](tests/AGENTS.md)，模块内无合适测试文件时才新建。
-- 测试失败时，先从 issue、需求规格或已发布的契约确认预期，再定位故障。不要照抄当前输出作为期望值。
-  - 需求有意改变行为时，同步更新实现、断言和相关文档，并填入 PR 的行为变化表。
-  - 实现违反契约就修实现。夹具、工具或运行环境出错，就修正对应环节再验证。
-  - 如果怀疑旧断言本身有误，在 PR 里列出疑点及契约依据。不要为了本次改动通过而改断言。
-- 不许靠削弱断言、删测、用 sleep 或超时同步、重试到通过或不看 diff 就重写快照来让测试通过。在 lint 覆盖的 Vitest 文件中，`.only` 会报错，禁用测试的违规数（含 `.skip`）按文件冻结，固定等待按文件冻结在 `scripts/checks/fixed-waits.mjs`。pi-tui 和 `.mjs` 的 `node:test` 用例靠评审检查。
-- flaky 测试也一样不许跳过、加 sleep 或重试：先找根因并修掉。找不到根因时可以删掉它，这是唯一允许删除失败测试的情况。
-- 改写、移植或搬家删掉了测试时，把它的断言搬到新的代码路径上，除非是有意去掉这个行为。
-- 删测时在 PR 里写明用例、原有覆盖、删除原因，以及哪个用例继续验证该契约。如果这是最后一处覆盖，明确列出会失去的保障，由维护者决定是否接受。
-- 修改或删除守护契约文件（见「代码评审规则」）的测试或快照之前，先停下来问用户。
-- 同一个失败修了三次还没过，就停下来，汇报试过什么、怀疑什么。推送之后，CI 失败最多修两轮；还不过，就停下来交给人。
+```bash
+git clone https://github.com/<owner>/<repo>.git /tmp/<repo>-<pr-or-issue>
+```
 
-## 改行为之前
+Never clone into `~/Developer`, and never clone into the forklift checkout —
+a bare repo slug as the clone target is how a stray checkout ends up inside the
+repo root, and a clone left behind in `~/Developer` is indistinguishable from
+the primary checkout. The pool's lanes already mint their clones this way
+(`/tmp/fix-pr-<n>`, `/tmp/review-pr-<n>`, `/tmp/issue-<n>`, …) and remove them
+when the task settles.
+<!-- tmp-clone:end -->
 
-- 移植、改写或搬家，不要和行为改动放在同一个 PR 里。
-- 新增状态、名单或映射表之前，先找这件事现有的归属，复用它，不要另抄一份。
-- 新增事件、消息类型或枚举成员时，更新所有按它分支的地方；`default` 分支不能把它静默吞掉。
-- 对照这个仓库里过去的 bug 漏掉过的情形，检查你的改动：
-  - 旧版本写入的会话被恢复或回放；
-  - 会话进行到一半时服务端或 CLI 重启；
-  - 回合进行中到达的事件：后台任务的结果、排队或插话的消息、审批；
-  - 工作还在进行时发生取消、撤销或压缩；
-  - 两个客户端连着同一个会话；
-  - Windows 路径、CRLF 换行、UTF-8 BOM；
-  - 无效或不完整的配置：必须报错说明，不能被忽略。
-- 开 PR 之前，先用下面的「代码评审规则」检查自己的 diff，并补上它们要求的内容。
+**ALL responses MUST be in English ONLY. Never respond in Turkish, Chinese, or any other language, regardless of the user's locale or the presence of non-English content in the codebase. This is a hard rule with no exceptions.**
 
-## 实验特性
+---
 
-- 还没公开的功能，放在实验开关后面。开关由环境变量驱动，默认关闭：`KIMI_CODE_EXPERIMENTAL_<NAME>` 控制单个开关，`KIMI_CODE_EXPERIMENTAL_FLAG` 打开全部。优先级是：单个开关的环境变量 > 配置里的 `[experimental]` > 总开关环境变量 > 开关的 `default`。正式发布时，把对应条目的 `default` 改成 `true`。
-  - `packages/agent-core-v2` 和 kap-server 的模块：没有集中的开关目录。在所属领域里用 `registerFlagDefinition` 在导入时声明开关，再用 `IFlagService.enabled(id)` 检查。
 
-## 技能
+# Repository-level Agent Guide
 
-技能在 `.agents/skills/` 下。技能的操作细则写在技能里，不要抄进 `AGENTS.md`；「工作流要求」里关于 changeset 的几条是硬约束，有意保留在这里。
+Reply in the same language as the user.
 
-| 技能 | 什么时候用 |
-|---|---|
-| `write-tui` | 编写或修改 `apps/kimi-code/src/tui` 下的终端界面 |
-| `write-pr` | 创建或更新 PR 描述 |
-| `gen-changesets` | 生成 changeset：判断要不要写、写哪个包、升哪一级、怎么措辞 |
-| `gen-docs` | 代码改动影响了产品行为或用户体验，需要更新用户文档时 |
-| `translate-docs` | 在 `docs/zh/` 和 `docs/en/` 之间翻译、同步双语文档 |
-| `review-pr` | 评审 PR；只在用户明确要求时使用 |
-| `review-duplication` | 实现前查找可复用的能力，提 PR 前自查或评审时核对平行实现 |
-| `pre-changelog` | 合并发版 PR 前预览 CLI 和桌面端的中文更新日志 |
-| `sync-changelog` | 同步 CLI 发布日志到文档站，或为桌面端更新对话框准备双语日志 |
+This is a TypeScript monorepo built for agent-assisted development. Keep the root `AGENTS.md` limited to hot-path rules: the project map, hard constraints, and workflow requirements — things every task needs to know.
 
-## 说明文件怎么维护
+## 🔍 Code Search — MANDATORY FIRST STEP
 
-- 代码改动让某份 `AGENTS.md` 写的事实（路径、命令、地图条目）不再成立时，在同一个 PR 里更新它。
-- 新增或修改团队流程、经验性规则时，单独提 PR。新接口的契约、随实现生效的架构约束、有明确风险依据的预防措施，在引入它们的同一 PR 中评审。
-- 几乎每个任务都需要的规则写进根 `AGENTS.md`，局部规则写进最近的子目录 `AGENTS.md`。
-- 项目地图里，每个工作区包写一行，而且只写一行；包的深入说明放在包自己的 `AGENTS.md` 里。
-- 如果 lint 规则、测试或脚本能拦住这类错误，就加检查而不是写规则；有检查执行的规则，旁边写明是哪个检查。
-- 说明文件的改动要聚焦，并有代码事实支撑。
-- 把经验写成团队规则前，确认同类失误至少出现过两次、规则会改变 agent 的做法，并且半年后仍然适用。
-- `pnpm lint` 里的 `scripts/checks/instructions.mjs` 会检查：所有 `AGENTS.md` 里的行内链接和反引号里的仓库路径是否存在。指向本仓库之外的路径或构建产物时，把它加进 `scripts/checks/instructions.json` 的 `unresolved`，并写明理由。
+**STOP. Before using `grep`, `find`, `rg`, `ripgrep`, or ANY shell-based search, you MUST use semantic search first.**
 
-## 发布流程
+```bash
+# THIS is how you search code — ALWAYS FIRST:
+mcp__claude_context__search_code(query="what you're looking for", path="/absolute/path/to/repo")
+```
 
-- `main` 上累积 changeset；`release/*` 分支维护 `ci: release packages` PR。合并版本 PR 即授权正式发布，发版 workflow 在同一 release commit 上运行单元测试，测试通过后发布对应版本。普通推送不会发布正式版。
-- CLI 发布到 npm 和 GitHub，桌面安装包发布到 GitHub Release，VS Code 扩展发布到扩展市场。CDN 上传和路由需另行审批。迁移和回同步见 `.changeset/README.md`。
+**Why?** Semantic search understands code relationships, finds implementations by meaning (not just text), and catches things grep misses entirely.
 
-## 工作流要求
+**Rules:**
+1. **ALWAYS** start with `mcp__claude_context__search_code` for code discovery
+2. **ONLY** fall back to `grep`/`find`/`rg` when:
+   - You need an EXACT literal string match (e.g., a specific error message)
+   - The semantic search index is unavailable/broken
+   - You're searching for file names, not code content
+3. **NEVER** use grep as your first code search tool — it's slower and less accurate
 
-- 读代码优先用 `rg` / `rg --files`。
-- 设计改动时，先遵循现有的边界和局部写法。
-- lint 报错要在代码里修。不要为了跑通而加禁用指令、修改 `.oxlintrc.json` 或 `.oxlintrc.ratchet.json`、重写 lint 快照，或者调高 `scripts/checks/baselines/` 里的棘轮基线；如果某条规则不适合你的情况，停下来报告。确实需要的禁用指令，要写明规则名，并在 ` -- ` 后面写原因。改 `.oxlintrc.json` 会被 `scripts/checks/guards.mjs` 发现，新增违规会被 `scripts/checks/ratchet.mjs` 拦住；改 `.oxlintrc.ratchet.json` 或基线文件，只能靠评审发现。
-- `.oxlintrc.ratchet.json` 里的规则在现有代码中已有违规，按文件冻结在 `scripts/checks/baselines/oxlint-ratchet.json`。新代码不能增加违规；修掉现有违规后，运行 `node scripts/checks/ratchet.mjs --update` 降低基线。
-- 不要运行 `pnpm lint:fix`：oxlint 的有些自动修复会改变行为（例如 `unicorn/no-unnecessary-await` 会删掉一个 `await`，后面代码的执行时机就变了）。
-- 在公开文本和测试数据里，用中性的占位符（例如 `example.com`、`example.test` 和 `YOUR_API_KEY`）替换真实的内部标识。开 PR 之前，请一个只读 agent 审查 diff，看有没有和具体环境相关的内部标识。
-- 创建 PR 时，用 `write-pr` 技能（`.agents/skills/write-pr/SKILL.md`）写 PR 描述。PR 标题必须用 Conventional Commit 格式，例如 `chore: remove legacy format commands`（由 `.github/workflows/pr-title-checker.yml` 检查）。
-- AI agent 创建或更新 PR 时，要填写 `.github/pull_request_template.md`：关联相关 issue 或说明问题，再描述改了什么。不要留下占位文字，也不要只给出泛泛的 diff 摘要。
-- 不要提交含糊的、AI 生成的 PR 文字。提交 PR 的人类作者必须足够理解这个改动，能讲清代码、边界情况，以及为什么这个做法适合这个仓库。
-- 完成任务后、提交 PR 之前，必须运行 `gen-changesets` 技能（见 `.agents/skills/gen-changesets/SKILL.md`），按它的规则在 `.changeset/` 下生成 changeset。
-- CLI、桌面端或 VS Code 扩展有用户可感知的变化时，按产品各写一句简短的英文 changeset。库源码改动按技能规则写技术条目，纯文档、测试和忽略包的处理见该技能。
-- 生成 changeset 时，**绝不**自行决定 `major` 版本升级：先停下来说明理由，得到用户明确确认后再做；默认用 `minor`，其次用 `patch`。见 `.agents/skills/gen-changesets/SKILL.md`。
-- 导入优先用 `import ... from '#/...'`，它和 `import ... from '@/...'` 的作用相同。
-- 不要提交临时的草稿或探索性文件。永远不要暂存：
-  - agent 的工作笔记，或交接、总结文档（例如 `HANDOVER-*.md`、`HANDOFF-*.md`、`handoff.md`）。
-  - 临时的 UI/UX 原型或设计稿（例如仓库根目录或 `design/` 目录下的 `*-designs.html`、`*-mockup.html`、`*-demo(s).html`）。唯一应该被跟踪的 `.html` 文件，是 Vite 的 `index.html` 入口。
+**Indexing:** If search fails with "not indexed", run `mcp__claude_context__index_codebase(path="/absolute/path")` first, then retry.
 
-  提交或开 PR 之前，运行 `git status` 和 `git diff --staged --stat`，把符合这些模式的文件从暂存区和这次提交里移除。草稿放在 `.tmp/`（已 gitignore），不要放在仓库根目录或源码树里。
+## 📚 Zread Wiki — Check First
 
-## 代码评审规则
+**Before diving into source code, check if a zread wiki exists for this project:**
 
-这些规则适用于每一次 PR 评审，自动评审和人工评审都一样。规则里提到的用户人群和契约文件，列在 `.agents/skills/review-pr/surfaces.md` 里。
+```bash
+# Check if wiki exists:
+cat .zread/wiki/current 2>/dev/null && echo "Wiki exists" || echo "No wiki"
 
-### 评审范围：PR 的 diff，而不是整个仓库
+# If wiki exists, read the pages directly:
+ls .zread/wiki/versions/$(cat .zread/wiki/current)/
 
-- 只评审 PR 相对于 base 的 diff。PR 没有碰到的代码里的问题（base 上原本就有的），只能作为非阻塞的备注提出，不能作为阻塞问题；唯一的例外是 PR 的行为直接触发或放大了的既有代码。
-- 一类问题一次报全：一个问题在 diff 里出现在多处时，一次列出所有位置，不要分好几轮提。
-- 不提纯风格或个人偏好的问题。每个问题都要标严重程度：P0 阻塞 / P1 应该修 / P2 建议。
-- 复审是增量的：只看上次评审之后改动的部分；不要重复针对没改动代码的问题，也不要重新提出已解决的讨论。把已解决的讨论当作定论之前，先核实当前代码：只有问题确实修好了、或者问题已不成立时，才不再报。
-- 各领域的规则有各自的正式归属：changeset（`.agents/skills/gen-changesets/SKILL.md`）、注释（「通用编码规则」）、PR 文字（`write-pr` 技能）。按这些归属评审，不要按临时的个人口味评审。
+# To regenerate wiki (if stale):
+zread generate --stdio
+```
 
-### 列出改变了的行为，而不只是找 bug
+**Why?** Zread generates comprehensive documentation from code. Reading the wiki is faster than crawling source files manually.
 
-改动之前能正常工作的任何输入，都必须在改动之后表现一致，除非 PR 声明了这项变化。这些输入包括：配置项、环境变量、CLI 参数、模型服务返回的结构、旧版本写入的会话、客户端请求、hook 载荷。对每一个被删除或收窄的分支、条件、默认值或提示词句子，问：以前谁会走到这里，现在他们去了哪里。对每一个新增的条件，问：哪些现有输入会先匹配上它。PR 声称某条路径「没变」，而它的分支条件其实移动了，要指出来。
+**Rules:**
+1. **ALWAYS** check `.zread/wiki/current` before reading source files
+2. If wiki exists, read the markdown pages directly — they're already indexed
+3. If wiki is missing or stale, run `zread generate --stdio` to create it
+4. Wiki pages live in `.zread/wiki/versions/<id>/` — read `wiki.json` for the TOC
 
-### 翻转默认值或删除行为，必须说明损失并提供逃生口
+## Working Principles
 
-所有使用旧默认值的人都会受影响。要求做到三件事：changeset 写明用户失去的行为，而不只是新的默认值；提供配置、环境变量或开关形式的逃生口，或者在 PR 里有维护者的明确签字；有一个测试，为仍然使用旧行为的人群固定住旧行为。
+- Think from first principles. Start from real requirements, code facts, and verification results; if the goal is unclear, discuss it with the user first.
+- Treat code, not documentation, as the source of truth. Unless the user explicitly says otherwise, do not read ordinary Markdown just to understand the implementation.
+- Before making code changes, read the relevant code and the most recent constraints, and follow the nearest `AGENTS.md` in the directory tree.
+- Keep changes focused. Do not slip in unrelated refactors along the way.
+- When committing, do not add any co-author attribution, and do not reveal the identity of the agent in commit messages, PR descriptions, or any explanatory text.
 
-### 提示词文本就是行为
+## Project Map
 
-编辑或删除 `packages/agent-core-v2/src/**/*.md` 下的句子（系统提示词、工具描述、提醒、覆盖层、内置技能），会改变所有收到这段提示词的用户的 agent 行为。「没有测试引用这句话」不能证明没有影响。要求 PR 写明：哪些人群会收到这段文本（每个会话、plan 模式、Tower 这类由开关控制的功能）、这句话原来约束了什么、谁依赖它、现在由什么来约束。
+- `apps/kimi-code`: the CLI / TUI application. It consumes core capabilities through `@moonshot-ai/kimi-code-sdk` and must not depend directly on engine packages. When writing or modifying its terminal UI, use the `write-tui` skill (`.agents/skills/write-tui/SKILL.md`).
+- the browser web UI: **its source no longer lives in this repo.** It is developed in the code-app repo (`apps/web`) and shipped as the committed, prebuilt bundle `apps/kimi-code/dist-web` (gitignored, force-added), synced from code-app with `KIMI_CODE_REPO=<this checkout> pnpm run sync:web` — sync and commit the bundle in the same change whenever the web UI should ship differently. `apps/kimi-code/scripts/check-web-assets.mjs` guards packaging against a missing bundle. To hack on the web UI against this repo's server, run `pnpm dev:server` here and point code-app's `pnpm dev:web` at it via `KIMI_SERVER_URL`.
+- `apps/vis`, `apps/vis/server`, `apps/vis/web`: visual debugging tools for sessions and replays.
+- `packages/agent-core-v2`: the DI × Scope agent engine (the v2 port behind kap-server). Three `LifecycleScope` tiers — `App` / `Session` / `Agent` (`app/scopes.ts`) — plus the L3 unit layer (`Service`/`Fiber` units, collection contribution points, the Feature seam in `src/features/`); `WorkspaceInstance`/`Program` graphs are materialized at runtime through `IWorkspaceInstanceManager`, with the App-scoped `ISessionManager` creating per-workspace session controllers through `Program`.
+- `packages/core`: the DI-free Loop, LLM, and tool runtime. LLM documentation is organized by reader: [consume outcomes and events](packages/core/docs/llm/calling.md), [build requests](packages/core/docs/llm/building.md) plus the [request contract reference](packages/core/docs/llm/building-reference.md), and [understand the architecture](packages/core/docs/llm/maintaining.md) before following the [maintenance guide](packages/core/docs/llm/maintenance-guide.md).
+- `packages/node-sdk`: the public TypeScript SDK and harness.
+- `packages/oauth`: Kimi OAuth and managed auth utilities.
+- `packages/telemetry`: shared client-side telemetry infrastructure.
+- `packages/transcript`: the isomorphic transcript rendering data layer — L1 agent-granular store, L2 idempotent operations, L3 `off/turn/block/delta` subscription granularity, L4 framework-free view registry, plus turn-cursor pagination. Pure TypeScript (browser-safe, no engine imports); the sole owner of the transcript contract types (`src/contract/`) and the op-batch sequencing contract.
+- `packages/session-import`: standalone Node.js conversion of external sessions into a single user message that carries the conversation, full effective-history attachments, and image references. It has no engine or UI dependency; callers provide the destination session attachment directory and context budget.
+- `packages/kap-server`: the Kimi Code server, backed by `@moonshot-ai/agent-core-v2`; exposes sessions over REST + WebSocket (`/api/v1` + `/api/v1/ws`), plus the `/api/v1/debug/*` reflection RPC surface (`--debug-endpoints`, loopback bind + bearer auth).
+- `packages/remote-control`: the Kimi Remote Control tunnel client — registers this machine with the relay and forwards HTTP/WebSocket traffic to the local server, with a machine-wide single-instance lock; consumed by kap-server (the `/api/v1/remote-control` toggle) and by the CLI (`kimi web --remote-control`).
+- `packages/agent-core-v2/src/remote`: the remote execution stack inside the engine — self-contained NDJSON line-framed RPC (codex exec-server dialect) between the local `ExecBridge` (ssh/docker/`command` launchers) and the light `kimi exec-server` executor, plus the provider that registers declared targets as `Environment`s (the fs/process RPC stubs are an OS backend under `src/os/backends/remote`, sibling of `node-local`); exported as `@moonshot-ai/agent-core-v2/remote` and `/remote/server`. The executor stays light — `src/remote/server` may import only node builtins, relative modules, `#/remote/protocol`, `#/os/interface`, `#/_base/execEnv` and the DI-free node-local fs/process backends it adapts (enforced by the package's `lint:imports`); the CLI reaches it only through the SDK's light `@moonshot-ai/kimi-code-sdk/exec-server` subpath, loaded dynamically in `src/cli/exec-server.ts`.
+- `packages/klient`: the client SDK — a contract-driven facade over agent-core-v2 (`global.*` / `session(id).*` / `agent(id).*`, zod-validated); transport via subpath entry (`@moonshot-ai/klient/ipc|memory`, both return the same `Klient`); also hosts the e2e suites. See `packages/klient/AGENTS.md`.
+- `packages/tree-sitter-bash`: a pure-TypeScript bash parser (no runtime deps, no wasm); `parse(source, { timeoutMs, maxNodes })` runs under a deterministic budget and returns a discriminated `ParseResult` — callers must treat aborted/hasError trees as "cannot analyze" and degrade. Parser only, no safety judgments; see the package README's "Known differences" section.
+- `packages/minidb`: the embedded JSON document store (`MiniDb`) behind kap-server's search index — snapshot + WAL persistence with an exclusive write lock, a larger-than-RAM full-text layer, and persistent index generations. See `packages/minidb/AGENTS.md`.
 
-### 契约文件是绊线
+## Environment Requirements
 
-以下文件定义跨组件或对外契约：`packages/agent-core-v2/docs/` 下的清单文件（`config-manifest.toml`、`wire-manifest.d.ts`、`state-manifest.d.ts`）、`packages/kap-server/schema/contract.txt`、`packages/kap-server/docs/kap.md`、`packages/node-sdk/src/index.ts`、`packages/agent-core-v2/src/features/externalHooks/`、`packages/acp-server/` 和 `apps/kimi-code/src/cli/`。使用方包括本仓库的桌面端和 Web 端、通过 KAP 驱动核心会话和对话流程的外部 agent 和机器人、VS Code 扩展、Zed 等 ACP 客户端、SDK 用户、hook 脚本，以及解析无界面输出的程序。这些文件变化时，要求 PR 写明有哪些使用方，以及上一个版本的数据和客户端怎样继续正常工作。
+- **Node.js**: `>=24.15.0` (from the root `package.json` `engines`; `.nvmrc` is `24.15.0`, used by nvm / fnm / mise to pick the minimum recommended version).
+- **pnpm**: `10.33.0` (from the root `package.json` `packageManager`).
+- `pnpm install` will fail when the Node version is not satisfied, because `.npmrc` sets `engine-strict=true`.
 
-### 移植和重构要带上旧路径的功能清单
+## Monorepo Workspace Maintenance
 
-一个改动替换或绕开现有路径时，要求列出旧路径做过的事（支持的环境变量、回退逻辑、接受的输入），并写明每一项在新路径里的位置。悄悄丢掉的一项是回归，不是清理。
+- `pnpm-workspace.yaml` is the source of truth for workspace membership, but `flake.nix` also contains **hardcoded** `workspacePaths` and `workspaceNames` lists.
+- **Whenever you add or remove a workspace package, you MUST update both `pnpm-workspace.yaml` and `flake.nix` — for every package, including leaf / test / e2e packages that nothing depends on.**
+  - `pnpm-workspace.yaml` uses globs (`packages/*`, `apps/*`), so most packages land there automatically; `flake.nix` is fully manual and is where omissions happen.
+  - Missing a path in `flake.nix`'s `workspacePaths` will silently drop files from the Nix build's `src` fileset.
+  - Missing a name in `flake.nix`'s `workspaceNames` will break `pnpmConfigHook` because dependencies for that workspace will not be fetched.
+- The automated "Check flake.nix workspace sync" (`scripts/check-nix-workspace.mjs`) only validates the transitive dependency **closure of `@moonshot-ai/kimi-code`**. A leaf package outside that closure (e.g. an e2e package nobody imports) slips through even when it is missing from `flake.nix`. A green check is therefore NOT proof that `flake.nix` is fully in sync — keep it updated by hand on every add/remove, do not rely on the check to catch omissions.
 
-### 静默失败比崩溃更严重
+## General Coding Rules
 
-让产品悄悄忽略配置、悄悄批准或跳过某个动作、悄悄丢数据的改动，是最严重的问题：用户收不到任何信号，也就无从报告。
+- Unless the user explicitly asks, do not modify, add, or delete comments. This includes line comments, block comments, and JSDoc.
+- For optional object properties, pass `undefined` directly instead of using conditional spread.
+  - YES: `{ user }`
+  - NO: `{ ...(user ? { user } : undefined) }`
+- Optional object properties do not need to additionally allow `undefined` in the type.
+  - YES: `interface Options { user?: User }`
+  - NO: `interface Options { user?: User | undefined }`
+- Internal methods with only a single parameter should not be turned into options objects just for stylistic uniformity.
+- Split functions only along abstraction levels: each function reads as one level of narrative (Step-down Rule), and a wrapper that adds no new abstraction level — especially one with a single call site — is inlined instead of extracted.
+- Except for a package's `index.ts`, other `index.ts` files should prefer `export * from './module';`.
+- Do not add too many new test files. Prefer adding tests to the existing test file of the corresponding component or module.
+- When a test fails because of a user modification, default to fixing the test first; do not change the implementation to satisfy an old test unless the implementation truly has a bug.
+- Do not sacrifice code quality for external compatibility unless the user explicitly asks for it. Breaking changes go through changesets and a `major` bump, gated by the rule below.
+
+## Experimental Features
+
+- Gate a not-yet-public feature behind an experimental flag. Flags are env-driven and default off: `KIMI_CODE_EXPERIMENTAL_<NAME>` toggles one, `KIMI_CODE_EXPERIMENTAL_FLAG` enables all. Precedence is per-flag env > `[experimental]` config > master env > the flag's `default`. Release by flipping the entry's `default` to `true`.
+  - `packages/agent-core-v2` and kap-server modules: there is no central catalog — declare the flag in the owning domain via `registerFlagDefinition` at import time, then check it with `IFlagService.enabled(id)`.
+
+## Where to Update Instructions
+
+- Hard rules that affect almost every task: update the root `AGENTS.md`.
+- Rules that only affect a specific directory: update the nearest sub-directory `AGENTS.md`.
+- Project-map entries stay at 1–2 sentences; deep package docs live in the package's own `AGENTS.md`.
+- Keep instruction updates focused and supported by code facts.
+
+## Release Workflow
+
+- `master` accumulates changesets; `release/*` maintains `ci: release packages` PRs. Merging the matching version PR authorizes publication after its merge-commit CI succeeds. Ordinary pushes do not publish.
+- The CLI publishes to npm and GitHub, desktop installers publish to GitHub Releases, and the VS Code extension publishes to the extension marketplace. CDN upload and routing remain separately approved operations. See `.changeset/README.md` for migration and main synchronization.
+- npm publishing and native artifacts retain the existing Changesets flow.
+
+## Workflow Requirements
+
+- Prefer `rg` / `rg --files` when reading code.
+- When designing changes, follow existing boundaries and local patterns first.
+- In public text and test data, replace real internal identifiers with neutral placeholders such as `example.com`, `example.test`, and `YOUR_API_KEY`. Before opening a PR, ask a read-only agent to audit the diff for context-specific internal identifiers.
+- When creating a PR, use the `write-pr` skill (`.agents/skills/write-pr/SKILL.md`) to write the PR description. The PR title must follow Conventional Commit style, e.g. `chore: remove legacy format commands`.
+- When an AI agent opens or updates a PR, fill in `.github/pull_request_template.md` — link the related issue or explain the problem, then describe what changed. Do not leave placeholder text or submit a generic summary of the diff.
+- Do not submit vague AI-generated PR text. The human author must understand the change well enough to explain the code, edge cases, and why the approach fits this repository.
+- After finishing a task and before submitting a PR, you must run the `gen-changesets` skill (see `.agents/skills/gen-changesets/SKILL.md`) and generate a changeset under `.changeset/` according to its rules.
+- Changesets must strictly follow the rules in `.agents/skills/gen-changesets/SKILL.md`: write one short user-facing sentence that states only what changed, and skip any change users cannot perceive.
+- When generating a changeset, **never** decide on a `major` bump on your own — stop, explain, and get explicit user confirmation first; default to `minor`, fall back to `patch`. See `.agents/skills/gen-changesets/SKILL.md`.
+- Prefer importing via `import ... from '#/...'`, which serves the same purpose as `import ... from '@/...'`.
+- Do not commit throwaway scratch or exploratory files. Never stage:
+  - Agent working notes or handoff/summary documents (e.g. `HANDOVER-*.md`, `HANDOFF-*.md`, `handoff.md`).
+  - Throwaway UI/UX prototypes or design mockups (e.g. `*-designs.html`, `*-mockup.html`, `*-demo(s).html`) at the repo root or under a `design/` folder. The only tracked `.html` files should be Vite `index.html` entrypoints.
+  Before committing or opening a PR, run `git status` and `git diff --staged --stat` and remove anything matching these patterns. Put scratch work under `.tmp/` (gitignored) instead of the repo root or the source tree.
+
+## Code Review Rules
+
+These rules apply to every pull request review, automated or human. The user populations and contract files they refer to are listed in `.agents/skills/review-pr/surfaces.md`.
+
+### Review scope: the PR's diff, not the repo
+
+- Review only the PR's diff against its base. A problem in code the PR does not touch (pre-existing on base) is reported as a non-blocking note, never as a blocking finding — the sole exception is pre-existing code that the PR's behavior directly triggers or amplifies.
+- Report a class of issues in one pass: when a finding generalizes to several locations in the diff, list all of them at once instead of raising them across successive rounds.
+- No pure style or personal-preference findings. Every finding carries a severity: P0 blocking / P1 should-fix / P2 suggestion.
+- Re-reviews are incremental: review only what changed since the previous review; do not restate findings on unchanged code or re-raise resolved threads. Before treating a resolved thread as settled, verify the current code: suppress a finding only when the problem is actually fixed or the finding no longer holds.
+- Domain-specific rules keep their own canonical homes — changesets (`.agents/skills/gen-changesets/SKILL.md`), comments (General Coding Rules), PR text (`write-pr` skill); review against those, not ad-hoc taste.
+
+### Enumerate changed behavior, not just bugs
+
+Any input that worked before the change — a config key, env var, CLI flag, provider response shape, session written by an older version, client request, or hook payload — must behave the same after it unless the PR declares the change. For every deleted or narrowed branch, condition, default, or prompt sentence, ask who reached it before and where they go now; for every new condition, ask which existing inputs now match it first. Flag a PR that calls a path "unchanged" when its branch condition moved.
+
+### A flipped default or removed behavior needs a named loss and an escape hatch
+
+Everyone on the old default is affected. Require the changeset to name the behavior users lose, not only the new default; a config, env, or flag escape hatch or a maintainer's explicit sign-off in the PR; and a test that pins the old behavior for the population that keeps it.
+
+### Prompt text is behavior
+
+Editing or deleting sentences under `packages/agent-core-v2/src/**/*.md` (system prompt, tool descriptions, reminders, overlays, built-in skills) changes agent behavior for every user who receives that prompt. "No test references the sentence" is not evidence of no impact. Require the PR to name the population that receives the text (every session, plan mode, a flag-gated feature such as Tower), what the sentence enforced, who relied on it, and what enforces it now.
+
+### Contract files are tripwires
+
+The manifests under `packages/agent-core-v2/docs/` (`config-manifest.toml`, `wire-manifest.d.ts`, `state-manifest.d.ts`), `packages/kap-server/test/__snapshots__/apiSurface.snapshot.test.ts.snap`, `packages/node-sdk/src/index.ts`, `packages/agent-core-v2/src/features/externalHooks/`, `packages/acp-server/`, and `apps/kimi-code/src/cli/` are consumed outside this repository: desktop and web in code-app, the VS Code extension, ACP clients such as Zed, SDK users, hook scripts, and headless-output parsers. When they change, require the PR to name the consumers and how data and clients from the previous release keep working.
+
+### Ports and refactors carry the old path's feature inventory
+
+When a change replaces or bypasses an existing path, require a list of what the old path did — env vars honored, fallbacks, accepted inputs — and where each item lives in the new path. A silently dropped item is a regression, not a cleanup.
+
+### Silent failure outranks a crash
+
+A change that makes the product silently ignore configuration, silently approve or skip an action, or silently drop data is the most severe finding: users get no signal to report.
+
+## Fork Upstream Sync Policy (MANDATORY)
+
+This repo (`arrrrny/kimi-code-sync`) is a **fork** of `MoonshotAI/kimi-code`. `master` carries fork-owned features that upstream will never accept (squeeze-model + secondary cascade, substitute-model on rate limit, compaction-model display, OpenAI-compatible context preservation, `/refresh-catalog`, model favorites, subscription-disable, free-models-only, etc.). The daily upstream sync (`.github/workflows/sync-upstream.yml`) MUST preserve them.
+
+- **Never auto-resolve conflicts in favor of upstream.** The sync workflow aborts the merge on any conflict, opens a `sync`-labeled GitHub issue listing the conflicted files, and FAILS. A human resolves conflicts on a `sync/fork-sync-resolution` branch and merges manually. (An earlier version used `git checkout --theirs` on every conflict and silently dropped the compaction-model indicator — that must not return.)
+- **Secondary guardrail:** after a clean merge, `sync-upstream.yml` checks a `FORK_OWNED_FILES` marker list. If a clean merge silently dropped a fork marker from an owned file, the sync fails and opens an issue. **When you add or change a fork-owned file, append it (with its survival marker) to that guard list** so future syncs cannot overwrite it unnoticed.
+- **Do not run blind `git merge -X theirs` or `-s ours` against upstream** in any script, CI, or manual step. Conflicts are data the fork must keep — resolve them by hand.
+- The `feat/daily-sync-ci` branch's `sync-and-release.yml` (uses `-X theirs` + a hardcoded owned-file list) is **deprecated and must not be enabled**; `sync-upstream.yml` on `master` is the source of truth.
+
+<!-- local-ci:begin -->
+## Running CI locally — `scripts/local_ci.sh`
+
+GitHub Actions is billing-blocked on our private repos: every workflow run ends in
+~3s with **zero steps executed**, so a red check here means nothing. Run the same
+gate locally instead:
+
+```bash
+./scripts/local_ci.sh              # every job of the pull_request workflow
+./scripts/local_ci.sh --plan       # print every step that would run, run nothing
+./scripts/local_ci.sh --list       # workflows, triggers and jobs in this repo
+./scripts/local_ci.sh --job <id>   # one job only
+./scripts/local_ci.sh --event push # simulate the push-triggered workflow
+./scripts/local_ci.sh --keep-going # do not stop at the first failure
+./scripts/local_ci.sh -v           # echo each command before running it
+```
+
+It reads `.github/workflows/*` at run time and executes that workflow's jobs and
+steps in order, so it cannot drift from CI — it is not a second copy of the gate.
+Edit the workflow and the local run changes with it. Exit 0 means every executed
+step passed.
+
+What it cannot reproduce, and prints on startup instead of guessing:
+
+- **Linux.** CI runs `ubuntu-latest`; this runs on macOS. The step set is the
+  same, the platform is not. `sudo apt-get install` steps are mapped to a local
+  presence probe rather than silently passed.
+- **GitHub context.** A step needing `${{ secrets.* }}`, `${{ inputs.* }}`,
+  `${{ vars.* }}`, `${{ steps.* }}` or `${{ github.event.* }}` is SKIPPED with the
+  reason printed, never run with a guessed value.
+- **`uses:` actions** are not executed. Toolchain setups (`setup-dart`,
+  `setup-node`, `flutter-action`, `rust-toolchain`, …) become a version assertion
+  against the local tool; checkout/cache/artifact are noted as no-ops; anything
+  else is skipped by name. A Windows-runner job is skipped outright.
+- **Cargo cross targets.** A step that builds for a rust cross target (e.g.
+  `cargo build --target wasm32-wasip2`) is answered against this host's
+  toolchain: a rustup toolchain carrying EVERY target the step asks for is used
+  for that step — selected through the rustup proxy (`RUSTUP_TOOLCHAIN`), so
+  `cargo +<toolchain>` keeps working — and when no local toolchain carries them
+  the step is SKIPPED with the reason printed (`rustup target add <target>`) —
+  never a red step that says nothing about the repo. The toolchain the workflow
+  pins wins over another one that merely happens to carry the target. A host
+  with no rust toolchain at all is a MISSING TOOLCHAIN, not a missing target:
+  the step FAILS, as this script's convention says.
+- **`container:`** jobs run on the host toolchain, not in the declared image.
+- **`continue-on-error: true`** steps are advisory locally, exactly as in CI.
+- **Local-only checkout state.** CI checks out the committed tree; this checkout
+  also has gitignored and untracked paths, which whole-tree commands (e.g.
+  `dart analyze .`) see. A step that fails naming only such paths is reported as
+  a LOCAL-ONLY failure, not as a CI failure — pass `--strict` to count it anyway.
+  A step that would `git clone` over a sibling checkout that already exists here
+  is skipped; `--allow-outside-clone` forces it.
+
+Canonical copy: `arrrrny/forklift` → `scripts/local_ci.sh` (reference:
+`docs/forklift-scripts.md`).
+<!-- local-ci:end -->
+
+<!-- test-concurrency:begin -->
+## Test concurrency (fleet guard)
+
+Cap test concurrency at **2** — one un-capped `flutter test` fan starved the
+shared host's services once (load 260; arrrrny/forklift#176).
+
+There is **no config-file knob for `flutter test`**: it ignores
+`dart_test.yaml` entirely (its only test-config file is
+`flutter_test_config.dart`, an execution hook), so the flag is the only
+lever — and it must be passed every time:
+
+```sh
+flutter test --concurrency=2
+dart test -j 2
+```
+
+A repo whose `dart_test.yaml` carries `concurrency: 2` already defaults to it
+for `dart test`; pass the flag anyway when you override it, and never raise
+the number on a host that also runs the forklift pool. CI carries the same
+flags in `.github/workflows`.
+<!-- test-concurrency:end -->
+
+<!-- dependency-bump-rule:begin -->
+## Publishing without a dependency bump is a no-op — file the upgrade chore
+
+Before any release, resolve the lockfile and align the DECLARED constraints to
+what actually resolved. The lockfile is what ships: a `pubspec.yaml` saying
+`^7.3.8` next to a resolved `7.4.2` only guarantees the next machine resolves
+to something else, so the release you just cut is not the release anyone else
+gets.
+
+```bash
+rm -f pubspec.lock
+dart pub get                     # or `flutter pub get` for an app
+# then set every caret constraint to the version the resolver picked
+```
+
+**Then look at what is still held back.** `dart pub outdated` (or
+`flutter pub outdated`) lists every package whose declared constraint refuses
+an available upgrade — the canonical example is `google_fonts` sitting on
+`8.2.1` while `9.0.0` is out. Those are the upgrades this release did NOT take.
+
+**The rule:** when a package could be upgraded but was not bumped
+automatically, the publish **continues as normal** — do not block the release
+on it — and you MUST file a GitHub chore issue for the available upgrades.
+A publish that silently leaves upgrades on the table is not a smaller publish;
+it is a publish nobody knows is stale. File the issue with the package names,
+the current and available versions, and whether the constraint or a transitive
+pin is what holds it.
+
+Two corollaries worth remembering:
+
+- **A `dart pub upgrade` that changes nothing is a signal, not a success.**
+  If the constraint blocks the upgrade, bumping the constraint is the fix —
+  and that is exactly the chore issue above.
+- **Transitive holds are still chore material.** A package held only because
+  a dependency pins it is not this repo's constraint to widen, but it is still
+  an available upgrade a human should decide on.
+
+This applies to every Dart/Flutter repo in the fleet. A repo whose publish
+flow already runs the lockfile dance (see each repo's `PUBLISH.md`) still owes
+the chore issue for whatever `pub outdated` reports.
+<!-- dependency-bump-rule:end -->

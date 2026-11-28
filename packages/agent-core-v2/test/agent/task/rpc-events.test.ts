@@ -761,6 +761,7 @@ describe('AgentTaskService — notification delivery', () => {
         code: ErrorCodes.SESSION_BUSY,
         details: { reason: 'loop' },
       });
+      expect(active.state).toBe('running');
       expect(active.signal.aborted).toBe(false);
 
       ctx.mockNextResponse({ type: 'text', text: 'notification acknowledged' });

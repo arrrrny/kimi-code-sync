@@ -80,7 +80,7 @@ export interface CustomRegistryProviderEntry {
   readonly models: Record<string, CustomRegistryModelEntry>;
 }
 
-export const CUSTOM_REGISTRY_DEFAULT_MAX_CONTEXT = 131072;
+export const CUSTOM_REGISTRY_DEFAULT_MAX_CONTEXT = 262144;
 export const CUSTOM_REGISTRY_DEFAULT_CAPABILITIES = ['tool_use'] as const;
 
 const ALLOWED_PROVIDER_TYPES: ReadonlySet<CustomRegistryProviderType> = new Set([
@@ -109,9 +109,18 @@ export function oauthManagedProviderMessage(providerId: string): string {
   return `Custom registry provider "${providerId}" is managed by OAuth; log out before importing it.`;
 }
 
+const PROVIDER_ID_PATTERN = /^[\p{L}\p{N}][\p{L}\p{N}\-_ ]*$/u;
+
+export function invalidProviderIdMessage(providerId: string): string {
+  return `Custom registry provider id "${providerId}" cannot be used as a provider id.`;
+}
+
 function assertCustomRegistryProviderId(providerId: string): void {
   if (isReservedProviderId(providerId)) {
     throw new Error(reservedProviderIdMessage(providerId));
+  }
+  if (!PROVIDER_ID_PATTERN.test(providerId)) {
+    throw new Error(invalidProviderIdMessage(providerId));
   }
 }
 
@@ -394,7 +403,6 @@ function retainedApiKeyEnv(
   entry: CustomRegistryProviderEntry,
   source: CustomRegistrySource,
 ): string | undefined {
-  assertCustomRegistryProviderId(entry.id);
   if (isRecord(existing) && existing['oauth'] !== undefined) {
     throw new Error(oauthManagedProviderMessage(entry.id));
   }
@@ -421,6 +429,7 @@ export function applyCustomRegistryProvider(
   source: CustomRegistrySource,
   priorProviders?: Readonly<Record<string, unknown>>,
 ): void {
+  assertCustomRegistryProviderId(entry.id);
   const providerKey = entry.id;
   const existing = priorProviders?.[providerKey] ?? config.providers[providerKey];
   const existingApiKeyEnv = retainedApiKeyEnv(existing, entry, source);

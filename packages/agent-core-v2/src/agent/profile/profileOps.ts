@@ -214,7 +214,18 @@ function configUpdateThinkingLevel(e: ConfigUpdatePayload): ThinkingEffort | und
   return e.thinkingLevel;
 }
 
-export type ActiveToolsState = readonly string[] | undefined;
+const compactionConfigChangedSchema = z.object({ agentId: z.string() });
+
+export class CompactionConfigChanged extends AgentEvent2<
+  z.infer<typeof compactionConfigChangedSchema>
+> {
+  static override readonly type = 'compaction.configChanged';
+  static override readonly observable = true;
+  static override readonly schema = compactionConfigChangedSchema;
+}
+export interface CompactionConfigChanged {
+  readonly agentId: string;
+}
 
 registerEvent2Class(ProfileBind);
 registerEvent2Class(ConfigUpdate);

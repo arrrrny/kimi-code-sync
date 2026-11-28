@@ -984,6 +984,7 @@ describe('AgentGoalService core workflow hooks', () => {
       thinkingLevel: 'off',
       reservedContextSize: undefined,
       compactionTriggerRatio: undefined,
+      compactionTokenBudget: undefined,
       compactionMaxAttempts: undefined,
     });
     clock = new ManualGoalDeadlineScheduler();

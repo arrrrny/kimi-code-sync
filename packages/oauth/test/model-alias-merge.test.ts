@@ -48,6 +48,25 @@ describe('mergeRefreshedModelAlias', () => {
     expect(merged.supportEfforts).toBeUndefined();
   });
 
+  it('keeps a curated reasoningKey when the managed payload never declares one', () => {
+    const merged = mergeRefreshedModelAlias(
+      {
+        provider: 'managed:kimi-code',
+        model: 'kimi-k2',
+        maxContextSize: 262144,
+        reasoningKey: 'reasoning_content',
+      },
+      {
+        provider: 'managed:kimi-code',
+        model: 'kimi-k2',
+        maxContextSize: 262144,
+      },
+      MANAGED_KIMI_MODEL_FIELDS,
+    );
+
+    expect(merged['reasoningKey']).toBe('reasoning_content');
+  });
+
   it('refreshes custom-registry supportEfforts from upstream', () => {
     const merged = mergeRefreshedModelAlias(
       {

@@ -175,9 +175,6 @@ async function scanWithoutFilter(
 
 async function statFile(root: string, relativePath: string): Promise<FeedbackCodebaseFile | null> {
   const absolutePath = resolve(root, relativePath);
-  // A tracked file can be deleted from the working tree but still listed by
-  // `git ls-files`; lstat then throws ENOENT. Treat unreadable/vanished paths
-  // like any other non-regular entry so one bad path does not abort the scan.
   const stat = await lstat(absolutePath).catch(() => null);
   if (stat === null || stat.isSymbolicLink() || !stat.isFile()) return null;
 

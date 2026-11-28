@@ -16,8 +16,10 @@ import {
   createRecoveryMemory,
   proposeFirst,
   type LlmRecovery,
+  type LlmRecoveryEntry,
   type LlmRecoveryMemory,
   type LlmRecoveryRecord,
+  exhaustedRecovery,
 } from './recovery';
 import type { LlmResolver } from './resolver';
 import {
@@ -223,6 +225,15 @@ export async function runLlmRequest(
   return outcome;
 }
 
+async function applyRecovery(proposal: LlmRecoveryEntry): Promise<Error | undefined> {
+  try {
+    await proposal.beforeNextAttempt?.();
+    return undefined;
+  } catch (error) {
+    return error instanceof Error ? error : new Error(String(error));
+  }
+}
+
 /**
  * Drives the attempts of one LLM request.
  *
@@ -337,17 +348,29 @@ async function runAttempts(
       endpoint: recoveryRequest.endpoint,
       rawError: result.rawError,
       signal,
+      attempt,
+      maxAttempts,
     });
     if (proposal !== undefined) {
-      proposal.beforeNextAttempt?.();
-      ledger.record(proposal);
-      recoveries.record(request, proposal);
+      const failure = await applyRecovery(proposal);
+      const record: LlmRecoveryEntry = {
+        ...proposal,
+        action: proposal.action,
+        detail:
+          failure === undefined
+            ? proposal.detail
+            : `${proposal.detail ?? proposal.action} could not be applied: ${failure.message}`,
+        failed: failure === undefined ? undefined : true,
+      };
+      ledger.record(record);
+      recoveries.record(request, record);
       attempt = 1;
       const retry: LlmRunEvent = {
         type: 'llm.retry',
         reason: 'recovery',
-        strategy: proposal.strategy,
-        action: proposal.action,
+        strategy: record.strategy,
+        action: record.action,
+        detail: record.detail,
         error: result.error,
         message: result.message,
         usage: result.usage,
@@ -392,6 +415,31 @@ async function runAttempts(
       continue;
     }
 
+    const exhausted = exhaustedRecovery(listOf(policy.recoveries), {
+      error: result.error,
+      request: recoveryRequest,
+      appliedRecoveries: ledger.applied,
+      endpoint: recoveryRequest.endpoint,
+      attempt,
+      maxAttempts,
+    });
+    if (exhausted !== undefined) {
+      onEvent?.({
+        type: 'llm.retry',
+        reason: 'recovery',
+        strategy: exhausted.strategy,
+        action: exhausted.action,
+        detail: exhausted.detail,
+        error: result.error,
+        message: result.message,
+        usage: result.usage,
+        headers: result.headers,
+        finish: result.finish,
+        messageId: result.messageId,
+        requestId: result.requestId,
+        timing: result.timing,
+      });
+    }
     log.error(
       {
         kind: result.error.kind,

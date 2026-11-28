@@ -5,7 +5,9 @@ import { DEFAULT_KIMI_CODE_OAUTH_HOST } from './constants';
 import { OAuthUnauthorizedError } from './errors';
 import { parseKimiCodeCustomHeaders } from './identity';
 import { DEFAULT_KIMI_CODE_BASE_URL, kimiCodeBaseUrl } from './managed-usage';
-import { MANAGED_KIMI_MODEL_FIELDS, mergeRefreshedModelAlias } from './model-alias-merge';
+import { MANAGED_KIMI_MODEL_FIELDS, mergeOpenAiCompatibleModelAlias, mergeRefreshedModelAlias } from './model-alias-merge';
+import { lookupModelsDevModel } from './modelsDevCatalog';
+import { OPENAI_COMPATIBLE_DEFAULT_CONTEXT } from './openai-compatible';
 import { isRecord } from './utils';
 
 export const KIMI_CODE_PLATFORM_ID = 'kimi-code';
@@ -26,6 +28,8 @@ export type SupportsThinkingType = 'only' | 'no' | 'both';
 export interface ManagedKimiCodeModelInfo {
   readonly id: string;
   readonly contextLength: number;
+  readonly reportedContextLength?: number | undefined;
+  readonly reportedMaxOutputSize?: number | undefined;
   readonly supportsReasoning: boolean;
   readonly supportsImageIn: boolean;
   readonly supportsVideoIn: boolean;
@@ -661,6 +665,61 @@ export function applyManagedApiKeyProviderModels(
       toManagedModelAlias(providerId, model),
       MANAGED_KIMI_MODEL_FIELDS,
     );
+  }
+
+  config.models = existingModels;
+}
+
+function resolveModelsDevDisplayName(
+  providerId: string,
+  modelId: string,
+  endpointName: string | undefined,
+): string | undefined {
+  const catalog = lookupModelsDevModel(providerId, modelId);
+  if (endpointName !== undefined && endpointName.length > 0) return endpointName;
+  if (catalog?.displayName !== undefined) return catalog.displayName;
+  return undefined;
+}
+
+export function applyOpenAiCompatibleCatalog(
+  config: ManagedKimiConfigShape,
+  providerId: string,
+  models: readonly ManagedKimiCodeModelInfo[],
+  aliasPrefix: string,
+): void {
+  const existingModels = config.models ?? {};
+  const upstreamKeys = new Set(models.map((m) => `${aliasPrefix}${m.id}`));
+  for (const [key, model] of Object.entries(existingModels)) {
+    if (isRecord(model) && model['provider'] === providerId && !upstreamKeys.has(key)) {
+      delete existingModels[key];
+    }
+  }
+  for (const model of models) {
+    const key = `${aliasPrefix}${model.id}`;
+    const existing = isRecord(existingModels[key]) ? existingModels[key] : {};
+    const existingMaxContextSize =
+      typeof existing['maxContextSize'] === 'number' ? existing['maxContextSize'] : undefined;
+    const catalog = lookupModelsDevModel(providerId, model.id);
+    const maxContextSize =
+      model.reportedContextLength ??
+      catalog?.context ??
+      existingMaxContextSize ??
+      OPENAI_COMPATIBLE_DEFAULT_CONTEXT;
+    const existingMaxOutputSize =
+      typeof existing['maxOutputSize'] === 'number' ? existing['maxOutputSize'] : undefined;
+    const maxOutputSize = model.reportedMaxOutputSize ?? existingMaxOutputSize;
+    const remoteAlias: ManagedKimiModelAlias = {
+      provider: providerId,
+      model: model.id,
+      maxContextSize,
+      ...(maxOutputSize !== undefined ? { maxOutputSize } : {}),
+      ...(model.displayName !== undefined ? { displayName: model.displayName } : {}),
+      ...(catalog?.capabilities !== undefined ? { capabilities: catalog.capabilities } : {}),
+      ...(catalog?.reasoningKey !== undefined ? { reasoningKey: catalog.reasoningKey } : {}),
+    };
+    existingModels[key] = mergeOpenAiCompatibleModelAlias(existing, remoteAlias);
+    const displayName = resolveModelsDevDisplayName(providerId, model.id, model.displayName);
+    if (displayName !== undefined) existingModels[key].displayName = displayName;
   }
 
   config.models = existingModels;

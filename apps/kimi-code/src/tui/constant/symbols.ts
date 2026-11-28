@@ -9,3 +9,5 @@ export const NOTIFY_USER_MARK_FOREGROUND = '#FFFFFF';
 
 export const SELECT_POINTER = '❯';
 export const CURRENT_MARK = '← current';
+
+export const FAVORITE_MARK = '★';

@@ -83,6 +83,7 @@ export interface AppState {
   upgrade: UpgradePreferences;
   statusLine?: StatusLineConfig;
   markdown?: MarkdownConfig;
+  favoriteModels?: readonly string[];
   transcript: TranscriptConfig;
   availableModels: Record<string, ModelAlias>;
   availableProviders: Record<string, ProviderConfig>;
@@ -174,6 +175,8 @@ export interface CompactionTranscriptData {
   readonly tokensBefore?: number;
   readonly tokensAfter?: number;
   readonly instruction?: string;
+  readonly model?: string;
+  readonly handoffPath?: string;
 }
 
 export interface CronTranscriptData {

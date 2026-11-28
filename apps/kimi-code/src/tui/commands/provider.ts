@@ -6,9 +6,11 @@ import {
   type ImportCustomRegistryResult,
   DEFAULT_CATALOG_URL,
   resolveCatalogImport,
+  SECONDARY_DERIVED_MODEL_ALIAS,
   type Catalog,
   type ModelAlias,
   type RefreshProviderModelsResponse,
+  type ProviderConfig,
   type ThinkingEffort,
 } from '@moonshot-ai/kimi-code-sdk';
 
@@ -30,11 +32,14 @@ import { DOCK_MODEL_SELECTOR_ROWS } from '../constant/rendering';
 import { DEFAULT_OAUTH_PROVIDER_NAME } from '../constant/kimi-tui';
 import { formatErrorMessage } from '../utils/event-payload';
 import { thinkingEffortToConfig } from '../utils/thinking-config';
-import { effectiveModelForHost } from '../utils/model-switch';
+import { effectiveModelForHost, performModelSwitch } from '../utils/model-switch';
 import {
   promptApiKey,
   promptBaseUrl,
   promptCatalogProviderSelection,
+  promptKeyName,
+  promptKeyProxyUrl,
+  promptProxyUrl,
 } from './prompts';
 import type { SlashCommandHost } from './dispatch';
 
@@ -128,6 +133,31 @@ function buildProviderManagerOptions(host: SlashCommandHost): ProviderManagerOpt
         host.showError(`Remove provider failed: ${formatErrorMessage(error)}`);
       });
     },
+    onAddKey: (providerId) => {
+      void handleProviderKeyAdd(host, providerId).catch((error: unknown) => {
+        host.showError(`Add API key failed: ${formatErrorMessage(error)}`);
+      });
+    },
+    onRemoveKey: (providerId, keyId) => {
+      void handleProviderKeyRemove(host, providerId, keyId).catch((error: unknown) => {
+        host.showError(`Remove API key failed: ${formatErrorMessage(error)}`);
+      });
+    },
+    onSetActiveKey: (providerId, keyId) => {
+      void handleProviderKeySetActive(host, providerId, keyId).catch((error: unknown) => {
+        host.showError(`Set active API key failed: ${formatErrorMessage(error)}`);
+      });
+    },
+    onSetProxyUrl: (providerId) => {
+      void handleProviderProxyUrl(host, providerId).catch((error: unknown) => {
+        host.showError(`Set proxy URL failed: ${formatErrorMessage(error)}`);
+      });
+    },
+    onToggleRotation: (providerId) => {
+      void handleProviderKeyRotationToggle(host, providerId).catch((error: unknown) => {
+        host.showError(`Toggle key rotation failed: ${formatErrorMessage(error)}`);
+      });
+    },
     onClose: () => {
       host.restoreEditor();
     },
@@ -168,6 +198,169 @@ async function handleProviderDelete(host: SlashCommandHost, providerId: string):
       availableModels: config.models ?? {},
     });
   }
+}
+
+async function handleProviderKeyAdd(host: SlashCommandHost, providerId: string): Promise<void> {
+  const provider = host.state.appState.availableProviders[providerId];
+  if (!provider) {
+    host.showError(`Provider ${providerId} not found`);
+    return;
+  }
+
+  const name = await promptKeyName(host);
+  if (name === undefined) {
+    reopenProviderManager(host);
+    return;
+  }
+
+  const apiKey = await promptApiKey(host, `API key for ${providerId}/${name}`);
+  if (apiKey === undefined) {
+    reopenProviderManager(host);
+    return;
+  }
+
+  const keyProxy = await promptKeyProxyUrl(host, `${providerId}/${name}`);
+  if (keyProxy === undefined) {
+    reopenProviderManager(host);
+    return;
+  }
+
+  const keyId = generateKeyId(provider);
+
+  const config = await host.harness.getConfig();
+  const providers = { ...config.providers };
+  const existingProvider = providers[providerId];
+  if (!existingProvider) {
+    host.showError(`Provider ${providerId} not found in config`);
+    return;
+  }
+
+  const apiKeys = existingProvider.apiKeys ? { ...existingProvider.apiKeys } : {};
+  apiKeys[keyId] = { key: apiKey, name, proxyUrl: keyProxy.proxyUrl };
+
+  providers[providerId] = {
+    ...existingProvider,
+    apiKeys,
+    activeApiKeyId: existingProvider.activeApiKeyId ?? keyId,
+  };
+
+  if (host.harness.supportsAtomicSectionReplace()) {
+    await host.harness.replaceConfigSections({ providers });
+  } else {
+    await host.harness.setConfig({ providers });
+  }
+  await host.authFlow.refreshConfigAfterLogin();
+  host.showStatus(`Added API key "${name}" to ${providerId}`);
+  reopenProviderManager(host);
+}
+
+async function handleProviderKeyRemove(host: SlashCommandHost, providerId: string, keyId: string): Promise<void> {
+  const config = await host.harness.getConfig();
+  const providers = { ...config.providers };
+  const provider = providers[providerId];
+  if (!provider || !provider.apiKeys || !provider.apiKeys[keyId]) {
+    host.showError(`API key not found`);
+    return;
+  }
+
+  const apiKeys = { ...provider.apiKeys };
+  const keyEntry = apiKeys[keyId];
+  if (!keyEntry) {
+    host.showError(`API key not found`);
+    return;
+  }
+  const keyName = keyEntry.name;
+  delete apiKeys[keyId];
+
+  let activeApiKeyId = provider.activeApiKeyId;
+  if (activeApiKeyId === keyId) {
+    const remainingKeys = Object.keys(apiKeys);
+    activeApiKeyId = remainingKeys.length > 0 ? remainingKeys[0] : undefined;
+  }
+
+  if (Object.keys(apiKeys).length === 0) {
+    const { apiKeys: _, activeApiKeyId: __, ...rest } = provider;
+    providers[providerId] = rest;
+  } else {
+    providers[providerId] = { ...provider, apiKeys, activeApiKeyId };
+  }
+
+  if (host.harness.supportsAtomicSectionReplace()) {
+    await host.harness.replaceConfigSections({ providers });
+  } else {
+    await host.harness.setConfig({ providers });
+  }
+  await host.authFlow.refreshConfigAfterLogin();
+  host.showStatus(`Removed API key "${keyName}" from ${providerId}`);
+  reopenProviderManager(host);
+}
+
+async function handleProviderKeySetActive(host: SlashCommandHost, providerId: string, keyId: string): Promise<void> {
+  const config = await host.harness.getConfig();
+  const providers = { ...config.providers };
+  const provider = providers[providerId];
+  if (!provider || !provider.apiKeys || !provider.apiKeys[keyId]) {
+    host.showError(`API key not found`);
+    return;
+  }
+
+  providers[providerId] = { ...provider, activeApiKeyId: keyId };
+  if (host.harness.supportsAtomicSectionReplace()) {
+    await host.harness.replaceConfigSections({ providers });
+  } else {
+    await host.harness.setConfig({ providers });
+  }
+  await host.authFlow.refreshConfigAfterLogin();
+  const keyName = provider.apiKeys[keyId].name;
+  host.showStatus(`Set active API key to "${keyName}" for ${providerId}`);
+  reopenProviderManager(host);
+}
+
+async function handleProviderKeyRotationToggle(
+  host: SlashCommandHost,
+  providerId: string,
+): Promise<void> {
+  const config = await host.harness.getConfig();
+  const providers = { ...config.providers };
+  const provider = providers[providerId];
+  if (!provider) {
+    host.showError(`Provider ${providerId} not found`);
+    return;
+  }
+
+  const rotateKeys = provider.rotateKeys !== true;
+  const keyCount = Object.keys(provider.apiKeys ?? {}).length;
+  if (rotateKeys && keyCount < 2) {
+    host.showError(
+      `Key rotation needs at least two API keys for ${providerId}; only ${String(keyCount)} configured.`,
+    );
+    return;
+  }
+  providers[providerId] = { ...provider, rotateKeys };
+
+  if (host.harness.supportsAtomicSectionReplace()) {
+    await host.harness.replaceConfigSections({ providers });
+  } else {
+    await host.harness.setConfig({ providers });
+  }
+  await host.authFlow.refreshConfigAfterLogin();
+  host.showStatus(
+    rotateKeys
+      ? `Key rotation enabled for ${providerId} (${String(keyCount)} keys)`
+      : `Key rotation disabled for ${providerId}`,
+  );
+  reopenProviderManager(host);
+}
+
+function generateKeyId(provider: ProviderConfig): string {
+  const existingKeys = provider.apiKeys ? Object.keys(provider.apiKeys) : [];
+  let counter = 1;
+  let keyId = `key${counter}`;
+  while (existingKeys.includes(keyId)) {
+    counter++;
+    keyId = `key${counter}`;
+  }
+  return keyId;
 }
 
 async function handleProviderAdd(host: SlashCommandHost): Promise<void> {
@@ -322,10 +515,12 @@ async function handleCatalogProviderAdd(host: SlashCommandHost): Promise<void> {
   }
 
   const stateModels = await host.harness.getConfig().then((c) => c.models ?? {});
+  const mergedModels = { ...stateModels };
+  delete mergedModels[SECONDARY_DERIVED_MODEL_ALIAS];
   mountProviderDefaultModelSelector(
     host,
-    stateModels,
-    Object.keys(stateModels).find((alias) => alias.startsWith(`${providerId}/`)),
+    mergedModels,
+    Object.keys(mergedModels).find((alias) => alias.startsWith(`${providerId}/`)),
     providerId,
   );
 }
@@ -408,7 +603,8 @@ async function handleCustomRegistryAddViaDialog(host: SlashCommandHost): Promise
     );
   }
 
-  const stateModels = await host.harness.getConfig().then((c) => c.models ?? {});
+  const stateModels = { ...(await host.harness.getConfig().then((c) => c.models ?? {})) };
+  delete stateModels[SECONDARY_DERIVED_MODEL_ALIAS];
   const firstNewAlias = Object.keys(stateModels).find((a) =>
     addedProviderIds.some((pid) => a.startsWith(`${pid}/`)),
   );
@@ -441,6 +637,10 @@ function mountProviderDefaultModelSelector(
         host.showError(`Set default model failed: ${formatErrorMessage(error)}`);
       });
     },
+    onSessionOnlySelect: ({ alias, thinking }) => {
+      host.restoreEditor();
+      void performModelSwitch(host, alias, thinking, 'session');
+    },
     onCancel: () => {
       host.restoreEditor();
     },
@@ -460,4 +660,78 @@ function promptCustomRegistryImport(
     );
     host.mountEditorReplacement(dialog);
   });
+}
+
+async function handleProviderProxyUrl(host: SlashCommandHost, providerId: string): Promise<void> {
+  const provider = host.state.appState.availableProviders[providerId];
+  if (!provider) {
+    host.showError(`Provider ${providerId} not found`);
+    return;
+  }
+
+  const proxyUrl = await promptProxyUrl(host, providerId);
+  if (proxyUrl === undefined) {
+    reopenProviderManager(host);
+    return;
+  }
+
+  const config = await host.harness.getConfig();
+  const providers = { ...config.providers };
+  const existingProvider = providers[providerId];
+  if (!existingProvider) {
+    host.showError(`Provider ${providerId} not found in config`);
+    return;
+  }
+
+  providers[providerId] = {
+    ...existingProvider,
+    proxyUrl,
+  };
+
+  if (host.harness.supportsAtomicSectionReplace()) {
+    await host.harness.replaceConfigSections({ providers });
+  } else {
+    await host.harness.setConfig({ providers });
+  }
+  await host.authFlow.refreshConfigAfterLogin();
+  const display = proxyUrl ? proxyUrl : 'disabled';
+  host.showStatus(`Proxy for ${providerId} set to ${display}`);
+  reopenProviderManager(host);
+}
+
+export async function handleRefreshCatalogCommand(
+  host: SlashCommandHost,
+  providerId: string | undefined,
+): Promise<void> {
+  if (providerId !== undefined && host.state.appState.availableProviders[providerId] === undefined) {
+    host.showError(`Provider ${providerId} not found`);
+    return;
+  }
+
+  const spinner = host.showProgressSpinner('Refreshing OpenAI-compatible catalogs…');
+  let result: Awaited<ReturnType<typeof host.authFlow.refreshCatalogModels>>;
+  try {
+    result = await host.authFlow.refreshCatalogModels(providerId);
+  } catch (error) {
+    spinner.stop({ ok: false, label: 'Catalog refresh failed.' });
+    host.showError(`Catalog refresh failed: ${formatErrorMessage(error)}`);
+    return;
+  }
+
+  if (result.failed.length > 0) {
+    const reasons = result.failed
+      .map((f) => `${f.provider}: ${f.reason}`)
+      .join('; ');
+    spinner.stop({ ok: false, label: 'Some catalogs failed to refresh.' });
+    host.showError(`Catalog refresh partial: ${reasons}`);
+    return;
+  }
+
+  const changed = result.changed.length;
+  const label =
+    changed === 0
+      ? 'Catalogs up to date.'
+      : `Refreshed ${String(changed)} provider catalog${changed === 1 ? '' : 's'}.`;
+  spinner.stop({ ok: true, label });
+  host.showStatus(label, 'success');
 }

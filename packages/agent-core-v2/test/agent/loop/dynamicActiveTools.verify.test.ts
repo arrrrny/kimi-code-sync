@@ -38,6 +38,7 @@ test('keeps turn and operation request tools frozen at the loop-start baseline',
   await agent.rpc.prompt({ input: [{ type: 'text', text: 'first' }] });
   await agent.untilTurnEnd();
   const first = toolNames(model.requests('main')[0]!);
+  const frozenTools = loop.baselineTools();
   expect(first).toContain('Read');
 
   loop.update({ activeToolNames: [...first] });
@@ -65,11 +66,13 @@ test('keeps turn and operation request tools frozen at the loop-start baseline',
   userTools.unregister('UserMid');
   const signal = new AbortController().signal;
   model.expectCacheBreak('the test sends its own messages through an operation request', { at: 'history' });
-  await loop.requester.with({
+  const requester = loop.requesterForModel().with({
     content: { messages: [{ role: 'user', content: [{ type: 'text', text: 'summarize' }] }] },
+    profile: { tools: frozenTools },
     attributes: { kind: 'verify_active_tools' },
     policy: { retry: { maxAttemptsPerStep: 1 } },
-  }).generate({}, { signal });
+  });
+  await requester.generate({}, { signal });
   const requests = model.requests('main');
   expect(requests).toHaveLength(4);
   expect(toolNames(requests[3]!)).toEqual(first);
@@ -106,6 +109,7 @@ test('keeps the compaction-style operation request prefix-aligned with the turn 
   await agent.untilTurnEnd();
   expect(model.requests('main')).toHaveLength(2);
   const turn = model.requests('main')[1]!;
+  const frozenTools = loop.baselineTools();
 
   loop.update({ activeToolNames: [...toolNames(turn), 'Lookup'] });
   loop.removeActiveTool('Read');
@@ -114,11 +118,13 @@ test('keeps the compaction-style operation request prefix-aligned with the turn 
   const instruction = createUserMessage('Compact the conversation.');
   const messages = historyFromContext([...loop.history(), instruction]);
   const signal = new AbortController().signal;
-  await loop.requester.with({
+  const requester = loop.requesterForModel().with({
     content: { messages },
+    profile: { tools: frozenTools },
     attributes: { kind: 'compaction' },
     policy: { retry: { maxAttemptsPerStep: 1 } },
-  }).generate({}, { signal });
+  });
+  await requester.generate({}, { signal });
 
   const operations = model.requests('compaction');
   expect(operations).toHaveLength(1);

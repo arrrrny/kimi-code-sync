@@ -5,6 +5,7 @@ import type { IAgentEnvironmentBindingService } from '@moonshot-ai/agent-core-v2
 import type { ISessionTokenCountingService } from '@moonshot-ai/agent-core-v2/session/tokenCounting/sessionTokenCounting';
 import type { IAgentPlanService } from '@moonshot-ai/agent-core-v2/features/plan/plan';
 import type { IAgentLoopService } from '@moonshot-ai/agent-core-v2/agent/loop/loop';
+import type { IAgentProfileService } from '@moonshot-ai/agent-core-v2/agent/profile/profile';
 import type { IAgentShellCommandService } from '@moonshot-ai/agent-core-v2/agent/shellCommand/shellCommand';
 import type { IAgentSkillService } from '@moonshot-ai/agent-core-v2/features/skill/skillService';
 import type { IAgentTaskService } from '@moonshot-ai/agent-core-v2/agent/task/task';
@@ -42,6 +43,10 @@ export type PromptWithSkillsInput = Omit<Parameters<IAgentSkillService['promptWi
 export type PromptWithSkillsResult = Awaited<ReturnType<IAgentSkillService['promptWithSkills']>>;
 export type ShellCommandResult = Awaited<ReturnType<IAgentShellCommandService['run']>>;
 export type SetModelResult = Awaited<ReturnType<IAgentLoopService['setModel']>>;
+export type SessionModelOverrideKind = Parameters<IAgentProfileService['setSessionModelOverride']>[0];
+export type SessionModelOverrides = Awaited<
+  ReturnType<IAgentProfileService['getAllSessionModelOverrides']>
+>;
 export type ThinkingLevel = ReturnType<IAgentLoopService['getEffectiveThinkingLevel']>;
 export type UsageStatus = Awaited<ReturnType<ISessionUsageService['status']>>;
 type AgentContextMessage = LegacyMessage & {
@@ -87,6 +92,9 @@ export interface AgentFacade {
   cancelShellCommand(input: { commandId: string }): Promise<void>;
   getModel(): Promise<string>;
   setModel(model: string): Promise<SetModelResult>;
+  setSessionModelOverride(kind: SessionModelOverrideKind, alias: string | null): Promise<void>;
+  getSessionModelOverride(kind: SessionModelOverrideKind): Promise<string | undefined>;
+  getAllSessionModelOverrides(): Promise<SessionModelOverrides>;
   getThinking(): Promise<ThinkingLevel>;
   setThinking(level: string): Promise<void>;
   setPermission(mode: PermissionMode): Promise<void>;
@@ -134,6 +142,12 @@ export function createAgentFacade(call: ScopedCaller, scope: ScopeRef): AgentFac
     getModel: () => call(scope, 'agentProfileService', 'getModel', []) as Promise<string>,
     setModel: (model) =>
       call(scope, 'agentProfileService', 'setModel', [model]) as Promise<SetModelResult>,
+    setSessionModelOverride: (kind, alias) =>
+      call(scope, 'agentProfileService', 'setSessionModelOverride', [kind, alias ?? null]) as Promise<void>,
+    getSessionModelOverride: (kind) =>
+      call(scope, 'agentProfileService', 'getSessionModelOverride', [kind]) as Promise<string | undefined>,
+    getAllSessionModelOverrides: () =>
+      call(scope, 'agentProfileService', 'getAllSessionModelOverrides', []) as Promise<SessionModelOverrides>,
     getThinking: () =>
       call(scope, 'agentProfileService', 'getEffectiveThinkingLevel', []) as Promise<ThinkingLevel>,
     setThinking: (level) =>

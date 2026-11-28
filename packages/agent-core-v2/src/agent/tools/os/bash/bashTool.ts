@@ -262,6 +262,7 @@ export class BashTool implements IBashTool {
           exitCode,
           parentToolCallId: toolCallId,
           timeoutMs,
+          detachTimeoutMs: startsInBackground ? this.detachTimeoutMs() : undefined,
           timedOut: status === 'timed_out' || undefined,
           stopReason,
         },

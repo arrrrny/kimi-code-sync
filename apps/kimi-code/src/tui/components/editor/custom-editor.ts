@@ -118,6 +118,7 @@ export class CustomEditor extends Editor {
   public onUpArrowEmpty?: () => boolean;
   public onDownArrowEmpty?: () => boolean;
   public onShiftTab?: () => void;
+  public onAltM?: () => void;
   public inputMode: 'prompt' | 'bash' = 'prompt';
   public onInputModeChange?: (mode: 'prompt' | 'bash') => void;
   public connectedAbove = false;
@@ -448,6 +449,11 @@ export class CustomEditor extends Editor {
 
     if (matchesKey(normalized, 'shift+tab')) {
       this.onShiftTab?.();
+      return;
+    }
+
+    if (matchesKey(normalized, Key.alt('m'))) {
+      this.onAltM?.();
       return;
     }
 

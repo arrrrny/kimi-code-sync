@@ -14,6 +14,7 @@ export function stubProviderService(
     listProviderConfigs: () => providers,
     getDefaultProviderId: () => undefined,
     setProviderConfig: async () => {},
+    setActiveApiKey: async () => {},
     deleteProviderConfig: async () => {},
     loadProviderConfigs: () => {},
     replaceProviderConfigs: async () => {},

@@ -87,6 +87,19 @@ export interface ApplyProfileOptions {
   readonly additionalDirs?: readonly string[];
 }
 
+export const COMPACTION_TRIGGER_RATIO_MIN = 0.05;
+
+export const COMPACTION_TRIGGER_RATIO_MAX = 0.99;
+
+export function compactionTriggerRatioError(
+  ratio: number,
+): string | undefined {
+  if (!Number.isFinite(ratio) || ratio < COMPACTION_TRIGGER_RATIO_MIN || ratio > COMPACTION_TRIGGER_RATIO_MAX) {
+    return `Invalid compaction trigger ratio "${String(ratio)}": must be between ${COMPACTION_TRIGGER_RATIO_MIN} and ${COMPACTION_TRIGGER_RATIO_MAX}.`;
+  }
+  return undefined;
+}
+
 export interface ProfileModelContext {
   readonly modelAlias: string;
   readonly model: LlmModelSpec;
@@ -95,12 +108,32 @@ export interface ProfileModelContext {
   readonly thinkingLevel: ThinkingEffort;
   readonly reservedContextSize: number | undefined;
   readonly compactionTriggerRatio: number | undefined;
+  readonly compactionTokenBudget: number | undefined;
   readonly compactionMaxAttempts: number | undefined;
 }
 
 export interface ProfileSetModelResult {
   readonly model: string;
   readonly providerName?: string | undefined;
+}
+
+export type SessionModelOverrideKind =
+  | 'visual'
+  | 'compaction'
+  | 'compactionSecondary'
+  | 'fallback'
+  | 'fallbackSecondary'
+  | 'substitute'
+  | 'secondary';
+
+export interface SessionModelOverrides {
+  readonly visual?: string;
+  readonly compaction?: string;
+  readonly compactionSecondary?: string;
+  readonly fallback?: string;
+  readonly fallbackSecondary?: string;
+  readonly substitute?: string;
+  readonly secondary?: string;
 }
 
 export interface BindAgentInput {
@@ -114,6 +147,7 @@ export interface EffectiveProfileReader {
   data(): ProfileData;
   getEffectiveThinkingLevel(): ThinkingEffort;
   resolveModelContext(): ProfileModelContext;
+  resolveModelContextFor(modelAlias: string): ProfileModelContext;
   resolveRequestParams(): InitializedLlmRequestPart;
   getModelCapabilities(): ModelCapability;
   getModelProviderType(alias?: string): string | undefined;
@@ -146,6 +180,15 @@ export interface IAgentProfileService extends EffectiveProfileReader {
   afterConfigDispatch(changed: Omit<ProfileUpdateData, 'activeToolNames'>, current?: ProfileBindingSnapshot): void;
   resolveModel(model: string): ProfileSetModelResult;
   resolveThinkingLevel(level: string, current?: ProfileBindingSnapshot): string;
+  setCompactionTriggerRatio(ratio: number | undefined): void;
+  getCompactionTriggerRatioOverride(): number | undefined;
+  getEffectiveCompactionTriggerRatio(): number | undefined;
+  setCompactionTokenBudget(tokens: number | undefined): void;
+  getCompactionTokenBudgetOverride(): number | undefined;
+  getEffectiveCompactionTokenBudget(): number | undefined;
+  setSessionModelOverride(kind: SessionModelOverrideKind, alias: string | undefined): void;
+  getSessionModelOverride(kind: SessionModelOverrideKind): string | undefined;
+  getAllSessionModelOverrides(): SessionModelOverrides;
   republishStatus(current?: ProfileBindingSnapshot): void;
   useProfile(profile: ResolvedAgentProfile, context: SystemPromptContext): ProfileUpdateData;
   applyProfile(profile: ResolvedAgentProfile, options?: ApplyProfileOptions): Promise<ProfileUpdateData>;

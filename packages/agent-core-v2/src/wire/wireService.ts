@@ -228,9 +228,11 @@ export class WireService extends Service implements IWireService, IAgentJournal 
     let entries: WireLine[] | undefined;
     for (let attempt = 0; attempt < 2 && entries === undefined; attempt++) {
       await this.drainPersisted();
+      if (this.pendingRepair !== undefined) await this.repairPendingJournal();
       const appendsBeforeRead = this.appendCount;
       const read = await this.readStableEntries();
       const nothingWrittenMeanwhile =
+        this.pendingRepair === undefined &&
         this.persistQueue === undefined &&
         this.appendCount === appendsBeforeRead &&
         this.lines === this.lastReadLineCount;

@@ -17,6 +17,7 @@ import {
   type AgentProfile,
 } from '#/app/agentProfileCatalog/agentProfileCatalog';
 import { IAgentLoopService } from '#/agent/loop/loop';
+import { IAgentProfileService } from '#/agent/profile/profile';
 import type { ProfileData } from '#/agent/profile/profile';
 import { IAgentPermissionModeService } from '#/agent/permissionMode/permissionMode';
 import { IAgentUserToolService } from '#/agent/userTool/userTool';
@@ -59,6 +60,7 @@ describe('SessionSubagentService planSpawn and spawn', () => {
   let disposables: DisposableStore;
   let ix: TestInstantiationService;
   let callerData: ProfileData;
+  let callerOverrides: Map<string, string>;
   let profiles: AgentProfile[];
   let modelIds: Set<string>;
   let modelMeta: Map<string, Partial<Model>>;
@@ -84,23 +86,33 @@ describe('SessionSubagentService planSpawn and spawn', () => {
     } as unknown as IAgentUserToolService;
   }
 
-  function profileServiceStub(data: ProfileData): IAgentLoopService {
+  function profileServiceStub(
+    data: ProfileData,
+    overrides: Map<string, string> = new Map(),
+  ): IAgentProfileService {
     return {
       _serviceBrand: undefined,
       data: () => data,
       getActiveToolNames: () => data.activeToolNames,
-    } as unknown as IAgentLoopService;
+      setSessionModelOverride: (kind: string, alias: string | undefined) => {
+        if (alias === undefined) {
+          overrides.delete(kind);
+        } else {
+          overrides.set(kind, alias);
+        }
+      },
+      getSessionModelOverride: (kind: string) => overrides.get(kind),
+    } as unknown as IAgentProfileService;
   }
 
   function createdHandle(agentId: string): IAgentScopeHandle {
+    const profile = profileServiceStub({ ...callerData, modelCapabilities: {} as never });
     return {
       id: agentId,
       kind: LifecycleScope.Agent,
       accessor: {
         get: (serviceId: unknown) => {
-          if (serviceId === IAgentLoopService) {
-            return profileServiceStub({ ...callerData, modelCapabilities: {} as never });
-          }
+          if (serviceId === IAgentProfileService || serviceId === IAgentLoopService) return profile;
           if (serviceId === IAgentPermissionModeService) return createdPermissionMode;
           if (serviceId === IAgentUserToolService) return createdUserTools;
           return undefined;
@@ -121,6 +133,7 @@ describe('SessionSubagentService planSpawn and spawn', () => {
       systemPrompt: 'caller prompt',
       modelCapabilities: {} as never,
     };
+    callerOverrides = new Map();
     profiles = [
       normalizeAgentProfile({
         name: 'coder',
@@ -152,7 +165,9 @@ describe('SessionSubagentService planSpawn and spawn', () => {
       kind: LifecycleScope.Agent,
       accessor: {
         get: (serviceId: unknown) => {
-          if (serviceId === IAgentLoopService) return profileServiceStub(callerData);
+          if (serviceId === IAgentProfileService || serviceId === IAgentLoopService) {
+            return profileServiceStub(callerData, callerOverrides);
+          }
           if (serviceId === IAgentPermissionModeService) return callerPermissionMode;
           if (serviceId === IAgentUserToolService) return callerUserTools;
           if (serviceId === IAgentEnvironmentService) {
@@ -287,6 +302,15 @@ describe('SessionSubagentService planSpawn and spawn', () => {
     });
   }
 
+  function spawnNonForkChild(svc: ISessionSubagentService): Promise<SpawnedSubagent> {
+    return svc.spawn({
+      callerAgentId: CALLER_ID,
+      plan: { profileName: 'coder', model: 'provider/fast', modelSource: 'secondary_pool', thinking: 'low', fork: false },
+      labels: { parentAgentId: 'main' },
+      prompt: 'Review the file',
+    });
+  }
+
   it('rejects an unknown subagent type', async () => {
     const svc = service();
 
@@ -355,6 +379,7 @@ describe('SessionSubagentService planSpawn and spawn', () => {
       model: 'provider/fast',
       modelSource: 'secondary_pool',
       thinking: 'max',
+      fork: false,
     });
   });
 
@@ -474,6 +499,7 @@ describe('SessionSubagentService planSpawn and spawn', () => {
       model: 'provider/fast',
       modelSource: 'secondary_pool',
       thinking: 'max',
+      fork: false,
     });
   });
 
@@ -487,6 +513,7 @@ describe('SessionSubagentService planSpawn and spawn', () => {
       model: 'main-model',
       modelSource: 'inherited',
       thinking: 'high',
+      fork: false,
     });
   });
 
@@ -538,6 +565,23 @@ describe('SessionSubagentService planSpawn and spawn', () => {
 
     expect(createdPermissionMode.setMode).toHaveBeenCalledWith('auto');
     expect(createdUserTools.inheritUserTools).toHaveBeenCalledWith(callerUserTools);
+  });
+
+  it('inherits the caller fallback model overrides', async () => {
+    const callerProfile = caller.accessor.get(IAgentProfileService);
+    callerProfile.setSessionModelOverride('fallback', 'fb-model');
+    callerProfile.setSessionModelOverride('fallbackSecondary', 'fb2-model');
+    callerProfile.setSessionModelOverride('substitute', 'sub-model');
+    callerProfile.setSessionModelOverride('secondary', 'secondary-model');
+    const svc = service();
+
+    await spawnNonForkChild(svc);
+
+    const childProfile = createdHandles.get('agent-child')!.accessor.get(IAgentProfileService);
+    expect(childProfile.getSessionModelOverride('fallback')).toBe('fb-model');
+    expect(childProfile.getSessionModelOverride('fallbackSecondary')).toBe('fb2-model');
+    expect(childProfile.getSessionModelOverride('substitute')).toBe('sub-model');
+    expect(childProfile.getSessionModelOverride('secondary')).toBeUndefined();
   });
 
   it('applies the profile prompt prefix to the spawned prompt', async () => {

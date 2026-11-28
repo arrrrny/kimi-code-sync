@@ -27,7 +27,7 @@ import {
 } from '#/agent/loop/loop';
 import { createToolSelectResolver } from '#/agent/loop/toolSelectPolicy';
 import { TurnStarted } from '#/agent/loop/turnEvents';
-import { StubEffectiveProfileReader, stubToolExecutor, stubWire } from '../loop/stubs';
+import { StubEffectiveProfileReader, stubLoopRequester, stubToolExecutor, stubWire } from '../loop/stubs';
 import { IAgentStateService } from '#/agent/state/agentState';
 import { IAgentToolPolicyService } from '#/agent/toolPolicy/toolPolicy';
 import { IAgentScopeContext, makeAgentScopeContext } from '#/agent/scopeContext/scopeContext';
@@ -227,9 +227,13 @@ class RecordingEventBus implements IEventBus {
 
 class FakeLoopService extends StubEffectiveProfileReader implements IAgentLoopService {
   readonly _serviceBrand = undefined;
-  readonly requester = {} as IAgentLoopService['requester'];
+  readonly requester = stubLoopRequester();
   readonly started = false;
   readonly hasPersistedState = false;
+
+  requesterForModel(): IAgentLoopService['requester'] {
+    return this.requester;
+  }
 
   resolveMaxOutputTokens(): undefined {
     return undefined;
@@ -299,6 +303,10 @@ class FakeLoopService extends StubEffectiveProfileReader implements IAgentLoopSe
     throw new Error('unused in this suite');
   }
 
+  cancelFromUser(): never {
+    throw new Error('unused in this suite');
+  }
+
   detachTool(): void {}
 
   suppressTaskNotifications(): void {}
@@ -308,7 +316,6 @@ class FakeLoopService extends StubEffectiveProfileReader implements IAgentLoopSe
   }
 
   abortTool(): void {}
-
   snapshot(): LoopSnapshot {
     return {
       state: 'idle',

@@ -32,6 +32,7 @@
 | `/sessions` | `/resume` | 浏览历史会话并切换/恢复 | 否 |
 | `/worktree` | — | 管理当前 Git 仓库的 [worktree](../guides/worktrees.md) | 否 |
 | `/tasks` | `/task` | 浏览后台任务和正在运行的前台 subagent。选中任务后按 `Enter` 查看输出。 | 是 |
+| `/queue` | — | 打开消息队列管理器，管理 Agent 运行期间堆叠起来的消息。用 <kbd>↑</kbd> / <kbd>↓</kbd> 浏览，<kbd>Space</kbd> 选择一条消息以便移动，选中后用 <kbd>↑</kbd> / <kbd>↓</kbd> 调整顺序，<kbd>E</kbd> 编辑，<kbd>D</kbd> 删除，<kbd>Ctrl-S</kbd> 发送选中的消息，<kbd>Ctrl-Shift-S</kbd> 发送全部，<kbd>Esc</kbd> 取消 | 是 |
 | `/fork` | — | 基于当前会话 fork 一份新会话，保留完整对话历史；fork 后仍停留在当前会话 | 否 |
 | `/title [<text>]` | `/rename` | 不带参数时显示当前会话标题；带参数时设置为新标题（最长 200 字符） | 是 |
 | `/compact [<instruction>]` | — | 压缩当前对话上下文，释放 token 占用；可附带自定义指令，提示模型压缩时保留哪些信息；Agent 运行期间使用会加入消息队列，轮到它时自动执行；等待期间若上下文已被自动压缩，该次排队会被跳过 | 是 |

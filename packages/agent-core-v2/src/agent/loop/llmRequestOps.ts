@@ -41,7 +41,6 @@ const llmToolsSnapshotSchema = z.object({
   tools: z.array(llmToolEntrySchema).readonly(),
 });
 
-// Persisted after resolvers and before legalization; the hash covers the complete resolved tool list.
 export class LlmToolsSnapshot extends AgentEvent2<z.infer<typeof llmToolsSnapshotSchema>> {
   static override readonly type = 'llm.tools_snapshot';
   static override readonly durable = true;

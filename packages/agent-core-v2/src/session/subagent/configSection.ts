@@ -11,6 +11,7 @@ import {
 } from '#/app/config/config';
 import { registerConfigSection } from '#/app/config/configSectionContributions';
 import { THINKING_SECTION } from '#/app/kosongConfig/configSection';
+import type { IAgentProfileService, SessionModelOverrideKind } from '#/agent/profile/profile';
 import type { Model } from '#/provider-catalog/model/catalog';
 import {
   declaredDefaultEffortForModel,
@@ -108,6 +109,8 @@ export function resolveSubagentTimeoutMs(config: IConfigService): number {
   );
 }
 
+export const PRIMARY_SUBAGENT_MODEL_CHOICE = 'primary';
+
 export interface SubagentModelPool {
   readonly defaultModel?: string;
   readonly models: Record<string, string>;
@@ -130,10 +133,21 @@ export function resolveSubagentModelPool(config: IConfigService): SubagentModelP
 export const SECONDARY_MODEL_DEFAULT_MODEL_REQUIRED_MESSAGE =
   '[secondary_model].default_model is required when [secondary_model.models] is configured';
 
+export const SECONDARY_MODEL_PRIMARY_MODEL_RESERVED_MESSAGE = `[secondary_model.models] key "${PRIMARY_SUBAGENT_MODEL_CHOICE}" is reserved. Rename the pool entry.`;
+
 export function assertValidSubagentModelPool(
   pool: SubagentModelPool,
   modelCatalog: IProviderCatalogService,
 ): void {
+  if (Object.hasOwn(pool.models, PRIMARY_SUBAGENT_MODEL_CHOICE)) {
+    throw new Error2(ErrorCodes.CONFIG_INVALID, SECONDARY_MODEL_PRIMARY_MODEL_RESERVED_MESSAGE, {
+      details: {
+        section: SECONDARY_MODEL_SECTION,
+        field: 'models',
+        model: PRIMARY_SUBAGENT_MODEL_CHOICE,
+      },
+    });
+  }
   const aliases = Object.keys(pool.models);
   if (pool.defaultModel === undefined) {
     throw new Error2(ErrorCodes.CONFIG_INVALID, SECONDARY_MODEL_DEFAULT_MODEL_REQUIRED_MESSAGE, {
@@ -226,22 +240,59 @@ function assertValidSubagentDefaultEffort(
   }
 }
 
-export type SubagentModelSource = 'inherited' | 'secondary_pool';
+export type SubagentModelSource = 'primary_override' | 'inherited' | 'secondary_pool';
 
 type SubagentBinding = { model: string; thinking?: string; modelSource: SubagentModelSource };
+
+const INHERITED_SESSION_MODEL_OVERRIDE_KINDS: readonly SessionModelOverrideKind[] = [
+  'fallback',
+  'fallbackSecondary',
+  'substitute',
+];
+
+export function inheritFallbackOverrides(
+  target: IAgentProfileService,
+  source: IAgentProfileService,
+): void {
+  for (const kind of INHERITED_SESSION_MODEL_OVERRIDE_KINDS) {
+    target.setSessionModelOverride(kind, source.getSessionModelOverride(kind));
+  }
+}
 
 export function resolveSubagentBinding(
   config: IConfigService,
   own: { modelAlias: string; thinkingLevel: string },
   requested?: string,
+  overrides?: { secondaryAlias?: string },
 ): SubagentBinding {
-  return bindSubagentModel(config, own, requested);
+  const overrideAlias = overrides?.secondaryAlias;
+  if (overrideAlias !== undefined) {
+    return { model: overrideAlias, thinking: own.thinkingLevel, modelSource: 'secondary_pool' };
+  }
+  return bindSubagentModel(config, own, requested, []);
+}
+
+export function resolveSubagentBindingWithPrimary(
+  config: IConfigService,
+  own: { modelAlias: string; thinkingLevel: string },
+  requested?: string,
+  overrides?: { secondaryAlias?: string },
+): SubagentBinding {
+  const overrideAlias = overrides?.secondaryAlias;
+  if (overrideAlias !== undefined) {
+    return { model: overrideAlias, thinking: own.thinkingLevel, modelSource: 'secondary_pool' };
+  }
+  if (requested === PRIMARY_SUBAGENT_MODEL_CHOICE) {
+    return { model: own.modelAlias, thinking: own.thinkingLevel, modelSource: 'primary_override' };
+  }
+  return bindSubagentModel(config, own, requested, [PRIMARY_SUBAGENT_MODEL_CHOICE]);
 }
 
 function bindSubagentModel(
   config: IConfigService,
   own: { modelAlias: string; thinkingLevel: string },
   requested: string | undefined,
+  extraChoices: readonly string[],
 ): SubagentBinding {
   const section = config.get<SecondaryModelConfig | undefined>(SECONDARY_MODEL_SECTION);
   const pool = resolveSubagentModelPool(config);
@@ -255,6 +306,15 @@ function bindSubagentModel(
     }
     return { model: own.modelAlias, thinking: own.thinkingLevel, modelSource: 'inherited' };
   }
+  if (Object.hasOwn(pool.models, PRIMARY_SUBAGENT_MODEL_CHOICE)) {
+    throw new Error2(ErrorCodes.CONFIG_INVALID, SECONDARY_MODEL_PRIMARY_MODEL_RESERVED_MESSAGE, {
+      details: {
+        section: SECONDARY_MODEL_SECTION,
+        field: 'models',
+        model: PRIMARY_SUBAGENT_MODEL_CHOICE,
+      },
+    });
+  }
   const choice = requested ?? pool.defaultModel;
   if (choice === undefined) {
     throw new Error2(ErrorCodes.CONFIG_INVALID, SECONDARY_MODEL_DEFAULT_MODEL_REQUIRED_MESSAGE, {
@@ -262,7 +322,7 @@ function bindSubagentModel(
     });
   }
   if (!Object.hasOwn(pool.models, choice)) {
-    const available = Object.keys(pool.models);
+    const available = [...Object.keys(pool.models), ...extraChoices];
     throw new Error2(
       ErrorCodes.CONFIG_INVALID,
       `Invalid model "${choice}". Available models: ${available.join(', ')}.`,
@@ -280,6 +340,92 @@ export function resolveSubagentThinking(
   if (explicit !== undefined) return explicit;
   if (config.get<ThinkingConfig>(THINKING_SECTION)?.enabled === false) return undefined;
   return declaredDefaultEffortForModel(model?.spec);
+}
+
+export function exposesSubagentModelChoice(config: IConfigService): boolean {
+  const pool = resolveSubagentModelPool(config);
+  return pool !== undefined && Object.keys(pool.models).length > 1;
+}
+
+export function buildSubagentModelDescriptions(config: IConfigService): string | undefined {
+  if (!exposesSubagentModelChoice(config)) return undefined;
+  return poolDescriptionLines(resolveSubagentModelPool(config)!).join('\n');
+}
+
+export function buildSubagentModelDescriptionsWithPrimary(
+  config: IConfigService,
+  callerModelAlias: string | undefined,
+): string | undefined {
+  const pool = resolveSubagentModelPool(config);
+  if (pool === undefined) return undefined;
+  const primaryLabel =
+    callerModelAlias === undefined
+      ? PRIMARY_SUBAGENT_MODEL_CHOICE
+      : `${PRIMARY_SUBAGENT_MODEL_CHOICE} (= ${callerModelAlias})`;
+  return [
+    ...poolDescriptionLines(pool),
+    `- ${primaryLabel}: your current model and thinking level`,
+    "Pool entries don't inherit your thinking level.",
+  ].join('\n');
+}
+
+export function buildSubagentModelSummary(config: IConfigService): string | undefined {
+  if (!exposesSubagentModelChoice(config)) return undefined;
+  const pool = resolveSubagentModelPool(config)!;
+  const labels = orderedPoolAliases(pool).map((alias) =>
+    alias === pool.defaultModel ? `${alias} [default]` : alias,
+  );
+  return `Available models (pass via model): ${labels.join(', ')}.`;
+}
+
+function poolDescriptionLines(pool: SubagentModelPool): string[] {
+  const lines = ['Available models (pass via model):'];
+  for (const alias of orderedPoolAliases(pool)) {
+    const marker = alias === pool.defaultModel ? ' [default]' : '';
+    lines.push(formatPoolLine(`${alias}${marker}`, pool.models[alias]!));
+  }
+  return lines;
+}
+
+function orderedPoolAliases(pool: SubagentModelPool): string[] {
+  const aliases = Object.keys(pool.models);
+  const defaultModel = pool.defaultModel;
+  if (defaultModel === undefined || !Object.hasOwn(pool.models, defaultModel)) return aliases;
+  return [defaultModel, ...aliases.filter((alias) => alias !== defaultModel)];
+}
+
+function formatPoolLine(label: string, description: string): string {
+  return description === '' ? `- ${label}` : `- ${label}: ${description}`;
+}
+
+export function stripSubagentModelParameter(
+  parameters: Record<string, unknown>,
+): Record<string, unknown> {
+  const properties = parameters['properties'];
+  if (!isPlainObject(properties) || !('model' in properties)) return parameters;
+  const nextProperties = { ...properties };
+  delete nextProperties['model'];
+  const next: Record<string, unknown> = { ...parameters, properties: nextProperties };
+  const required = parameters['required'];
+  if (Array.isArray(required) && required.includes('model')) {
+    next['required'] = required.filter((entry) => entry !== 'model');
+  }
+  return next;
+}
+
+export function stripSubagentForkParameter(
+  parameters: Record<string, unknown>,
+): Record<string, unknown> {
+  const properties = parameters['properties'];
+  if (!isPlainObject(properties) || !('fork' in properties)) return parameters;
+  const nextProperties = { ...properties };
+  delete nextProperties['fork'];
+  const next: Record<string, unknown> = { ...parameters, properties: nextProperties };
+  const required = parameters['required'];
+  if (Array.isArray(required) && required.includes('fork')) {
+    next['required'] = required.filter((entry) => entry !== 'fork');
+  }
+  return next;
 }
 
 export function wrapSubagentModelError(

@@ -76,6 +76,10 @@ export class AgentLoopProfileAdapter implements EffectiveProfileReader {
     return this.profile.resolveModelContext(this.snapshot());
   }
 
+  resolveModelContextFor(modelAlias: string): ProfileModelContext {
+    return this.profile.resolveModelContextFor(modelAlias);
+  }
+
   resolveRequestParams(): InitializedLlmRequestPart {
     return this.profile.resolveRequestParams(this.snapshot());
   }

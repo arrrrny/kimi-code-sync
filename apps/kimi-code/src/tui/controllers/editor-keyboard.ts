@@ -80,6 +80,7 @@ export interface EditorKeyboardHost {
   hideSessionPicker(): void;
   openUndoSelector(): void;
   requestExit(): Promise<void>;
+  rotateFavoriteModels(): void;
   ensureSession(): Promise<Session | undefined>;
   handlePlanToggle(next: boolean): void;
   handleInputModeChange(mode: 'prompt' | 'bash'): void;
@@ -294,6 +295,11 @@ export class EditorKeyboardController {
         return;
       }
       togglePlan();
+    };
+
+    editor.onAltM = () => {
+      host.track('shortcut_model_rotate_pressed');
+      host.rotateFavoriteModels();
     };
 
     editor.onInputModeChange = (mode) => {

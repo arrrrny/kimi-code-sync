@@ -1,19 +1,9 @@
 {
   "unresolved": [
     {
-      "file": "AGENTS.md",
-      "reference": "packages/tui",
-      "why": "A path in the upstream earendil-works/pi repository that pi-tui is forked from, not in this one."
-    },
-    {
       "file": "packages/pi-tui/AGENTS.md",
       "reference": "packages/tui",
       "why": "A path in the upstream earendil-works/pi repository that pi-tui is forked from, not in this one."
-    },
-    {
-      "file": "docs/AGENTS.md",
-      "reference": "docs/.vitepress/dist",
-      "why": "The VitePress build output; it exists only after the docs site is built."
     },
     {
       "file": "apps/kimi-code/AGENTS.md",
@@ -24,6 +14,151 @@
       "file": "apps/kimi-code/AGENTS.md",
       "reference": "apps/kimi-code/web-dist",
       "why": "The web bundle copied into the CLI during prebuild, ignored by Git."
+    },
+    {
+      "file": "AGENTS.md",
+      "reference": "apps/web",
+      "why": "The browser web UI source lives in the code-app repo; only the prebuilt bundle ships here."
+    },
+    {
+      "file": "AGENTS.md",
+      "reference": "apps/kimi-code/dist-web",
+      "why": "The web bundle copied into the CLI during prebuild; gitignored, force-added."
+    },
+    {
+      "file": "AGENTS.md",
+      "reference": "packages/core/docs/llm/calling.md",
+      "why": "Upstream core LLM design doc path; not present in this fork's tree."
+    },
+    {
+      "file": "AGENTS.md",
+      "reference": "packages/core/docs/llm/building.md",
+      "why": "Upstream core LLM design doc path; not present in this fork's tree."
+    },
+    {
+      "file": "AGENTS.md",
+      "reference": "packages/core/docs/llm/building-reference.md",
+      "why": "Upstream core LLM design doc path; not present in this fork's tree."
+    },
+    {
+      "file": "AGENTS.md",
+      "reference": "packages/core/docs/llm/maintaining.md",
+      "why": "Upstream core LLM design doc path; not present in this fork's tree."
+    },
+    {
+      "file": "AGENTS.md",
+      "reference": "packages/core/docs/llm/maintenance-guide.md",
+      "why": "Upstream core LLM design doc path; not present in this fork's tree."
+    },
+    {
+      "file": "AGENTS.md",
+      "reference": "packages/transcript",
+      "why": "Upstream package path; this fork's transcript data layer lives under packages/core."
+    },
+    {
+      "file": "AGENTS.md",
+      "reference": "packages/kap-server/test/__snapshots__/apiSurface.snapshot.test.ts.snap",
+      "why": "Generated vitest snapshot; not committed in this fork."
+    },
+    {
+      "file": "AGENTS.md",
+      "reference": "docs/forklift-scripts.md",
+      "why": "Forklift pipeline reference doc; its canonical copy lives in the forklift repo."
+    },
+    {
+      "file": "docs/AGENTS.md",
+      "reference": "./config.md",
+      "why": "Example link in the docs contribution template."
+    },
+    {
+      "file": "docs/AGENTS.md",
+      "reference": "/path",
+      "why": "Placeholder path in the docs page template."
+    },
+    {
+      "file": "packages/agent-core-v2/AGENTS.md",
+      "reference": "packages/agent-core",
+      "why": "Predecessor (v1) engine package; the v2 engine under agent-core-v2 replaced it."
+    },
+    {
+      "file": "packages/agent-core-v2/AGENTS.md",
+      "reference": "src/session/sessionSeed/sessionSeedAdapters.ts",
+      "why": "Describes a seed-adapter unit; the path is illustrative of the v2 wiring, not a literal file."
+    },
+    {
+      "file": "packages/agent-core-v2/AGENTS.md",
+      "reference": ".kimi-code/local.toml",
+      "why": "Workspace-local runtime config, created on demand; not committed."
+    },
+    {
+      "file": "packages/agent-core-v2/AGENTS.md",
+      "reference": ".kimi-code/mcp.json",
+      "why": "Workspace-local MCP config, created on demand; not committed."
+    },
+    {
+      "file": "packages/agent-core-v2/AGENTS.md",
+      "reference": "../kimi-code-mini-bench",
+      "why": "Sibling benchmark checkout outside this repository."
+    },
+    {
+      "file": "packages/agent-core-v2/AGENTS.md",
+      "reference": "../kimi-code-mini-bench/README.md",
+      "why": "Sibling benchmark checkout outside this repository."
+    },
+    {
+      "file": "packages/agent-core-v2/AGENTS.md",
+      "reference": "docs/di.md",
+      "why": "Upstream agent-core-v2 design doc path; not present in this fork's docs tree."
+    },
+    {
+      "file": "packages/agent-core-v2/AGENTS.md",
+      "reference": "docs/service-design.md",
+      "why": "Upstream agent-core-v2 design doc path; not present in this fork's docs tree."
+    },
+    {
+      "file": "packages/agent-core-v2/AGENTS.md",
+      "reference": "docs/flag.md",
+      "why": "Upstream agent-core-v2 design doc path; not present in this fork's docs tree."
+    },
+    {
+      "file": "packages/agent-core-v2/AGENTS.md",
+      "reference": "docs/errors.md",
+      "why": "Upstream agent-core-v2 design doc path; not present in this fork's docs tree."
+    },
+    {
+      "file": "packages/agent-core-v2/AGENTS.md",
+      "reference": "docs/di-testing.md",
+      "why": "Upstream agent-core-v2 design doc path; not present in this fork's docs tree."
+    },
+    {
+      "file": "packages/agent-core-v2/AGENTS.md",
+      "reference": "docs/features.md",
+      "why": "Upstream agent-core-v2 design doc path; not present in this fork's docs tree."
+    },
+    {
+      "file": "packages/core/AGENTS.md",
+      "reference": "src/contract",
+      "why": "Upstream contract dir path; this fork's transcript contracts live elsewhere."
+    },
+    {
+      "file": "packages/core/AGENTS.md",
+      "reference": "docs/sdk.md",
+      "why": "Upstream SDK doc path; not present in this fork's tree."
+    },
+    {
+      "file": "packages/kap-server/AGENTS.md",
+      "reference": "src/routes/v2/sessions.ts",
+      "why": "Upstream v2 route path; not present in this fork's kap-server tree."
+    },
+    {
+      "file": "packages/kap-server/AGENTS.md",
+      "reference": "src/routes/registerApiV2Routes.ts",
+      "why": "Upstream v2 route path; not present in this fork's kap-server tree."
+    },
+    {
+      "file": "packages/kap-server/AGENTS.md",
+      "reference": "src/routes/v2/mcp.ts",
+      "why": "Upstream v2 route path; not present in this fork's kap-server tree."
     }
   ]
 }

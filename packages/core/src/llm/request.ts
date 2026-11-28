@@ -86,12 +86,27 @@ export interface LlmRequestModel {
 export interface LlmCredential {
   readonly apiKey?: string;
   readonly headers?: Record<string, string>;
+  readonly proxyUrl?: string;
+}
+
+export type LlmKeyRotationOutcome =
+  | { readonly outcome: 'rotated'; readonly keyId: string; readonly name: string }
+  | { readonly outcome: 'already-advanced'; readonly keyId: string; readonly name: string }
+  | { readonly outcome: 'unavailable' };
+
+export interface LlmKeyRotationController {
+  readonly providerName: string;
+  readonly keyCount: number;
+  plan(): { readonly keyId: string; readonly name: string } | undefined;
+  rotate(expectedKeyId: string | undefined): Promise<LlmKeyRotationOutcome>;
 }
 
 export interface LlmCredentialProvider {
   resolve(): Promise<LlmCredential | undefined> | LlmCredential | undefined;
   canRecover?(error: unknown): boolean;
   invalidate?(): void;
+  rotation?(): LlmKeyRotationController | undefined;
+  readonly keyCount?: number;
 }
 
 export interface LlmFileInput {
@@ -123,6 +138,7 @@ export interface LlmFiles {
 
 export interface LlmEndpoint {
   readonly baseUrl?: string;
+  readonly proxyUrl?: string;
   readonly headers?: Record<string, string>;
   readonly credentials?: LlmCredentialProvider;
   readonly defaultBaseUrl?: string;

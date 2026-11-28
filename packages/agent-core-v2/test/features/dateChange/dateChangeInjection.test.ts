@@ -296,7 +296,8 @@ describe('AgentDateChangeService', () => {
     expect(dateReminders(context)).toHaveLength(1);
 
     ctx.expectCacheBreak('undo rewrites the history', { at: 'history' });
-    await ctx.get(IAgentConversationUndoService).undo(1);
+    expect(await ctx.get(IAgentConversationUndoService).undo(1)).toBe(1);
+    expect(context.history().some((message) => messageText(message).includes('first turn'))).toBe(false);
     expect(dateReminders(context)).toHaveLength(1);
     ctx.mockNextResponse({ type: 'text', text: 'replacement answer' });
     await ctx.rpc.prompt({ input: [{ type: 'text', text: 'replacement turn' }] });
@@ -320,7 +321,8 @@ describe('AgentDateChangeService', () => {
     expect(dateReminders(context)).toHaveLength(1);
 
     ctx.expectCacheBreak('undo rewrites the history', { at: 'history' });
-    await ctx.get(IAgentConversationUndoService).undo(1);
+    expect(await ctx.get(IAgentConversationUndoService).undo(1)).toBe(1);
+    expect(context.history().some((message) => messageText(message).includes('first turn'))).toBe(false);
     expect(dateReminders(context)).toHaveLength(1);
     ctx.mockNextResponse({ type: 'text', text: 'replacement answer' });
     await ctx.rpc.prompt({ input: [{ type: 'text', text: 'replacement turn' }] });

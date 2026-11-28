@@ -27,7 +27,7 @@
 // references become '(circular)', and class instances collapse to a '(ClassName)'
 // marker — the wire shape of an entry is the JSON projection of the type here.
 //
-// Index (App: 0 keys · Workspace: 8 keys · Session: 9 keys · Agent: 61 keys)
+// Index (App: 0 keys · Workspace: 8 keys · Session: 9 keys · Agent: 62 keys)
 //   App
 //   Workspace
 //     workspaceDirs.ephemeralDirs          src/project/projectDirs/projectDirsService.ts
@@ -90,6 +90,7 @@
 //     profile.emittedThinkingEffortWarnings           src/agent/profile/profileService.ts
 //     profile.emittedToolPatternWarnings              src/agent/profile/profileService.ts
 //     shellCommand.tasks                              src/agent/shellCommand/shellCommandService.ts
+//     squeezeModel                                    src/agent/fullCompaction/squeezeForkOps.ts
 //     swarm                                           src/features/swarm/swarmOps.ts
 //     task                                            src/agent/task/taskOps.ts
 //     toolDedupe.activeStep                           src/agent/toolDedupe/toolDedupeService.ts
@@ -940,6 +941,12 @@ export interface AgentStateSnapshot {
   'fullCompaction.consecutiveOverflowCompactions': number;
   'fullCompaction.lastCompactedTokenCount': number | null;
   'fullCompaction.observedMaxContextTokensByModel': Map<string, number>;
+  // src/agent/fullCompaction/squeezeForkOps.ts
+  // replayable · durable — folds: SqueezeModelDecided
+  'squeezeModel': /* SqueezeModelState — packages/agent-core-v2/src/agent/fullCompaction/squeezeForkOps.ts */ {
+    readonly model: string;
+    readonly modelDisplay?: string;
+  };
   // src/agent/interruptionReminder/interruptionReminderOps.ts
   // replayable · durable · undoable — folds: InterruptionCancellationRequested, InterruptionReminderRecorded
   'interruptionReminder': /* InterruptionReminderState — packages/agent-core-v2/src/agent/interruptionReminder/interruptionReminderOps.ts */ {

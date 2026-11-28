@@ -1,6 +1,8 @@
 import { toDisposable } from '#/_base/di/lifecycle';
 import type { IAgentLoopService, LoopErrorHandler, LoopErrorHandlerRegistrationOptions, LoopNotify, LoopNotifyMessage, PromptHandle, PromptPayload, Turn, TurnResult } from '#/agent/loop/loop';
 import type { LoopHooks } from '@moonshot-ai/core/loop/contract/hook';
+import type { FullLoopLlmRequester } from '@moonshot-ai/core/loop/request';
+import { createRequester } from '@moonshot-ai/core/llm/requester';
 import { ToolExecutor } from '#/tool/executor';
 import type { Message, UserMessage } from '@moonshot-ai/core/llm/message';
 import { contextFromHistoryEntry, historyFromContext } from '#/agent/loop/history';
@@ -42,7 +44,9 @@ export function submitPromptTurn(
       get state() {
         return backing?.state ?? (settledCancelled ? 'cancelled' : 'queued');
       },
-      signal: controller.signal,
+      get signal() {
+        return backing?.signal ?? controller.signal;
+      },
       ready: handle.launched.then(async (turn) => {
         await turn?.ready;
       }),
@@ -98,6 +102,7 @@ export class StubEffectiveProfileReader {
   data() { return { modelCapabilities: UNKNOWN_CAPABILITY, thinkingLevel: 'off', systemPrompt: '' }; }
   getEffectiveThinkingLevel() { return 'off' as const; }
   resolveModelContext(): never { throw new Error('model is not configured'); }
+  resolveModelContextFor(): never { throw new Error('model is not configured'); }
   resolveRequestParams() { return {}; }
   getModelCapabilities(): ModelCapability { return UNKNOWN_CAPABILITY; }
   getModelProviderType() { return undefined; }
@@ -112,6 +117,10 @@ export class StubEffectiveProfileReader {
   republishStatus(): void {}
   addActiveTool(): void {}
   removeActiveTool(): void {}
+}
+
+export function stubLoopRequester(): FullLoopLlmRequester {
+  return createRequester() as FullLoopLlmRequester;
 }
 
 export function stubLoopWithHooks(options: StubLoopOptions = {}): StubLoop {
@@ -132,9 +141,11 @@ export function stubLoopWithHooks(options: StubLoopOptions = {}): StubLoop {
   };
   const hasPending = () => pending.length > 0;
   const messages: ContextMessage[] = [];
+  const requester = stubLoopRequester();
   const stub: StubLoop = {
     _serviceBrand: undefined, hooks, launches, cancels, startTurn, batchStartingHooks,
-    requester: {} as IAgentLoopService['requester'],
+    requester,
+    requesterForModel: () => requester,
     resolveMaxOutputTokens: () => undefined,
     registerToolBatchStarting(hook) {
       batchStartingHooks.push(hook);
@@ -159,6 +170,7 @@ export function stubLoopWithHooks(options: StubLoopOptions = {}): StubLoop {
     data: () => ({ modelCapabilities: UNKNOWN_CAPABILITY, thinkingLevel: 'off', systemPrompt: '' }),
     getEffectiveThinkingLevel: () => 'off',
     resolveModelContext: () => { throw new Error('model is not configured'); },
+    resolveModelContextFor: () => { throw new Error('model is not configured'); },
     resolveRequestParams: () => ({}),
     getModelCapabilities: () => UNKNOWN_CAPABILITY,
     getModelProviderType: () => undefined,
@@ -276,6 +288,7 @@ export function stubLoopWithHooks(options: StubLoopOptions = {}): StubLoop {
     },
     promptHandle: (id) => handles.get(id),
     cancel(target, reason) { cancels.push({ turnId: target?.turnId, reason }); if (target?.promptId !== undefined) return true; if (active === undefined || (target?.turnId !== undefined && active.id !== target.turnId)) return false; active.cancel(reason); return true; },
+    cancelFromUser(turnId) { stub.cancel(turnId === undefined ? undefined : { turnId }); },
     detachTool: () => {},
     suppressTaskNotifications: () => {},
     abortTool: () => {},

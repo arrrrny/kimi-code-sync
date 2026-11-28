@@ -86,6 +86,7 @@ import {
 } from './model/catalog';
 import { ModelCatalogErrors } from './model/errors';
 import { IHostRequestHeaders } from './model/host-request-headers';
+import { createKeyedCredentialProvider } from './provider/apiKeyRotation';
 import type {
   DefaultModelChangedEvent,
   ModelRecord,
@@ -133,6 +134,7 @@ export interface IProviderCatalogService {
   getProviderConfig(name: string): ProviderConfig | undefined;
   listProviderConfigs(): Readonly<Record<string, ProviderConfig>>;
   setProviderConfig(name: string, config: ProviderConfig): Promise<void>;
+  setActiveApiKey(name: string, keyId: string): Promise<void>;
   deleteProviderConfig(name: string): Promise<void>;
   loadProviderConfigs(providers: ProvidersSection, defaultProvider: string | undefined): void;
   replaceProviderConfigs(providers: ProvidersSection): Promise<void>;
@@ -289,6 +291,13 @@ export class ProviderCatalogService extends Disposable implements IProviderCatal
 
   setProviderConfig(name: string, config: ProviderConfig): Promise<void> {
     return this.providerStore.set(name, config);
+  }
+
+  async setActiveApiKey(name: string, keyId: string): Promise<void> {
+    await this.ready;
+    const config = this.providerStore.get(name);
+    if (config === undefined) return;
+    await this.setProviderConfig(name, { ...config, activeApiKeyId: keyId });
   }
 
   deleteProviderConfig(name: string): Promise<void> {
@@ -621,6 +630,7 @@ export class ProviderCatalogService extends Disposable implements IProviderCatal
       },
       endpoint: {
         baseUrl: resolvedBaseUrl,
+        proxyUrl: nonEmpty(this.getProviderConfig(providerName)?.proxyUrl),
         headers: resolveOutboundHeaders(
           providerConfig?.type,
           providerConfig?.customHeaders,
@@ -696,6 +706,14 @@ export class ProviderCatalogService extends Disposable implements IProviderCatal
     auth: ResolvedModelAuthMaterial,
   ): LlmCredentialProvider {
     if (auth.apiKey !== undefined) {
+      const configured = this.getProviderConfig(providerName);
+      if (configured !== undefined && Object.keys(configured.apiKeys ?? {}).length > 0) {
+        return createKeyedCredentialProvider({
+          providers: this,
+          providerName,
+          fallbackApiKey: auth.apiKey,
+        });
+      }
       return createStaticCredentialProvider(auth.apiKey);
     }
     if (auth.apiKeyEnv !== undefined) {

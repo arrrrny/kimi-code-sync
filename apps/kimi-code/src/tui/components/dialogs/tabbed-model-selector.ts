@@ -21,6 +21,10 @@ import {
 
 const ALL_TAB_ID = 'all';
 const ALL_TAB_LABEL = 'All';
+const FAVORITES_TAB_ID = 'favorites';
+const FAVORITES_TAB_LABEL = 'Favorites';
+const FAVORITES_EMPTY_MESSAGE =
+  'No favorites yet — highlight a model and press Shift+A to add it';
 
 export interface TabbedModelSelectorOptions {
   readonly models: Record<string, ModelAlias>;
@@ -33,6 +37,8 @@ export interface TabbedModelSelectorOptions {
   readonly warning?: string;
   readonly thinkingControl?: boolean;
   readonly effortDescriptions?: Readonly<Record<string, string>>;
+  readonly favoriteAliases?: readonly string[];
+  readonly onToggleFavorite?: (alias: string) => void;
   readonly onSelect: (selection: ModelSelection) => void;
   readonly onSessionOnlySelect?: (selection: ModelSelection) => void;
   readonly onCancel: () => void;
@@ -46,19 +52,26 @@ interface ModelTab {
 
 export class TabbedModelSelectorComponent extends DockSection implements Focusable {
   private _focused = false;
-  private readonly tabs: readonly ModelTab[];
+  private readonly opts: TabbedModelSelectorOptions;
+  private tabs: readonly ModelTab[];
   private activeIndex: number;
+  private favoriteAliases: readonly string[];
   private readonly shownAt = Date.now();
   private tabStripRow = -1;
   private tabHitRanges: readonly TabStripHitRange[] = [];
 
-  constructor(readonly opts: TabbedModelSelectorOptions) {
+  constructor(opts: TabbedModelSelectorOptions) {
     super(opts.layout);
-    this.tabs = buildTabs(opts);
+    this.opts = opts;
+    this.favoriteAliases = opts.favoriteAliases ?? [];
+    this.tabs = buildTabs(opts, this.favoriteAliases);
 
-    const initialTabIdx = opts.initialTabId
+    let initialTabIdx = opts.initialTabId
       ? this.tabs.findIndex((tab) => tab.id === opts.initialTabId)
       : -1;
+    if (initialTabIdx === -1) {
+      initialTabIdx = defaultTabIndex(opts, this.favoriteAliases, this.tabs);
+    }
     this.activeIndex = Math.max(initialTabIdx, 0);
     this.syncFocusToActive();
     this.ensureActiveSelectionVisible();
@@ -71,6 +84,16 @@ export class TabbedModelSelectorComponent extends DockSection implements Focusab
   set focused(value: boolean) {
     this._focused = value;
     this.syncFocusToActive();
+  }
+
+  setFavoriteAliases(favorites: readonly string[]): void {
+    const activeId = this.tabs[this.activeIndex]?.id;
+    this.favoriteAliases = favorites;
+    this.tabs = buildTabs(this.opts, favorites);
+    const nextIndex = this.tabs.findIndex((tab) => tab.id === activeId);
+    this.activeIndex = nextIndex === -1 ? Math.max(defaultTabIndex(this.opts, favorites, this.tabs), 0) : nextIndex;
+    this.syncFocusToActive();
+    this.invalidate();
   }
 
   handleInput(data: string): void {
@@ -197,7 +220,29 @@ export class TabbedModelSelectorComponent extends DockSection implements Focusab
   }
 }
 
-function buildTabs(opts: TabbedModelSelectorOptions): readonly ModelTab[] {
+function usableFavorites(
+  favorites: readonly string[],
+  models: Record<string, ModelAlias>,
+): readonly string[] {
+  return favorites.filter((alias) => models[alias] !== undefined);
+}
+
+function defaultTabIndex(
+  opts: TabbedModelSelectorOptions,
+  favorites: readonly string[],
+  tabs: readonly ModelTab[],
+): number {
+  if (opts.favoriteAliases !== undefined && usableFavorites(favorites, opts.models).length > 0) {
+    const idx = tabs.findIndex((tab) => tab.id === FAVORITES_TAB_ID);
+    if (idx !== -1) return idx;
+  }
+  return tabs.findIndex((tab) => tab.id === ALL_TAB_ID);
+}
+
+function buildTabs(
+  opts: TabbedModelSelectorOptions,
+  favorites: readonly string[],
+): readonly ModelTab[] {
   const entries = Object.entries(opts.models);
   const minBodyRows =
     opts.layout !== undefined ? Math.min(opts.layout.maxBodyRows, entries.length) : undefined;
@@ -211,13 +256,27 @@ function buildTabs(opts: TabbedModelSelectorOptions): readonly ModelTab[] {
     }
   }
 
-  const tabs: ModelTab[] = [
-    {
-      id: ALL_TAB_ID,
-      label: ALL_TAB_LABEL,
-      selector: makeSelector(opts, opts.models, minBodyRows),
-    },
-  ];
+  const favoriteSet = new Set(favorites);
+  const tabs: ModelTab[] = [];
+
+  if (opts.favoriteAliases !== undefined) {
+    const subset: Record<string, ModelAlias> = {};
+    for (const alias of favorites) {
+      const model = opts.models[alias];
+      if (model !== undefined) subset[alias] = model;
+    }
+    tabs.push({
+      id: FAVORITES_TAB_ID,
+      label: FAVORITES_TAB_LABEL,
+      selector: makeSelector(opts, subset, minBodyRows, favoriteSet, FAVORITES_EMPTY_MESSAGE),
+    });
+  }
+
+  tabs.push({
+    id: ALL_TAB_ID,
+    label: ALL_TAB_LABEL,
+    selector: makeSelector(opts, opts.models, minBodyRows, favoriteSet),
+  });
   for (const providerId of providerIds) {
     const subset: Record<string, ModelAlias> = {};
     for (const [alias, model] of entries) {
@@ -226,7 +285,7 @@ function buildTabs(opts: TabbedModelSelectorOptions): readonly ModelTab[] {
     tabs.push({
       id: providerId,
       label: providerDisplayName(providerId),
-      selector: makeSelector(opts, subset, minBodyRows),
+      selector: makeSelector(opts, subset, minBodyRows, favoriteSet),
     });
   }
   return tabs;
@@ -236,6 +295,8 @@ function makeSelector(
   opts: TabbedModelSelectorOptions,
   subset: Record<string, ModelAlias>,
   minBodyRows: number | undefined,
+  favoriteSet: ReadonlySet<string>,
+  emptyMessage?: string,
 ): ModelSelectorComponent {
   const candidate = opts.selectedValue ?? opts.currentValue;
   const selectedValue = subset[candidate] !== undefined ? candidate : undefined;
@@ -251,6 +312,9 @@ function makeSelector(
     warning: opts.warning,
     thinkingControl: opts.thinkingControl,
     effortDescriptions: opts.effortDescriptions,
+    favoriteAliases: favoriteSet,
+    ...(emptyMessage !== undefined ? { emptyMessage } : {}),
+    ...(opts.onToggleFavorite !== undefined ? { onToggleFavorite: opts.onToggleFavorite } : {}),
     onSelect: opts.onSelect,
     onSessionOnlySelect: opts.onSessionOnlySelect,
     onCancel: opts.onCancel,

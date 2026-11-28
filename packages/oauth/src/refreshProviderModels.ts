@@ -12,6 +12,7 @@ import {
 import {
   applyManagedApiKeyProviderModels,
   applyManagedKimiCodeConfig,
+  applyOpenAiCompatibleCatalog,
   fetchManagedKimiCodeModels,
   KIMI_CODE_PLATFORM_ID,
   KIMI_CODE_PROVIDER_NAME,
@@ -21,6 +22,7 @@ import {
   type ManagedKimiOAuthRef,
 } from './managed-kimi-code';
 import { isManagedKimiCodeBaseUrl } from './managed-usage';
+import { fetchOpenAIProviderModels } from './openai-compatible';
 import {
   applyOpenPlatformConfig,
   fetchOpenPlatformModels,
@@ -74,9 +76,12 @@ interface ProviderView {
   readonly baseUrl?: string;
   readonly apiKey?: string;
   readonly apiKeyEnv?: unknown;
+  readonly apiKeys?: Record<string, { key: string; name: string }>;
+  readonly activeApiKeyId?: string;
   readonly oauth?: ManagedKimiOAuthRef;
   readonly source?: unknown;
   readonly env?: unknown;
+  readonly freeModelsOnly?: boolean;
 }
 
 function resolveProviderApiKey(provider: ProviderView, providerName: string): string | undefined {
@@ -112,7 +117,10 @@ function readProvider(
 ): ProviderView | undefined {
   const provider = config.providers[providerId];
   if (provider === undefined) return undefined;
-  return provider as ProviderView;
+  const view = provider as ProviderView;
+  const rawFree = (provider as Record<string, unknown>)['freeModelsOnly'];
+  const freeModelsOnly = typeof rawFree === 'boolean' ? rawFree : undefined;
+  return { ...view, freeModelsOnly };
 }
 
 function readModel(
@@ -802,4 +810,88 @@ export async function refreshProviderModels(
   }
 
   return { changed, unchanged, failed, retiredDefault };
+}
+
+export interface RefreshCatalogResult {
+  readonly changed: readonly ProviderChange[];
+  readonly unchanged: readonly string[];
+  readonly failed: ReadonlyArray<{ provider: string; reason: string }>;
+}
+
+export async function refreshProviderCatalog(
+  host: RefreshProviderHost,
+  options: { providerId?: string; userAgent?: string } = {},
+): Promise<RefreshCatalogResult> {
+  const changed: ProviderChange[] = [];
+  const unchanged: string[] = [];
+  const failed: Array<{ provider: string; reason: string }> = [];
+  const targetId = options.providerId;
+
+  let config = await host.getConfig();
+  const openAiCompatibleTypes = new Set(['openai', 'openai_responses']);
+
+  for (const providerId of Object.keys(config.providers)) {
+    if (providerId === KIMI_CODE_PROVIDER_NAME) continue;
+    if (isOpenPlatformId(providerId)) continue;
+    if (targetId !== undefined && targetId !== providerId) continue;
+    const provider = readProvider(config, providerId);
+    if (provider === undefined) continue;
+    if (!openAiCompatibleTypes.has(provider.type ?? '')) continue;
+    if (readCustomRegistrySource(provider) !== undefined) continue;
+    if (provider.baseUrl === undefined || provider.baseUrl.length === 0) continue;
+    const apiKey = resolveProviderApiKey(provider, providerId);
+    if (apiKey === undefined) continue;
+
+    try {
+      const models = await fetchOpenAIProviderModels(provider.baseUrl, apiKey, {
+        userAgent: options.userAgent ?? host.userAgent,
+      });
+      if (models.length === 0) continue;
+
+      const filteredModels = provider.freeModelsOnly
+        ? models.filter((m) => m.id.toLowerCase().includes('free'))
+        : models;
+      if (filteredModels.length === 0) {
+        continue;
+      }
+
+      config = await rebaseSelectionAfterFetch(host, config);
+      const aliasPrefix = `${providerId}/`;
+      const next = structuredClone(config);
+      applyOpenAiCompatibleCatalog(next, providerId, filteredModels, aliasPrefix);
+      const refreshedAliasKeys = providerRefreshAliasKeys(config, next, providerId, aliasPrefix);
+      restoreProviderAliases(
+        next,
+        preserveUserProviderAliases(config, providerId, refreshedAliasKeys),
+      );
+      restoreDefaultSelection(next, config.defaultModel, config.thinking?.enabled);
+      clampDanglingDefault(next);
+      clearDefaultThinkingWhenDefaultRemoved(next, config.defaultModel);
+
+      if (providerModelsEqual(config, next, providerId, refreshedAliasKeys)) {
+        unchanged.push(providerId);
+      } else {
+        const { added, removed } = computeChanges(
+          collectModelIdsForAliases(config, refreshedAliasKeys),
+          collectModelIdsForAliases(next, refreshedAliasKeys),
+        );
+        await host.removeProvider(providerId);
+        config = await host.setConfig({
+          providers: next.providers,
+          models: next.models,
+          defaultModel: next.defaultModel,
+          thinking: next.thinking,
+          defaultProvider: next['defaultProvider'],
+        });
+        changed.push({ providerId, providerName: providerId, added, removed });
+      }
+    } catch (error) {
+      failed.push({
+        provider: providerId,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return { changed, unchanged, failed };
 }

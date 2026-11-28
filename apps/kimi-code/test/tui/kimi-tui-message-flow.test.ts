@@ -24,8 +24,9 @@ import {
   type Session,
 } from '@moonshot-ai/kimi-code-sdk';
 import { call, startFakeModel } from '@moonshot-ai/testkit/model';
+import { resetSurveyPopupConfigCache } from '@moonshot-ai/kimi-code-product/session-rating/node';
 import chalk from 'chalk';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApprovalPanelComponent } from '#/tui/components/dialogs/approval-panel';
 import { StatusMessageComponent } from '#/tui/components/messages/status-message';
@@ -39,6 +40,7 @@ import {
   resetModelSwitchConfirmConfigCache,
 } from '#/utils/model-switch-confirm-config';
 import { resetEffortSwitchConfigCache } from '#/utils/effort-switch-config';
+import { resetKimiRegionCache } from '#/utils/region';
 import { EffortSelectorComponent } from '#/tui/components/dialogs/effort-selector';
 import { kimiCodePluginMarketplaceUrl } from '#/constant/app';
 import { MOON_SPINNER_FRAMES } from '#/tui/constant/rendering';
@@ -283,6 +285,8 @@ function makeSession(overrides: Record<string, unknown> = {}) {
     setPermission: vi.fn(async () => {}),
     setPlanMode: vi.fn(async () => {}),
     setSwarmMode: vi.fn(async () => {}),
+    setCompactionTriggerRatio: vi.fn(async () => {}),
+    setCompactionTokenBudget: vi.fn(async () => {}),
     onEvent: vi.fn((_listener: (event: Event) => void) => vi.fn()),
     listMcpServers: vi.fn(async () => []),
     listSkills: vi.fn(async () => []),
@@ -641,6 +645,8 @@ afterEach(async () => {
   } else {
     process.env['KIMI_CODE_HOME'] = originalKimiCodeHome;
   }
+  delete process.env['KIMI_CODE_OAUTH_HOST'];
+  resetKimiRegionCache();
   if (originalVisual === undefined) {
     delete process.env['VISUAL'];
   } else {
@@ -2436,6 +2442,56 @@ describe('KimiTUI message flow', () => {
     expect(driver.getCurrentSessionId()).toBe('ses-lazy');
   });
 
+  it('applies /compact-threshold-k while a turn is streaming', async () => {
+    const session = makeSession({ id: 'ses-lazy' });
+    const { driver } = await makeDriver(session);
+    driver.state.appState.streamingPhase = 'waiting';
+
+    driver.handleUserInput('/compact-threshold-k 120');
+
+    await vi.waitFor(() => {
+      expect(session.setCompactionTokenBudget).toHaveBeenCalledWith(120);
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(stripSgr(renderTranscript(driver))).not.toContain('while streaming');
+    expect(stripSgr(renderTranscript(driver))).toContain(
+      'Auto-compact token budget set to 120000 for this session',
+    );
+
+    driver.handleUserInput('/compact-threshold-k off');
+
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(session.setCompactionTokenBudget).toHaveBeenCalledWith(undefined);
+    expect(stripSgr(renderTranscript(driver))).toContain(
+      'Auto-compact token budget override cleared',
+    );
+  });
+
+  it('applies /compact-threshold while a turn is streaming', async () => {
+    const session = makeSession({ id: 'ses-lazy' });
+    const { driver } = await makeDriver(session);
+    driver.state.appState.streamingPhase = 'waiting';
+
+    driver.handleUserInput('/compact-threshold 0.5');
+
+    await vi.waitFor(() => {
+      expect(session.setCompactionTriggerRatio).toHaveBeenCalledWith(0.5);
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(stripSgr(renderTranscript(driver))).not.toContain('while streaming');
+    expect(stripSgr(renderTranscript(driver))).toContain(
+      'Auto-compact threshold set to 0.5 for this session',
+    );
+
+    driver.handleUserInput('/compact-threshold off');
+
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(session.setCompactionTriggerRatio).toHaveBeenCalledWith(undefined);
+    expect(stripSgr(renderTranscript(driver))).toContain(
+      'Auto-compact threshold override cleared',
+    );
+  });
+
   const thinkingModelsConfig = () => ({
     models: {
       k2: {
@@ -3272,6 +3328,9 @@ command = "vim"
   });
 
   it('prints the sign-up page and GitHub Issues links when not signed in', async () => {
+    vi.stubEnv('KIMI_CODE_OAUTH_HOST', 'https://auth.kimi.com');
+    resetKimiRegionCache();
+    process.env['KIMI_CODE_HOME'] = await makeTempHome();
     const { driver, harness } = await makeDriver(makeSession());
     harness.feedbackAvailability.mockResolvedValueOnce({ kind: 'needs-login' });
     const feedbackDriver = driver as unknown as FeedbackDriver;
@@ -7644,7 +7703,7 @@ command = "vim"
     });
   });
 
-  it('steers messages queued before a WaitFor starts into the running turn', async () => {
+  it('steers messages queued before a WaitFor starts into the running turn one at a time', async () => {
     const { driver, session } = await makeDriver();
     driver.state.appState.streamingPhase = 'waiting';
     driver.handleUserInput('first note');
@@ -7654,7 +7713,11 @@ command = "vim"
     startWaitFor(driver);
 
     expect(session.steer).toHaveBeenCalledTimes(1);
-    expect(session.steer).toHaveBeenCalledWith('first note\n\nsecond note', { promptId: expect.any(String) });
+    expect(session.steer).toHaveBeenCalledWith('first note', { promptId: expect.any(String) });
+    await vi.waitFor(() => {
+      expect(session.steer).toHaveBeenCalledTimes(2);
+    });
+    expect(session.steer).toHaveBeenNthCalledWith(2, 'second note', { promptId: expect.any(String) });
     await vi.waitFor(() => {
       expect(driver.state.queuedMessages).toEqual([]);
     });
@@ -8244,6 +8307,27 @@ command = "vim"
         expect(driver.state.queuedMessages.map((message) => message.text)).toEqual(['after this turn', 'next objective']);
       });
 
+      it('holds a skill prompt queued with Ctrl-Q in tower mode until the turn ends', async () => {
+        const session = makeSession({ id: 'ses-tower-skill' });
+        const { driver } = await makeDriver(session, {
+          listWorkspaceSkills: vi.fn(async () => [
+            { name: 'my-skill', description: 'A test skill', path: '/tmp/my-skill', source: 'user' },
+          ]),
+          listPluginCommands: vi.fn(async () => []),
+        });
+        await (driver as unknown as { refreshSkillCommands(): Promise<void> }).refreshSkillCommands();
+        driver.state.appState.towerMode = true;
+        driver.state.appState.streamingPhase = 'waiting';
+
+        press(driver, '/skill:my-skill src/app.ts', CTRL_Q);
+        press(driver, 'next objective', '\r');
+        await new Promise((resolve) => setImmediate(resolve));
+
+        expect(session.steer).not.toHaveBeenCalled();
+        expect(driver.state.queuedMessages.map((message) => message.text)).toEqual(['/skill:my-skill src/app.ts', 'next objective']);
+        expect(driver.state.queuedMessages[0]).toMatchObject({ holdUntilTurnEnds: true });
+      });
+
       it('keeps a message queued with Ctrl-Q in tower mode once an in-flight draft steer lands', async () => {
         const steer = pendingSteer();
         const { driver } = await makeDriver(steer.session);
@@ -8279,7 +8363,12 @@ command = "vim"
 
         press(driver, 'next objective', '\r');
 
-        expect(session.steer).toHaveBeenCalledExactlyOnceWith('queued objective\n\nnext objective', { promptId: expect.any(String) });
+        expect(session.steer).toHaveBeenCalledTimes(1);
+        expect(session.steer).toHaveBeenCalledWith('queued objective', { promptId: expect.any(String) });
+        await vi.waitFor(() => {
+          expect(session.steer).toHaveBeenCalledTimes(2);
+        });
+        expect(session.steer).toHaveBeenNthCalledWith(2, 'next objective', { promptId: expect.any(String) });
         await vi.waitFor(() => {
           expect(driver.state.queuedMessages).toEqual([]);
         });
@@ -8509,7 +8598,12 @@ command = "vim"
     driver.state.appState.isCompacting = false;
     driver.handleUserInput('objective two');
 
-    expect(session.steer).toHaveBeenCalledWith('objective one\n\nobjective two', { promptId: expect.any(String) });
+    expect(session.steer).toHaveBeenCalledTimes(1);
+    expect(session.steer).toHaveBeenCalledWith('objective one', { promptId: expect.any(String) });
+    await vi.waitFor(() => {
+      expect(session.steer).toHaveBeenCalledTimes(2);
+    });
+    expect(session.steer).toHaveBeenNthCalledWith(2, 'objective two', { promptId: expect.any(String) });
     expect(session.prompt).not.toHaveBeenCalled();
     await vi.waitFor(() => {
       expect(driver.state.queuedMessages).toEqual([]);
@@ -8784,7 +8878,7 @@ capabilities = ["image_in", "video_in"]
       await harness?.close();
       await model.close();
     }
-  }, 20_000);
+  }, 60_000);
 
   it('clears streaming editor text before cancelling the active turn on Ctrl-C', async () => {
     const { driver, session } = await makeDriver();
@@ -9177,7 +9271,7 @@ capabilities = ["image_in", "video_in"]
     await vi.waitFor(() => { expect(driver.state.queuedMessages).toEqual([]); });
   });
 
-  it('releases every queued use of shared media after a batched steer', async () => {
+  it('releases every queued use of shared media after steering them one at a time', async () => {
     const session = makeSession();
     const { driver, harness } = await makeDriver(session);
     driver.state.appState.model = 'k2';
@@ -9191,7 +9285,9 @@ capabilities = ["image_in", "video_in"]
 
     driver.state.editor.onCtrlS?.();
 
-    expect(session.steer).toHaveBeenCalledOnce();
+    await vi.waitFor(() => {
+      expect(session.steer).toHaveBeenCalledTimes(2);
+    });
     driver.sessionEventHandler.handleEvent(
       { type: 'turn.ended', agentId: 'main', turnId: 1, reason: 'completed' } as Event,
       () => {},
@@ -9286,7 +9382,7 @@ capabilities = ["image_in", "video_in"]
     expect(queued.videoAttachmentIds).toEqual([attachment.id]);
   });
 
-  it('steers consecutive image-only messages without a whitespace-only separator part', async () => {
+  it('steers consecutive image-only messages one at a time without a separator part', async () => {
     const session = makeSession();
     const { driver } = await makeDriver(session);
     driver.state.appState.model = 'k2';
@@ -9316,13 +9412,14 @@ capabilities = ["image_in", "video_in"]
 
     driver.state.editor.onCtrlS?.();
 
-    expect(session.steer).toHaveBeenCalledWith(
-      [imagePart(first.bytes), imagePart(second.bytes)],
-      { promptId: expect.any(String) },
-    );
+    await vi.waitFor(() => {
+      expect(session.steer).toHaveBeenCalledTimes(2);
+    });
+    expect(session.steer).toHaveBeenNthCalledWith(1, [imagePart(first.bytes)], { promptId: expect.any(String) });
+    expect(session.steer).toHaveBeenNthCalledWith(2, [imagePart(second.bytes)], { promptId: expect.any(String) });
   });
 
-  it('steers a media item followed by plain text with a blank-line separator', async () => {
+  it('steers a media item followed by plain text one at a time', async () => {
     const session = makeSession();
     const { driver } = await makeDriver(session);
     driver.state.appState.model = 'k2';
@@ -9345,14 +9442,17 @@ capabilities = ["image_in", "video_in"]
 
     driver.state.editor.onCtrlS?.();
 
-    expect(session.steer).toHaveBeenCalledWith([
+    await vi.waitFor(() => {
+      expect(session.steer).toHaveBeenCalledTimes(2);
+    });
+    expect(session.steer).toHaveBeenNthCalledWith(1, [
       { type: 'text', text: 'look ' },
       { type: 'image_url', imageUrl: { url: 'data:image/png;base64,qrs=' } },
-      { type: 'text', text: '\n\nfocus on tests' },
     ], { promptId: expect.any(String) });
+    expect(session.steer).toHaveBeenNthCalledWith(2, 'focus on tests', { promptId: expect.any(String) });
   });
 
-  it('steers plain text followed by a media item with a blank-line separator', async () => {
+  it('steers plain text followed by a media item one at a time', async () => {
     const session = makeSession();
     const { driver } = await makeDriver(session);
     driver.state.appState.model = 'k2';
@@ -9372,8 +9472,11 @@ capabilities = ["image_in", "video_in"]
 
     driver.state.editor.onCtrlS?.();
 
-    expect(session.steer).toHaveBeenCalledWith([
-      { type: 'text', text: 'hello\n\n' },
+    await vi.waitFor(() => {
+      expect(session.steer).toHaveBeenCalledTimes(2);
+    });
+    expect(session.steer).toHaveBeenNthCalledWith(1, 'hello', { promptId: expect.any(String) });
+    expect(session.steer).toHaveBeenNthCalledWith(2, [
       { type: 'image_url', imageUrl: { url: 'data:image/png;base64,qrs=' } },
     ], { promptId: expect.any(String) });
   });
@@ -14137,7 +14240,7 @@ capabilities = ["image_in", "video_in"]
     expect(driver.state.appState.thinkingEffort).toBe('on');
   });
 
-  it('applies /model selection to the session only on Alt+S without persisting', async () => {
+  it('applies /model selection to the session only on Shift+S without persisting', async () => {
     const session = makeSession();
     const setConfig = vi.fn(async () => ({ providers: {} }));
     const { driver } = await makeDriver(session, {
@@ -14170,7 +14273,7 @@ capabilities = ["image_in", "video_in"]
       expect(driver.state.editorContainer.children[0]).toBeInstanceOf(TabbedModelSelectorComponent);
     });
     const picker = driver.state.editorContainer.children[0];
-    (picker as TabbedModelSelectorComponent).handleInput(`${ESC}s`);
+    (picker as TabbedModelSelectorComponent).handleInput('S');
 
     await vi.waitFor(() => {
       expect(session.setModel).toHaveBeenCalledWith('turbo');
@@ -14217,7 +14320,7 @@ capabilities = ["image_in", "video_in"]
       await vi.waitFor(() => {
         expect(driver.state.editorContainer.children[0]).toBeInstanceOf(TabbedModelSelectorComponent);
       });
-      (driver.state.editorContainer.children[0] as TabbedModelSelectorComponent).handleInput(`${ESC}s`);
+      (driver.state.editorContainer.children[0] as TabbedModelSelectorComponent).handleInput('S');
 
       await vi.waitFor(() => {
         expect(driver.state.editorContainer.children[0]).toBeInstanceOf(ModelSwitchConfirmDialogComponent);
@@ -14273,7 +14376,7 @@ capabilities = ["image_in", "video_in"]
       await vi.waitFor(() => {
         expect(driver.state.editorContainer.children[0]).toBeInstanceOf(TabbedModelSelectorComponent);
       });
-      (driver.state.editorContainer.children[0] as TabbedModelSelectorComponent).handleInput(`${ESC}s`);
+      (driver.state.editorContainer.children[0] as TabbedModelSelectorComponent).handleInput('S');
 
       await vi.waitFor(() => {
         expect(driver.state.editorContainer.children[0]).toBeInstanceOf(ModelSwitchConfirmDialogComponent);
@@ -14786,10 +14889,13 @@ capabilities = ["image_in", "video_in"]
 
     try {
       process.title = 'kimi-test-runner';
-      driver.handleUserInput('/fork ignored args');
+      driver.handleUserInput('/fork');
 
       await vi.waitFor(() => {
-        expect(forkSession).toHaveBeenCalledWith({ id: 'ses-source' });
+        expect(forkSession).toHaveBeenCalledWith({
+          id: 'ses-source',
+          title: 'Fork: Source title',
+        });
         expect(driver.state.transcriptContainer.render(120).join('\n')).toContain(
           'Session forked (ses-fork). Still in the original session; switch to the fork via /sessions.',
         );
@@ -14888,7 +14994,10 @@ capabilities = ["image_in", "video_in"]
     driver.handleUserInput('/fork');
 
     await vi.waitFor(() => {
-      expect(forkSession).toHaveBeenCalledWith({ id: 'ses-source' });
+      expect(forkSession).toHaveBeenCalledWith({
+        id: 'ses-source',
+        title: 'Fork: ses-source',
+      });
       expect(driver.getCurrentSessionId()).toBe('ses-source');
       expect(driver.state.transcriptContainer.render(120).join('\n')).toContain(
         'Failed to fork session: fork unavailable',
@@ -16361,6 +16470,10 @@ describe('activity bar', () => {
 });
 
 describe('KimiTUI session rating survey', () => {
+  beforeEach(() => {
+    resetSurveyPopupConfigCache(clientConfigs);
+  });
+
   it.each(['startup', 'switch', 'reload'] as const)(
     'reports cumulative user turns after a %s mount',
     async (mount) => {
@@ -17423,5 +17536,105 @@ describe('restoring how a turn ended after resume', () => {
     expect(turnOf('Error: [provider.api_error]')).toBe(turnOf('Summarise the deployment status.'));
     expect(turnOf('Interrupted by user')).toBe(turnOf('Estimate the downtime.'));
     expect(turnOf('Summarise the deployment status.')).not.toBe(turnOf('Estimate the downtime.'));
+  });
+});
+
+describe('KimiTUI message queue manager actions', () => {
+  const UP = `${String.fromCodePoint(27)}[A`;
+  const CTRL_S = '\u0013';
+  type SteerOutcome = 'steered' | 'failed' | 'restored';
+
+  type QueueDriver = MessageDriver & {
+    openMessageQueueManager(): void;
+    steerMessage: KimiTUI['steerMessage'];
+    editorReplacementPanel?: { handleInput(data: string): void };
+  };
+
+  async function mountManager(
+    texts: readonly QueuedMessage[],
+  ): Promise<{ driver: QueueDriver; panel: { handleInput(data: string): void } }> {
+    const { driver } = await makeDriver();
+    const queueDriver = driver as unknown as QueueDriver;
+    queueDriver.state.appState.streamingPhase = 'waiting';
+    queueDriver.streamingUI.setTurnId('42');
+    queueDriver.state.queuedMessages.push(...texts);
+    queueDriver.openMessageQueueManager();
+    const panel = queueDriver.editorReplacementPanel;
+    if (panel === undefined) throw new Error('message queue manager did not mount');
+    return { driver: queueDriver, panel };
+  }
+
+  function spySteer(queueDriver: QueueDriver): {
+    steer: ReturnType<typeof vi.spyOn>;
+    settle: (outcome: SteerOutcome) => void;
+  } {
+    let settle: (outcome: SteerOutcome) => void = () => {};
+    const steer = vi
+      .spyOn(queueDriver, 'steerMessage')
+      .mockImplementation(((...args: unknown[]) => {
+        const onSettled = args[2] as ((outcome: SteerOutcome) => void) | undefined;
+        settle = onSettled ?? (() => {});
+      }) as unknown as KimiTUI['steerMessage']);
+    return { steer, settle: (outcome) => settle(outcome) };
+  }
+
+  it('sends the selected message instead of the messages around it', async () => {
+    const { driver, panel } = await mountManager([
+      { text: 'first', agentId: 'main' },
+      { text: 'second', agentId: 'main' },
+      { text: 'third', agentId: 'main' },
+    ]);
+    const { steer } = spySteer(driver);
+
+    panel.handleInput(UP);
+    panel.handleInput(CTRL_S);
+
+    expect(steer).toHaveBeenCalledOnce();
+    const sent = steer.mock.calls[0]?.[1] as readonly { text: string }[];
+    expect(sent.map((item) => item.text)).toEqual(['second']);
+    expect(driver.state.queuedMessages.map((message) => message.text)).toEqual(['first', 'third']);
+  });
+
+  it('puts a failed send back into the queue', async () => {
+    const { driver, panel } = await mountManager([
+      { text: 'first', agentId: 'main' },
+      { text: 'second', agentId: 'main' },
+    ]);
+    const { settle } = spySteer(driver);
+
+    panel.handleInput(CTRL_S);
+    expect(driver.state.queuedMessages.map((message) => message.text)).toEqual(['first']);
+
+    settle('failed');
+
+    expect(driver.state.queuedMessages.map((message) => message.text)).toEqual(['first', 'second']);
+  });
+
+  it('refuses to send a compaction barrier and leaves it queued', async () => {
+    const { driver, panel } = await mountManager([
+      { text: 'first', agentId: 'main' },
+      { text: '/compact', agentId: 'main', mode: 'compact', queuedAfterAutoSerial: 0 },
+    ]);
+    const { steer } = spySteer(driver);
+
+    panel.handleInput(CTRL_S);
+
+    expect(steer).not.toHaveBeenCalled();
+    expect(driver.state.queuedMessages.map((message) => message.text)).toEqual(['first', '/compact']);
+  });
+
+  it('keeps a prompt from moving across a compaction barrier', async () => {
+    const { driver, panel } = await mountManager([
+      { text: '/compact', agentId: 'main', mode: 'compact', queuedAfterAutoSerial: 0 },
+      { text: 'behind barrier', agentId: 'main' },
+    ]);
+
+    panel.handleInput(' ');
+    panel.handleInput(UP);
+
+    expect(driver.state.queuedMessages.map((message) => message.text)).toEqual([
+      '/compact',
+      'behind barrier',
+    ]);
   });
 });

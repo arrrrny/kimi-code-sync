@@ -1,4 +1,5 @@
 import type { LlmErrorMessage, LlmRemoteErrorMessage } from '#/llm/response';
+import { isTransientHttpStatus, toLlmStatusErrorMessage } from './rules/status';
 
 export function sanitizeStatusErrorMessage(message: string): string {
   const titleMatch = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(message);
@@ -12,6 +13,15 @@ export function errorStatusCode(error: unknown): number | undefined {
   const record = error as Record<string, unknown>;
   const status = record['status'] ?? record['statusCode'];
   return typeof status === 'number' ? status : undefined;
+}
+
+export function statusErrorInCauseChain(error: unknown): unknown {
+  let current: unknown = error;
+  for (let depth = 0; current instanceof Error && depth < 5; depth += 1) {
+    if (errorStatusCode(current) !== undefined) return current;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return undefined;
 }
 
 export class SyntaxRequestFormatError extends Error {
@@ -124,6 +134,19 @@ export function toLlmErrorMessage(error: unknown): LlmRemoteErrorMessage {
     typeof cause === 'object' && cause !== null && typeof (cause as { code?: unknown }).code === 'string'
       ? (cause as { code: string }).code
       : undefined;
+  const statusCode = errorStatusCode(error);
+  if (statusCode !== undefined && statusCode >= 400) {
+    const record = error as Record<string, unknown>;
+    const requestId = typeof record['requestId'] === 'string' ? record['requestId'] : undefined;
+    const retryAfterMs = typeof record['retryAfterMs'] === 'number' ? record['retryAfterMs'] : undefined;
+    return toLlmStatusErrorMessage({
+      statusCode,
+      message: errorText(error),
+      requestId,
+      retryAfterMs,
+      retryable: isTransientHttpStatus(statusCode),
+    });
+  }
   return {
     kind: 'unknown',
     message: cause instanceof Error ? cause.message : errorText(error),

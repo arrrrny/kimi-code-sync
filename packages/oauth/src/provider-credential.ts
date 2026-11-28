@@ -1,6 +1,8 @@
 export interface ProviderCredentialView {
   readonly apiKey?: unknown;
   readonly apiKeyEnv?: unknown;
+  readonly apiKeys?: unknown;
+  readonly activeApiKeyId?: unknown;
   readonly oauth?: unknown;
 }
 
@@ -10,17 +12,37 @@ export type DeclaredProviderCredential =
   | { readonly kind: 'none' }
   | { readonly kind: 'conflict'; readonly message: string };
 
+interface InlineApiKey {
+  readonly key: string;
+  readonly field: 'apiKey' | 'apiKeys';
+}
+
+function activeInlineApiKey(provider: ProviderCredentialView): InlineApiKey | undefined {
+  const activeId = nonEmptyString(provider.activeApiKeyId);
+  const entries = provider.apiKeys;
+  if (activeId !== undefined && typeof entries === 'object' && entries !== null) {
+    const entry = (entries as Record<string, unknown>)[activeId];
+    const key =
+      typeof entry === 'object' && entry !== null
+        ? nonEmptyString((entry as { key?: unknown }).key)
+        : undefined;
+    if (key !== undefined) return { key, field: 'apiKeys' };
+  }
+  const legacy = nonEmptyString(provider.apiKey);
+  return legacy === undefined ? undefined : { key: legacy, field: 'apiKey' };
+}
+
 export function declaredProviderCredential(
   provider: ProviderCredentialView,
   providerName: string,
 ): DeclaredProviderCredential {
-  const inlineApiKey = nonEmptyString(provider.apiKey);
+  const inline = activeInlineApiKey(provider);
   const apiKeyEnv = nonEmptyString(provider.apiKeyEnv);
   const hasOAuth = provider.oauth !== undefined;
-  if (inlineApiKey !== undefined && apiKeyEnv !== undefined) {
+  if (inline !== undefined && apiKeyEnv !== undefined) {
     return {
       kind: 'conflict',
-      message: credentialConflictMessage('Provider', providerName, 'apiKey', 'apiKeyEnv'),
+      message: credentialConflictMessage('Provider', providerName, inline.field, 'apiKeyEnv'),
     };
   }
   if (apiKeyEnv !== undefined && hasOAuth) {
@@ -29,13 +51,13 @@ export function declaredProviderCredential(
       message: credentialConflictMessage('Provider', providerName, 'apiKeyEnv', 'oauth'),
     };
   }
-  if (inlineApiKey !== undefined && hasOAuth) {
+  if (inline !== undefined && hasOAuth) {
     return {
       kind: 'conflict',
-      message: credentialConflictMessage('Provider', providerName, 'apiKey', 'oauth'),
+      message: credentialConflictMessage('Provider', providerName, inline.field, 'oauth'),
     };
   }
-  if (inlineApiKey !== undefined) return { kind: 'inline', apiKey: inlineApiKey };
+  if (inline !== undefined) return { kind: 'inline', apiKey: inline.key };
   if (apiKeyEnv !== undefined) return { kind: 'env', apiKeyEnv };
   return { kind: 'none' };
 }

@@ -26,6 +26,16 @@ export const CUSTOM_REGISTRY_MODEL_FIELDS: ReadonlySet<string> = new Set([
   'upgrade',
 ]);
 
+const OPENAI_COMPATIBLE_REFRESHED_FIELDS: ReadonlySet<string> = new Set([
+  'provider',
+  'model',
+  'maxContextSize',
+  'maxOutputSize',
+  'displayName',
+]);
+
+const CURATED_DERIVED_FIELDS = ['displayName', 'reasoningKey'] as const;
+
 function cloneOverrides(
   overrides: ManagedKimiModelAliasOverrides | undefined,
 ): ManagedKimiModelAliasOverrides | undefined {
@@ -61,4 +71,36 @@ export function mergeRefreshedModelAlias(
     ...remote,
     ...(overrides !== undefined ? { overrides } : {}),
   };
+}
+
+export function mergeOpenAiCompatibleModelAlias(
+  existing: unknown,
+  remote: ManagedKimiModelAlias,
+): ManagedKimiModelAlias {
+  const current = isRecord(existing) ? existing : {};
+  const capabilities = mergeCapabilities(current['capabilities'], remote.capabilities);
+  const merged = mergeRefreshedModelAlias(current, remote, OPENAI_COMPATIBLE_REFRESHED_FIELDS);
+  if (capabilities !== undefined) merged.capabilities = capabilities;
+  else delete merged.capabilities;
+  for (const field of CURATED_DERIVED_FIELDS) {
+    if (merged[field] === undefined && current[field] !== undefined) {
+      (merged as Record<string, unknown>)[field] = current[field];
+    }
+  }
+  return merged;
+}
+
+function mergeCapabilities(
+  curated: unknown,
+  catalog: readonly string[] | undefined,
+): string[] | undefined {
+  if (catalog !== undefined && catalog.length === 0) return undefined;
+  const out = new Set<string>();
+  if (Array.isArray(curated)) {
+    for (const entry of curated) {
+      if (typeof entry === 'string' && entry.length > 0) out.add(entry);
+    }
+  }
+  for (const entry of catalog ?? []) out.add(entry);
+  return out.size > 0 ? [...out] : undefined;
 }

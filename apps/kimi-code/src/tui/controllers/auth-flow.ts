@@ -1,7 +1,10 @@
 import {
+  removeProviderFromConfig,
+  type KimiConfig,
   type KimiHarness,
   type RefreshProviderModelsOptions,
   type RefreshProviderModelsResponse,
+  type OAuthRef,
   type Session,
   type ThinkingEffort,
 } from '@moonshot-ai/kimi-code-sdk';
@@ -11,10 +14,16 @@ import {
   matchedModelSwitchRule,
 } from '../commands/config';
 import type { SlashCommandHost } from '../commands/dispatch';
+import { createKimiCodeUserAgent } from '#/cli/host-identity';
 import { OAUTH_LOGIN_REQUIRED_STARTUP_NOTICE } from '../constant/kimi-tui';
 import { refreshEffortSwitchConfig } from '#/utils/effort-switch-config';
 import { refreshModelSwitchConfirmConfig } from '#/utils/model-switch-confirm-config';
 import { lazyModelSelection } from '../utils/model-switch';
+import {
+  refreshCatalogProviderModels,
+  type RefreshCatalogResult,
+  type RefreshProviderHost,
+} from '../utils/refresh-providers';
 import { thinkingEffortFromConfig } from '../utils/thinking-config';
 import type { AppState, KimiTUIOptions } from '../types';
 
@@ -167,9 +176,57 @@ export class AuthFlowController {
 
   async refreshOAuthProviderModels(): Promise<RefreshProviderModelsResponse> {
     const result = await this.host.harness.refreshProviderModels({ scope: 'oauth' });
+    await this.refreshAvailableModels();
+    return result;
+  }
+
+  async refreshCatalogModels(providerId?: string): Promise<RefreshCatalogResult> {
+    const result = await refreshCatalogProviderModels(this.buildRefreshHost(), { providerId });
     if (result.changed.length > 0) {
       await this.refreshAvailableModels();
     }
     return result;
+  }
+
+  private buildRefreshHost(): RefreshProviderHost {
+    const { host } = this;
+    const resolveOAuthToken = async (providerName: string, oauthRef?: OAuthRef): Promise<string> => {
+      const tokenProvider = host.harness.auth.resolveOAuthTokenProvider(providerName, oauthRef);
+      return tokenProvider.getAccessToken();
+    };
+    const userAgent = createKimiCodeUserAgent();
+    if (!host.harness.supportsAtomicSectionReplace()) {
+      return {
+        getConfig: () => host.harness.getConfig({ reload: true }),
+        removeProvider: (id) => host.harness.removeProvider(id),
+        setConfig: (patch) => host.harness.setConfig(patch),
+        resolveOAuthToken,
+        userAgent,
+      };
+    }
+    let staged: KimiConfig | undefined;
+    const requireStaged = (): KimiConfig => {
+      if (staged === undefined) {
+        throw new Error('refresh host: getConfig must be called before writes');
+      }
+      return staged;
+    };
+    return {
+      getConfig: async () => {
+        staged = await host.harness.getConfig({ reload: true });
+        return staged;
+      },
+      removeProvider: (id) => {
+        staged = removeProviderFromConfig(requireStaged(), id);
+        return Promise.resolve(staged);
+      },
+      setConfig: async (patch) => {
+        staged = { ...requireStaged(), ...patch } as KimiConfig;
+        await host.harness.replaceConfigSections(Object.fromEntries(Object.entries(patch)));
+        return staged;
+      },
+      resolveOAuthToken,
+      userAgent,
+    };
   }
 }

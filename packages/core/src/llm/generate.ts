@@ -1,4 +1,5 @@
-import { resolveEndpoint } from '#/llm/endpoint';
+import { mergeHeaders, resolveEndpoint } from '#/llm/endpoint';
+import { opencodeSessionHeaders } from '#/llm/protocol/session-headers';
 import { isAbortError, toLlmErrorMessage, toLlmSyntaxErrorMessage } from '#/llm/protocol/errors';
 import type { DecodeSink, LlmModule, ProtocolReply } from '#/llm/protocol/protocol';
 import type { LlmRequest } from '#/llm/request';
@@ -208,7 +209,16 @@ export async function generate(
   }
   let streamStarted = false;
   try {
-    const endpoint = await resolveEndpoint(request.endpoint);
+    const resolved = await resolveEndpoint(request.endpoint);
+    const sessionHeaders = opencodeSessionHeaders({
+      cacheKey: request.model.cacheKey,
+      apiKey: resolved.apiKey,
+      baseUrl: resolved.baseUrl,
+    });
+    const endpoint =
+      sessionHeaders === undefined
+        ? resolved
+        : { ...resolved, headers: mergeHeaders(resolved.headers, sessionHeaders) };
     const clientFactory = request.endpoint?.clientFactory;
     const client =
       clientFactory === undefined

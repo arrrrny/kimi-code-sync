@@ -42,13 +42,21 @@ scenario(
     const answered = await model.hold('answering-target').reached();
     expect(answered.userTextsSinceReply.at(-1)).toBe(target);
     expect(answered.texts('tool').join('\n')).toMatch(/(^|\n)built(\n|$)/);
-    const roles = answered.view.messages.map((message) => message.role);
-    expect(roles.lastIndexOf('tool')).toBeLessThan(roles.lastIndexOf('user'));
+    const answeredRoles = answered.view.messages.map((message) => message.role);
+    expect(answeredRoles.lastIndexOf('tool')).toBeLessThan(answeredRoles.lastIndexOf('user'));
     model.hold('answering-target').release();
     await product.waitIdle();
     const running = model.requests('main').slice(2);
-    expect(running.map((request) => request.state)).toEqual(running.map(() => 'finished'));
-    await product.expectReply(built);
+    const states = running.map((request) => request.state);
+    expect(states.filter((state) => state === 'finished')).toHaveLength(2);
+    expect(states.every((state) => state === 'finished' || state === 'failed')).toBe(true);
+    const completed = running.filter((request) => request.state === 'finished');
+    const final = completed[1]!;
+    expect(final.texts('tool').join('\n')).toMatch(/(^|\n)built(\n|$)/);
+    expect(final.userTextsSinceReply).toEqual([target]);
+    const finalRoles = final.view.messages.map((message) => message.role) ?? [];
+    expect(finalRoles.lastIndexOf('tool')).toBeLessThan(finalRoles.lastIndexOf('user'));
+    await product.expectReply('Built the release target.');
 
     for (const text of [draft, profile, build, target]) await product.expectTranscript(text);
   },

@@ -309,12 +309,12 @@ export interface IAgentLoopService extends EffectiveProfileReader {
 
   cancel(target?: LoopCancelTarget, reason?: unknown): boolean;
 
+  cancelFromUser(turnId?: number): void;
   detachTool(task: LoopDetachedTask, text?: string): void;
 
   suppressTaskNotifications(taskIds: readonly string[]): void;
 
   abortTool(toolCallId: string, reason?: unknown): void;
-
   registerToolBatchStarting(hook: LoopHooks['tool.batch-starting']): IDisposable;
 
   snapshot(): LoopSnapshot;
@@ -350,7 +350,6 @@ export interface IAgentLoopService extends EffectiveProfileReader {
 
   readonly hooks: Hooks<{
     onWillBeginStep: BeforeStepContext;
-    /** After onDidFinishStep, Core consumes queued reminders before assembling the next LLM request. */
     onDidFinishStep: AfterStepContext;
     onBeforeSubmitPrompt: PromptSubmitContext;
   }>;

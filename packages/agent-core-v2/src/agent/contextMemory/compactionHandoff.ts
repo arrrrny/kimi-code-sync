@@ -46,6 +46,7 @@ export interface ContextCompactionShapeInput {
   readonly keptHeadUserMessageCount?: number;
   readonly droppedCount?: number;
   readonly legacyTail?: boolean;
+  readonly handoffPath?: string;
 }
 
 export interface ContextCompactionShape {
@@ -99,7 +100,7 @@ export function buildContextCompactionShape(
     ? [...selection.head, ...selection.tail]
     : [...selection.head, elisionMessage, ...selection.tail];
   const contextSummary = input.contextSummary ?? input.summary;
-  const continuationMessage = createCompactionContinuationMessage();
+  const continuationMessage = createCompactionContinuationMessage(input.handoffPath);
   const appendedInjections = history
     .slice(input.compactedCount)
     .filter((message) => message.origin?.kind === 'injection');
@@ -159,15 +160,21 @@ export function buildCompactionElisionText(omittedTokens: number): string {
   );
 }
 
-export function createCompactionContinuationMessage(): ContextMessage {
+export function createCompactionContinuationMessage(handoffPath?: string): ContextMessage {
   return {
     role: 'user',
-    content: [{ type: 'text', text: buildCompactionContinuationText() }],
+    content: [{ type: 'text', text: buildCompactionContinuationText(handoffPath) }],
     origin: { kind: 'injection', variant: COMPACTION_CONTINUATION_VARIANT },
   };
 }
 
-export function buildCompactionContinuationText(): string {
+export function buildCompactionContinuationText(handoffPath?: string): string {
+  const handoff = handoffPath?.trim() ?? '';
+  if (handoff.length > 0) {
+    return wrapSystemReminder(
+      `Context compaction is complete, and a handoff document for the work in progress is on disk at ${handoff}. Read it end to end now, before any other tool call and before replying to the user, then continue that work from the threads it records — this is the same task you were mid-way through, not a new one.`,
+    );
+  }
   return wrapSystemReminder(
     'Context compaction is complete — continue the work that was in progress when it began.',
   );
@@ -177,6 +184,17 @@ export function collectCompactableUserMessages<T extends MessageLike>(messages: 
   return messages.filter(
     (message) => isRealUserInput(message) && !isCompactionSummaryMessage(message),
   );
+}
+
+export function firstUserPromptText(
+  messages: readonly MessageLike[],
+  maxChars = 2_000,
+): string | undefined {
+  const first = collectCompactableUserMessages(messages).at(0);
+  if (first === undefined) return undefined;
+  const text = extractText(first.content).trim();
+  if (text.length === 0) return undefined;
+  return text.length <= maxChars ? text : `${text.slice(0, maxChars)}...`;
 }
 
 export function isCompactionSummaryMessage(message: MessageLike): boolean {

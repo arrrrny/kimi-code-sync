@@ -4,6 +4,27 @@ import type { LlmErrorMessage } from '#/llm/response';
 export interface LlmRecoveryRecord {
   readonly strategy: string;
   readonly action: string;
+  readonly detail?: string;
+  readonly failed?: boolean;
+}
+
+export const API_KEY_ROTATION_STRATEGY = 'api_key_rotation';
+
+export function isAuthRejection(error: LlmErrorMessage): boolean {
+  if (error.kind === 'auth') return true;
+  return error.kind === 'status' && (error.statusCode === 401 || error.statusCode === 403);
+}
+
+export function rotationCount(appliedRecoveries: readonly LlmRecoveryRecord[]): number {
+  return appliedRecoveries.filter(
+    (record) => record.strategy === API_KEY_ROTATION_STRATEGY && record.failed !== true,
+  ).length;
+}
+
+export function rotationFailed(appliedRecoveries: readonly LlmRecoveryRecord[]): boolean {
+  return appliedRecoveries.some(
+    (record) => record.strategy === API_KEY_ROTATION_STRATEGY && record.failed === true,
+  );
 }
 
 export interface LlmRecoveryContext {
@@ -14,14 +35,17 @@ export interface LlmRecoveryContext {
   readonly endpoint?: LlmEndpoint;
   readonly rawError?: unknown;
   readonly signal?: AbortSignal;
+  readonly attempt: number;
+  readonly maxAttempts: number;
 }
 
 export type LlmRequestRewrite = (request: LlmRequest) => LlmRequest;
 
 export interface LlmRecoveryProposal {
   readonly action: string;
+  readonly detail?: string;
   readonly rewrite?: LlmRequestRewrite;
-  readonly beforeNextAttempt?: () => void;
+  readonly beforeNextAttempt?: () => void | Promise<void>;
 }
 
 export type LlmRecoveryEntry = LlmRecoveryProposal & LlmRecoveryRecord & {
@@ -40,6 +64,18 @@ export interface LlmRecovery {
   propose(
     ctx: LlmRecoveryContext,
   ): LlmRecoveryEntry | undefined | Promise<LlmRecoveryEntry | undefined>;
+  exhausted?(ctx: LlmRecoveryContext): LlmRecoveryEntry | undefined;
+}
+
+export function exhaustedRecovery(
+  recoveries: readonly (LlmRecovery | undefined)[],
+  ctx: LlmRecoveryContext,
+): LlmRecoveryEntry | undefined {
+  for (const recovery of recoveries) {
+    const record = recovery?.exhausted?.(ctx);
+    if (record !== undefined) return record;
+  }
+  return undefined;
 }
 
 export interface LlmRecoveryLedger {
@@ -61,7 +97,12 @@ export function createRecoveryLedger(
     apply: (request) => rewrites.reduce((current, rewrite) => rewrite(current), request),
     record: (entry) => {
       entries.push(entry);
-      applied.push({ strategy: entry.strategy, action: entry.action });
+      applied.push({
+        strategy: entry.strategy,
+        action: entry.action,
+        detail: entry.detail,
+        failed: entry.failed,
+      });
       if (entry.rewrite !== undefined) rewrites.push(entry.rewrite);
     },
     fork: (filter) => createRecoveryLedger(filter === undefined ? entries : entries.filter(filter)),

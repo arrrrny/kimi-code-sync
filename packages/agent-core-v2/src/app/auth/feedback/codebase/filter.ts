@@ -1,8 +1,5 @@
 export const DEFAULT_MAX_FILES = 50000;
 export const DEFAULT_MAX_FILE_SIZE = 50 * 1024 * 1024;
-// Upper bound for the compressed codebase archive, aligned with the backend's
-// per-upload limit. The scanner uses cumulative raw file size as a conservative
-// estimate so the resulting zip stays within this bound.
 export const DEFAULT_MAX_ARCHIVE_SIZE = 500 * 1024 * 1024;
 
 const IGNORED_DIR_NAMES: ReadonlySet<string> = new Set([

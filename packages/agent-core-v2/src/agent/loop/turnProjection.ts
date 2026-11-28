@@ -54,6 +54,8 @@ import {
   type TurnInterruptReason,
 } from './turnEvents';
 import { AgentErrorEvent } from '#/agent/mcp/mcpEvents';
+import { WarningIssued } from '#/agent/profile/profileOps';
+import { API_KEY_ROTATION_STRATEGY } from '#human/credentials/keyRotationRecovery';
 import { TurnEnded, TurnPrompt, type TurnReplyModel } from './turnOps';
 import type { ISessionRequestAttributionService } from '#/session/requestAttribution/requestAttribution';
 import { ErrorCodes, Error2, isError2, toKimiErrorPayload } from '#/errors';
@@ -77,6 +79,10 @@ export const loopLastRequestIdKey = defineState<string | undefined>(
 );
 
 const MAX_STEP_SIGNAL_LISTENERS = 64;
+
+const RECOVERY_WARNING_CODES: Partial<Record<string, string>> = {
+  [API_KEY_ROTATION_STRATEGY]: 'api-key-rotation',
+};
 
 interface CoreStepState {
   readonly number: number;
@@ -617,6 +623,13 @@ export class AgentTurnProjection {
         }
         if (event.reason === 'recovery') {
           turn.current = undefined;
+          if (event.detail !== undefined) {
+            void this.options.dispatcher.dispatch(new WarningIssued({
+              agentId: this.options.scopeContext.agentId,
+              code: RECOVERY_WARNING_CODES[event.strategy],
+              message: event.detail,
+            }));
+          }
           return;
         }
         const fields = retryErrorFields(event.error);

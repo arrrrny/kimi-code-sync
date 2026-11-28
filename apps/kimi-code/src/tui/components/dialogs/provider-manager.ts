@@ -24,11 +24,27 @@ interface ConfirmState {
   readonly providerIds: readonly string[];
 }
 
+interface KeyRow {
+  readonly kind: 'key';
+  readonly id: string;
+  readonly providerId: string;
+  readonly keyId: string;
+  readonly label: string;
+  readonly preview: string;
+  readonly isActive: boolean;
+  readonly proxyUrl?: string;
+}
+
 export interface ProviderManagerOptions {
   readonly providers: Record<string, ProviderConfig>;
   readonly activeProviderId?: string;
   readonly onAdd: () => void;
   readonly onDeleteSource: (providerIds: readonly string[]) => void;
+  readonly onAddKey: (providerId: string) => void;
+  readonly onRemoveKey: (providerId: string, keyId: string) => void;
+  readonly onSetActiveKey: (providerId: string, keyId: string) => void;
+  readonly onSetProxyUrl: (providerId: string) => void;
+  readonly onToggleRotation: (providerId: string) => void;
   readonly onClose: () => void;
 }
 
@@ -39,6 +55,8 @@ interface SourceRow {
   readonly providerIds: readonly string[];
   readonly hasActive: boolean;
   readonly baseUrl?: string;
+  readonly rotateKeys?: boolean;
+  readonly keyRows: readonly KeyRow[];
 }
 
 interface AddRow {
@@ -47,11 +65,11 @@ interface AddRow {
   readonly label: string;
 }
 
-type Row = SourceRow | AddRow;
+type Row = SourceRow | AddRow | KeyRow;
 
 const ADD_ROW_LABEL = '[ Add New Platform ]';
 const PAGE_SIZE = 8;
-const HEADER_HINT = '↑↓ navigate · D delete · Esc cancel';
+const HEADER_HINT = '↑↓ navigate · D delete · A add key · S set active · R rotate keys · P proxy · Esc cancel';
 
 function readCustomRegistrySource(provider: unknown): CustomRegistrySource | undefined {
   if (typeof provider !== 'object' || provider === null) return undefined;
@@ -78,9 +96,10 @@ function sourceUrlLabel(url: string): string {
 }
 
 function buildRows(opts: ProviderManagerOptions): readonly Row[] {
-  const sources: SourceRow[] = [];
+  const rows: Row[] = [];
 
   const customRegistryIndex = new Map<string, number>();
+  const sourceRows: SourceRow[] = [];
 
   for (const [id, cfg] of Object.entries(opts.providers)) {
     if (id === DEFAULT_OAUTH_PROVIDER_NAME) continue;
@@ -89,12 +108,13 @@ function buildRows(opts: ProviderManagerOptions): readonly Row[] {
 
     if (isOpenPlatformId(id)) {
       const platform = getOpenPlatformById(id);
-      sources.push({
+      sourceRows.push({
         kind: 'source',
         id: `open:${id}`,
         label: platform?.name ?? id,
         providerIds: [id],
         hasActive: isActive,
+        keyRows: [],
       });
       continue;
     }
@@ -109,42 +129,89 @@ function buildRows(opts: ProviderManagerOptions): readonly Row[] {
       const key = `${customSource.url}${customSource.apiKey}`;
       const existingIdx = customRegistryIndex.get(key);
       if (existingIdx !== undefined) {
-        const existing = sources[existingIdx];
+        const existing = sourceRows[existingIdx];
         if (existing !== undefined && existing.kind === 'source') {
-          sources[existingIdx] = {
+          sourceRows[existingIdx] = {
             kind: 'source',
             id: existing.id,
             label: existing.label,
             providerIds: [...existing.providerIds, id],
             hasActive: existing.hasActive || isActive,
             baseUrl: existing.baseUrl,
+            rotateKeys: existing.rotateKeys,
+            keyRows: existing.keyRows,
           };
         }
         continue;
       }
-      customRegistryIndex.set(key, sources.length);
-      sources.push({
+      customRegistryIndex.set(key, sourceRows.length);
+      sourceRows.push({
         kind: 'source',
         id: `custom:${key}`,
         label: sourceUrlLabel(customSource.url),
         providerIds: [id],
         hasActive: isActive,
         baseUrl,
+        keyRows: [],
       });
       continue;
     }
 
-    sources.push({
+    const keyRows = buildKeyRows(id, cfg as ProviderConfig);
+
+    sourceRows.push({
       kind: 'source',
       id: `provider:${id}`,
       label: id,
       providerIds: [id],
       hasActive: isActive,
       baseUrl,
+      rotateKeys: cfg.rotateKeys === true,
+      keyRows,
     });
   }
 
-  return [...sources, { kind: 'add', id: '__add__', label: ADD_ROW_LABEL }];
+  for (const source of sourceRows) {
+    rows.push(source);
+    for (const keyRow of source.keyRows) {
+      rows.push(keyRow);
+    }
+  }
+
+  rows.push({ kind: 'add', id: '__add__', label: ADD_ROW_LABEL });
+  return rows;
+}
+
+function buildKeyRows(providerId: string, provider: ProviderConfig): readonly KeyRow[] {
+  const apiKeys = provider.apiKeys;
+  if (!apiKeys || Object.keys(apiKeys).length === 0) return [];
+
+  const activeKeyId = provider.activeApiKeyId;
+  return Object.entries(apiKeys).map(([keyId, keyInfo]) => ({
+    kind: 'key' as const,
+    id: `${providerId}:${keyId}`,
+    providerId,
+    keyId,
+    label: keyInfo.name,
+    preview: maskApiKey(keyInfo.key),
+    isActive: keyId === activeKeyId,
+    proxyUrl: keyInfo.proxyUrl,
+  }));
+}
+
+function maskApiKey(key: string): string {
+  if (key.length <= 12) return '*'.repeat(key.length);
+  return `${key.slice(0, 8)}...${key.slice(-4)}`;
+}
+
+function proxyHost(proxyUrl: string): string {
+  try {
+    const host = new URL(proxyUrl).host;
+    if (host.length > 0) return host;
+  } catch {}
+  const withoutScheme = proxyUrl.replace(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//, '');
+  const withoutUserinfo = withoutScheme.slice(withoutScheme.lastIndexOf('@') + 1);
+  return withoutUserinfo.split('/')[0] ?? withoutUserinfo;
 }
 
 export class ProviderManagerComponent extends Container implements Focusable {
@@ -245,22 +312,63 @@ export class ProviderManagerComponent extends Container implements Focusable {
     }
 
     const ch = printableChar(data);
-    if (ch === 'd' || ch === 'D') {
-      this.armDeleteConfirm();
+    const selected = rows[this.selectedIndex];
+
+    if (selected?.kind === 'key') {
+      if (ch === 'a' || ch === 'A') {
+        this.opts.onAddKey(selected.providerId);
+        return;
+      }
+      if (ch === 's' || ch === 'S') {
+        this.opts.onSetActiveKey(selected.providerId, selected.keyId);
+        return;
+      }
+      if (ch === 'd' || ch === 'D') {
+        this.armDeleteKeyConfirm(selected);
+        return;
+      }
+    }
+
+    if (selected?.kind === 'source') {
+      if ((ch === 'a' || ch === 'A') && selected.providerIds.length === 1) {
+        const providerId = selected.providerIds[0];
+        if (providerId) this.opts.onAddKey(providerId);
+        return;
+      }
+      if ((ch === 'p' || ch === 'P') && selected.providerIds.length === 1) {
+        const providerId = selected.providerIds[0];
+        if (providerId) this.opts.onSetProxyUrl(providerId);
+        return;
+      }
+      if ((ch === 'r' || ch === 'R') && selected.providerIds.length === 1) {
+        const providerId = selected.providerIds[0];
+        if (providerId) this.opts.onToggleRotation(providerId);
+        return;
+      }
+      if (ch === 'd' || ch === 'D') {
+        this.armDeleteProviderConfirm(selected);
+        return;
+      }
     }
   }
 
-  private armDeleteConfirm(): void {
-    const selected = this.rows[this.selectedIndex];
-    if (selected === undefined || selected.kind === 'add') return;
-    const ids = selected.providerIds;
+  private armDeleteProviderConfirm(selected: SourceRow): void {
     const prompt =
-      ids.length === 1
+      selected.providerIds.length === 1
         ? `Delete platform "${selected.label}"?`
-        : `Delete platform "${selected.label}" and all ${String(ids.length)} providers?`;
+        : `Delete platform "${selected.label}" and all ${String(selected.providerIds.length)} providers?`;
     this.confirm = {
       label: prompt,
-      providerIds: ids,
+      providerIds: selected.providerIds,
+    };
+    this.invalidate();
+  }
+
+  private armDeleteKeyConfirm(selected: KeyRow): void {
+    const prompt = `Delete API key "${selected.label}" from provider "${selected.providerId}"?`;
+    this.confirm = {
+      label: prompt,
+      providerIds: [`${selected.providerId}:${selected.keyId}`],
     };
     this.invalidate();
   }
@@ -277,7 +385,18 @@ export class ProviderManagerComponent extends Container implements Focusable {
       this.confirm = undefined;
       this.invalidate();
       if (confirm === undefined) return;
-      this.opts.onDeleteSource(confirm.providerIds);
+      const firstId = confirm.providerIds[0];
+      if (!firstId) return;
+      if (firstId.includes(':')) {
+        const parts = firstId.split(':', 2);
+        const providerId = parts[0];
+        const keyId = parts[1];
+        if (providerId && keyId) {
+          this.opts.onRemoveKey(providerId, keyId);
+        }
+      } else {
+        this.opts.onDeleteSource(confirm.providerIds);
+      }
       return;
     }
   }
@@ -349,19 +468,47 @@ function renderRow(
         ? currentTheme.fg('primary', text)
         : currentTheme.fg('text', text);
 
-  const isActive = row.kind === 'source' && row.hasActive;
-  const marker = isActive ? ` ${CURRENT_MARK}` : '';
+  const isActiveProvider = row.kind === 'source' && row.hasActive;
+  const isActiveKey = row.kind === 'key' && row.isActive;
+  const marker = (isActiveProvider || isActiveKey) ? ` ${CURRENT_MARK}` : '';
 
   const labelWidth = Math.max(0, width - 4 - visibleWidth(marker));
   const labelText = truncateToWidth(row.label, labelWidth, '…');
   let line = `  ${pointerStyle(`${pointer} `)}${labelStyle(labelText)}`;
-  if (isActive) line += currentTheme.fg('success', marker);
+  if (isActiveProvider || isActiveKey) line += currentTheme.fg('success', marker);
 
   const lines: string[] = [line];
 
-  if (row.kind === 'source' && row.baseUrl !== undefined && row.baseUrl.length > 0) {
-    const urlText = truncateToWidth(row.baseUrl, Math.max(0, width - 6), '…');
-    lines.push(currentTheme.fg('textMuted', `      ${urlText}`));
+  if (row.kind === 'source') {
+    if (row.baseUrl !== undefined && row.baseUrl.length > 0) {
+      const urlText = truncateToWidth(row.baseUrl, Math.max(0, width - 6), '…');
+      lines.push(currentTheme.fg('textMuted', `      ${urlText}`));
+    }
+    if (row.keyRows.length >= 2) {
+      const state = row.rotateKeys === true ? 'on' : 'off';
+      lines.push(
+        currentTheme.fg(
+          row.rotateKeys === true ? 'success' : 'textDim',
+          `      rotate keys: ${state}`,
+        ),
+      );
+    }
+  } else if (row.kind === 'key') {
+    const keyLabelWidth = Math.max(0, width - 8 - visibleWidth(marker));
+    const keyLabelText = truncateToWidth(row.label, keyLabelWidth, '…');
+    const keyPointer = isSelected ? SELECT_POINTER : ' ';
+    const keyPointerStyle = (text: string) =>
+      isSelected ? currentTheme.fg('primary', text) : currentTheme.fg('textDim', text);
+    const keyLine = `    ${keyPointerStyle(`${keyPointer} `)}${currentTheme.fg('text', keyLabelText)}  ${currentTheme.fg('textMuted', row.preview)}`;
+    if (row.isActive) {
+      lines.push(currentTheme.fg('success', `${keyLine} ${CURRENT_MARK}`));
+    } else {
+      lines.push(keyLine);
+    }
+    if (row.proxyUrl !== undefined) {
+      const proxyText = truncateToWidth(proxyHost(row.proxyUrl), Math.max(0, width - 8), '…');
+      lines.push(currentTheme.fg('textMuted', `      proxy: ${proxyText}`));
+    }
   }
 
   return lines;

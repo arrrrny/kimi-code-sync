@@ -1,5 +1,6 @@
 import type { LlmRequestAttributes } from '@moonshot-ai/core/llm/request';
 import type { InitializedLlmRequestPart } from '@moonshot-ai/core/llm/requester';
+import type { FullLoopLlmRequester } from '@moonshot-ai/core/loop/request';
 import type { ProfileModelContext } from '#/agent/profile/profile';
 import type { AgentLLMRequestLogFields, AgentLLMRequestSource } from '#/agent/usage/usage';
 
@@ -8,6 +9,12 @@ export interface RequestConfigSnapshot {
   readonly params: InitializedLlmRequestPart;
   readonly systemPrompt: string;
   readonly maxCompletionTokensCap?: number;
+}
+
+declare module './loop' {
+  interface IAgentLoopService {
+    requesterForModel(modelAlias?: string, maxOutputSize?: number): FullLoopLlmRequester;
+  }
 }
 
 export function requestSourceOf(attributes: LlmRequestAttributes | undefined): AgentLLMRequestSource {

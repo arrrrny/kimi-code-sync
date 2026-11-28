@@ -5,6 +5,7 @@ import {
 } from '@anthropic-ai/sdk';
 import { v4 as randomUUID } from 'uuid';
 
+import { errorStatusCode, statusErrorInCauseChain, toLlmErrorMessage } from '#/llm/protocol/errors';
 import { headersToRecord, parseRetryAfterMs } from '#/llm/protocol/kit/http';
 import {
   isTransientHttpStatus,
@@ -238,6 +239,8 @@ export function decodeError(error: unknown, source?: 'stream'): LlmRemoteErrorMe
     return { kind: 'timeout', message: error.message, retryable: true };
   }
   if (error instanceof RawAnthropicSDKConnectionError) {
+    const statusCause = statusErrorInCauseChain(error.cause);
+    if (statusCause !== undefined) return toLlmErrorMessage(statusCause);
     return { kind: 'connection', message: error.message, retryable: !isUnreachableConnection(error) };
   }
   if (error instanceof RawAnthropicSDKAPIError) {
@@ -293,6 +296,9 @@ export function decodeError(error: unknown, source?: 'stream'): LlmRemoteErrorMe
         ...statusInfo,
       });
     }
+  }
+  if (errorStatusCode(error) !== undefined) {
+    return toLlmErrorMessage(error);
   }
   if (error instanceof Error) {
     return toLlmTransportErrorMessage(error.message);
