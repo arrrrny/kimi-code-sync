@@ -110,11 +110,12 @@ async function searchDocs(kap: Kap, model: FakeModel, sessionId: string, mcp: Pr
   expect(model.requests('main').at(-1)?.texts('tool').join('\n')).toContain('found 2 pages');
 }
 
-async function runPastTheCompactionTrigger(kap: Kap, model: FakeModel, sessionId: string, roleMetadata: boolean): Promise<void> {
+async function runPastTheCompactionTrigger(kap: Kap, model: FakeModel, sessionId: string, roleMetadata: boolean, handoff: boolean): Promise<void> {
   const summary = say('Summary: four commands ran.');
   if (roleMetadata) model.lane('compaction').script(summary);
   else model.expectCacheBreak('without role metadata the request after compaction cannot be told apart from a rewritten history', { at: 'history' });
-  model.script(withUsage(PAST_THE_TRIGGER, bash('echo four')), ...(roleMetadata ? [] : [summary]), answer('fourth answer'), answer('continued after compacting'));
+  const handoffStep = handoff ? [say('Handoff document written.')] : [];
+  model.script(withUsage(PAST_THE_TRIGGER, bash('echo four')), ...handoffStep, ...(roleMetadata ? [] : [summary]), answer('fourth answer'), answer('continued after compacting'));
   await turn(kap, sessionId, 'Run one more command.');
   await turn(kap, sessionId, 'Carry on.');
   expect(model.requests('main').at(-1)?.texts('user').join('\n')).toContain('Summary: four commands ran.');
@@ -129,6 +130,7 @@ async function compact(kap: Kap, model: FakeModel, sessionId: string, summary: s
 
 describe.each(PROFILES)('one session with $name', ({ options, roleMetadata, mcp, takesEffect }) => {
   const test = base.extend<ScenarioFixtures>(scenarioFixtures({ ...withAutoCompaction(options), modelOptions: { reportCachedTokens: true } }));
+  const handoff = options.env?.KIMI_CODE_EXPERIMENTAL_FLAG === '1';
 
   test('keeps every main request and every request of a subagent on the prompt cache prefix through a retry, compaction, a restart, an automatic compaction and a subagent', async ({ kap, model }) => {
     const session = await kap.createSession();
@@ -144,7 +146,8 @@ describe.each(PROFILES)('one session with $name', ({ options, roleMetadata, mcp,
     await turn(kap, session.id, 'What happened so far?');
 
     await kap.restart();
-    await runPastTheCompactionTrigger(kap, model, session.id, roleMetadata);
+    await runPastTheCompactionTrigger(kap, model, session.id, roleMetadata, handoff);
+    if (handoff) model.expectCacheBreak('compaction summary replaces the previous handoff request', { at: 'history' });
     await searchDocs(kap, model, session.id, mcp);
     if (roleMetadata) {
       model.script(agent({ prompt: 'look around the workspace', description: 'scout' }), answer('fifth answer'));

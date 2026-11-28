@@ -22,8 +22,8 @@
     },
     {
       "file": "AGENTS.md",
-      "reference": "apps/kimi-code/dist-web",
-      "why": "The web bundle copied into the CLI during prebuild; gitignored, force-added."
+      "reference": "apps/kimi-code/web-dist",
+      "why": "The web bundle built into the CLI during prebuild; gitignored, not committed."
     },
     {
       "file": "AGENTS.md",

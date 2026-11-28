@@ -47,7 +47,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build Kimi web assets
-        # The SEA blob step embeds apps/kimi-code/dist-web. Build it from the
+        # The SEA blob step embeds apps/kimi-code/web-dist. Build it from the
         # desktop renderer's web variant, then verify it is in place.
         run: |
           node apps/kimi-code/scripts/sync-web-dist.mjs
