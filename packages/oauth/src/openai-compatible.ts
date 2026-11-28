@@ -1,11 +1,6 @@
 import type { ManagedKimiCodeModelInfo } from './managed-kimi-code';
 import { isRecord } from './utils';
 
-// Honor a provider-supplied context length (OpenRouter's `context_length`,
-// OpenAI's `context_window`) when present; fall back to a conservative 256K
-// window only when the value is missing or invalid. Users can still override
-// per-model in config.toml. The `/refresh-catalog` path preserves a curated
-// `maxContextSize` and only uses this default for brand-new aliases.
 export const OPENAI_COMPATIBLE_DEFAULT_CONTEXT = 262144;
 
 export interface FetchOpenAIProviderModelsOptions {
@@ -14,14 +9,6 @@ export interface FetchOpenAIProviderModelsOptions {
   readonly userAgent?: string;
 }
 
-/**
- * Fetches the model list from an OpenAI-compatible provider's `/models`
- * endpoint and normalizes it to {@link ManagedKimiCodeModelInfo}. OpenAI's wire
- * shape is `{ data: [{ id }] }`; some gateways report `object: 'model'` per
- * entry, which we tolerate. Providers that do not serve a recognizable
- * `/models` contract throw so the caller can report the failure instead of
- * silently skipping the provider.
- */
 export async function fetchOpenAIProviderModels(
   baseUrl: string,
   apiKey: string,
@@ -64,19 +51,7 @@ export async function fetchOpenAIProviderModels(
     const parsedCtx = Number(rawCtx);
     const reportedContextLength =
       Number.isInteger(parsedCtx) && parsedCtx > 0 ? parsedCtx : undefined;
-    // Every normalized model carries a positive context window: use the
-    // endpoint-reported value when present, otherwise the conservative 256K
-    // default. `reportedContextLength` stays undefined when the endpoint said
-    // nothing, so the catalog refresh can preserve a curated `maxContextSize`.
     const contextLength = reportedContextLength ?? OPENAI_COMPATIBLE_DEFAULT_CONTEXT;
-    // OpenRouter documents the completion cap as `top_provider.max_completion_tokens`
-    // and it is always trustworthy. A bare `max_tokens` is NOT part of the OpenAI
-    // `/v1/models` contract: some gateways echo their context window into it
-    // (e.g. `max_tokens === context_length`), and trusting that would silently
-    // inflate a curated `maxOutputSize` by the context-to-output ratio. So a bare
-    // `max_tokens` is honored only when it is smaller than the reported context
-    // window — a plausible completion cap. Absent means "unknown", so a curated
-    // `maxOutputSize` is left alone rather than reset.
     const topProviderMaxOutputSize = isRecord(raw['top_provider'])
       ? positiveInteger(raw['top_provider']['max_completion_tokens'])
       : undefined;

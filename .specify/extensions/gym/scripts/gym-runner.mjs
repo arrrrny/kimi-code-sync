@@ -1,22 +1,10 @@
 #!/usr/bin/env node
-// GYM — Operator Forging runner (extension build).
-//
-// Adapted from the reference gym.mjs into an installable, project-agnostic form:
-//   - locations + timeout come from gym-config.yml (defaults: gym/ + exercises/)
-//   - warmup reps expose verify(ctx); graded exercises expose evaluate(sandbox)
-//   - the gate (gym/.gate) opens only when every rep is grown and every exercise passed
-//   - degrades gracefully: empty curriculum -> gate open; thrown verify/evaluate -> fail
-//
-// Subcommands: init | run | warmup | gate   (drop is handled by drop.mjs)
-//   node gym-runner.mjs run
-//   GYM_EXERCISES=skip node gym-runner.mjs run   (warmup only)
-//   GYM_TIMEOUT=20 node gym-runner.mjs run
 import fs from 'node:fs/promises';
 import { existsSync, readFileSync, globSync } from 'node:fs';
 import path from 'node:path';
 
 const __dirname = import.meta.dirname;
-const EXT_DIR = path.resolve(__dirname, '..'); // .specify/extensions/gym
+const EXT_DIR = path.resolve(__dirname, '..');
 const CONFIG_PATH = path.join(EXT_DIR, 'gym-config.yml');
 const DEFAULTS = {
   warmup_location: 'gym/',
@@ -26,7 +14,6 @@ const DEFAULTS = {
   drop_stores: ['local', 'ledger'],
 };
 
-// --- minimal YAML reader (flat keys + block/inline lists; no nesting) ---------
 function scalar(v) {
   if (v === 'true') return true;
   if (v === 'false') return false;
@@ -72,9 +59,7 @@ function loadConfig() {
     for (const k of Object.keys(DEFAULTS)) {
       if (parsed[k] !== undefined) cfg[k] = parsed[k];
     }
-  } catch {
-    /* defaults */
-  }
+  } catch {}
   return cfg;
 }
 
@@ -237,7 +222,7 @@ async function doInit() {
 
 async function doGate() {
   let state = 'closed';
-  try { state = (await fs.readFile(gatePath, 'utf8')).trim() || 'closed'; } catch { /* not run yet */ }
+  try { state = (await fs.readFile(gatePath, 'utf8')).trim() || 'closed'; } catch {}
   console.log(state);
   return state;
 }

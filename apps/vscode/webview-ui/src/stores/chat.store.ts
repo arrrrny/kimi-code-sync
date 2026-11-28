@@ -135,6 +135,15 @@ function clearHandshakeTimer() {
   }
 }
 
+function failedPromptInput(messages: readonly ChatMessage[]): PendingInput | null {
+  const failed = messages.at(-1);
+  const prompt = messages.at(-2);
+  if (failed?.role !== "assistant" || failed.inlineError === undefined || prompt?.role !== "user") {
+    return null;
+  }
+  return { content: prompt.content, model: "" };
+}
+
 function clearAllInlineErrors(draft: ChatState): void {
   for (const msg of draft.messages) {
     if (msg.inlineError) {
@@ -322,6 +331,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         draft.isCompacting = false;
         draft.compactingModel = undefined;
         draft.pendingQuestion = null;
+        draft.pendingInput = failedPromptInput(draft.messages);
       }),
     );
     useApprovalStore.getState().clearRequests();

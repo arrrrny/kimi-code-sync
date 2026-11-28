@@ -1,6 +1,3 @@
-// Example warmup rep. Replace with a real reflex check for YOUR software.
-// A rep grows a muscle: it proves the operator can do something, not that the
-// software works. The runner calls `verify(ctx)` and treats `{ ok: true }` as grown.
 export default {
   id: 'warmup-1',
   name: 'Prove you can read the tool’s help',

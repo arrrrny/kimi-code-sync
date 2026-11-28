@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { TIMEOUTS } from '@moonshot-ai/testkit/fixtures';
 import type { BrowserContext, Page } from '@playwright/test';
 
-import type { ApprovalExpectation, ApproveOptions, Diagnostic, Frame, PermissionMode, ReopenState, SurfaceDriver, ToolExpectation } from '../support/verbs';
+import type { ApprovalExpectation, ApproveOptions, Diagnostic, Frame, PermissionMode, PlanModeState, ReopenState, SessionBadge, SurfaceDriver, TaskExpectation, ToolExpectation } from '../support/verbs';
 import { RendererSurface, type MenuPage } from './renderer';
 
 export const WELCOME_DIALOG = 'Welcome to Kimi Code';
@@ -59,6 +59,8 @@ export abstract class PageDriver implements SurfaceDriver<'desktop' | 'web'> {
 
   abstract close(): Promise<void>;
 
+  abstract quitDuringTurn(): Promise<void>;
+
   abstract reopenState(): ReopenState;
 
   abstract kill(): Promise<void>;
@@ -111,6 +113,14 @@ export abstract class PageDriver implements SurfaceDriver<'desktop' | 'web'> {
     return this.window().setPermissionMode(mode);
   }
 
+  switchModel(name: string): Promise<void> {
+    return this.window().switchModel(name);
+  }
+
+  setThinkingEffort(effort: string): Promise<void> {
+    return this.window().setThinkingEffort(effort);
+  }
+
   stop(): Promise<void> {
     return this.window().stop();
   }
@@ -143,12 +153,96 @@ export abstract class PageDriver implements SurfaceDriver<'desktop' | 'web'> {
     return this.window().expectTranscript(text);
   }
 
+  undo(): Promise<void> {
+    return this.window().undo();
+  }
+
+  steerQueued(): Promise<void> {
+    return this.window().steerQueued();
+  }
+
+  background(): Promise<void> {
+    return this.window().background();
+  }
+
+  expectTask(expectation: TaskExpectation): Promise<void> {
+    return this.window().expectTask(expectation);
+  }
+
+  stopTask(description: string): Promise<void> {
+    return this.window().stopTask(description);
+  }
+
+  expectStopped(): Promise<void> {
+    return this.window().expectStopped();
+  }
+
+  recallPrevious(): Promise<void> {
+    return this.window().recallPrevious();
+  }
+
+  submit(text: string): Promise<void> {
+    return this.window().submit(text);
+  }
+
+  expectComposer(text: string): Promise<void> {
+    return this.window().expectComposer(text);
+  }
+
   newSession(): Promise<void> {
     return this.window().newSession();
   }
 
+  fork(): Promise<void> {
+    return this.window().fork();
+  }
+
+  deleteSession(title: string): Promise<void> {
+    return this.window().deleteSession(title);
+  }
+
+  archiveSession(title: string): Promise<void> {
+    return this.window().archiveSession(title);
+  }
+
+  expectSessions(titles: readonly string[]): Promise<void> {
+    return this.window().expectSessions(titles);
+  }
+
+  expectSessionBadge(title: string, badge: SessionBadge): Promise<void> {
+    return this.window().expectSessionBadge(title, badge);
+  }
+
+  removeWorkspace(): Promise<void> {
+    return this.window().removeWorkspace();
+  }
+
+  addWorkspace(): Promise<void> {
+    return this.window().addWorkspace();
+  }
+
   compact(): Promise<void> {
     return this.window().compact();
+  }
+
+  openSession(title: string): Promise<void> {
+    return this.window().openSession(title);
+  }
+
+  reload(): Promise<void> {
+    return this.window().reload();
+  }
+
+  useSkill(name: string): Promise<void> {
+    return this.window().useSkill(name);
+  }
+
+  setPlanMode(state: PlanModeState): Promise<void> {
+    return this.window().setPlanMode(state);
+  }
+
+  btw(question: string, reply: string): Promise<void> {
+    return this.window().btw(question, reply);
   }
 
   idle(): Promise<boolean> {
@@ -159,11 +253,25 @@ export abstract class PageDriver implements SurfaceDriver<'desktop' | 'web'> {
     return this.window().resize(viewport);
   }
 
+  protected switchBrowserControl(enabled: boolean): Promise<void> {
+    return this.window().setBrowserControl(enabled);
+  }
+
   protected async awaitResumed(lastPrompt: string | undefined): Promise<void> {
     if (lastPrompt !== undefined) await this.window().awaitMessage(lastPrompt);
     if (this.page !== undefined && (await this.page.getByRole('dialog', { name: WELCOME_DIALOG }).isVisible())) {
       throw new Error(`The welcome dialog came back after the restart; a returning user should not be onboarded again.\n${await this.window().describe()}`);
     }
+  }
+
+  protected async reloadWindow(): Promise<void> {
+    const page = this.page;
+    if (page === undefined) throw new Error(`The ${this.name} page is not ready.`);
+    const before = page.url();
+    await page.reload({ timeout: TIMEOUTS.server });
+    await page.getByRole('status', { name: 'Connecting…' }).first().waitFor({ state: 'hidden', timeout: TIMEOUTS.server });
+    await page.getByRole('combobox', { name: 'Message input' }).waitFor({ state: 'visible', timeout: TIMEOUTS.server });
+    if (page.url() !== before) throw new Error(`reloadPage() came back at ${page.url()} instead of ${before}.\n${await this.window().describe()}`);
   }
 
   protected async startTrace(): Promise<void> {
@@ -186,6 +294,11 @@ export abstract class PageDriver implements SurfaceDriver<'desktop' | 'web'> {
     if (!(await this.window().idle())) {
       throw new Error(`The scenario ended while a turn was running or an approval was pending; end it with waitIdle().\n${this.lastPage}`);
     }
+    await this.saveTrace();
+  }
+
+  protected async leaveDuringTurn(): Promise<void> {
+    this.lastPage = await this.window().describe();
     await this.saveTrace();
   }
 

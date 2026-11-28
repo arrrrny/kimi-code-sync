@@ -1,10 +1,3 @@
-/**
- * Single-line-cursored, multi-line text input shared by the dialogs that edit
- * queued text (goal queue, message queue). Owns the raw-key handling
- * (bracketed paste, grapheme-aware cursor moves, vertical movement) and the
- * windowed render; the caller owns focus, submit semantics and framing.
- */
-
 import { CURSOR_MARKER, Key, matchesKey, truncateToWidth, visibleWidth } from '@moonshot-ai/pi-tui';
 import chalk from 'chalk';
 
@@ -95,9 +88,7 @@ export class MultilineTextInput {
     }
   }
 
-  invalidate(): void {
-    // No cached layout.
-  }
+  invalidate(): void {}
 
   render(width: number): string[] {
     const safeWidth = Math.max(4, width);

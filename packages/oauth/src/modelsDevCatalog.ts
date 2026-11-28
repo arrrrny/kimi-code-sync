@@ -1,13 +1,5 @@
 import { isRecord } from './utils';
 
-/**
- * Self-contained models.dev catalog lookup for OpenAI-compatible catalog
- * refresh (`/refresh-catalog`). Kept inside `@moonshot-ai/kimi-code-oauth` so
- * the package stays free of `agent-core` / SDK dependencies. Mirrors the
- * catalog resolution in `agent-core-v2`'s kosongConfig, but only the narrow
- * "lookup a single model's display name + capabilities" slice needed here.
- */
-
 interface ModelsDevModelEntry {
   readonly id?: string;
   readonly name?: string;
@@ -64,20 +56,10 @@ function toCapabilities(model: ModelsDevModelEntry): string[] | undefined {
   if (inputs.includes('audio')) caps.add('audio_in');
   if (Boolean(model.reasoning) || model.reasoning !== undefined) caps.add('thinking');
   caps.add('tool_use');
-  // A deprecated/alpha model is a *known* catalog answer of "no capabilities",
-  // not the same as "no catalog entry". Return an explicit empty set so the
-  // merge can retract a curated set instead of reading the deprecation as
-  // silence and keeping `tool_use` / `image_in` forever.
   if (model.status === 'deprecated' || model.status === 'alpha') return [];
   return caps.size > 0 ? [...caps] : undefined;
 }
 
-/**
- * The wire field a model streams its reasoning text in (models.dev
- * `interleaved.field`), e.g. `reasoning_content`. Mirrors `modelsDevReasoningKey`
- * in agent-core-v2's kosongConfig so a catalog refresh writes the same key an
- * import would.
- */
 function toReasoningKey(model: ModelsDevModelEntry): string | undefined {
   const interleaved = model.interleaved;
   if (typeof interleaved !== 'object' || interleaved === null) return undefined;
@@ -100,11 +82,6 @@ function modelInfoFrom(
   const rawName = raw['name'];
   const displayName =
     typeof rawName === 'string' && rawName.length > 0 ? rawName : undefined;
-  // `capabilities` and `context` are independent signals — a model flagged
-  // `deprecated` / `alpha` yields an explicit empty capabilities set (so the
-  // merge retracts a curated one) but can still carry a `limit.context` we want
-  // to surface. Read both, then return only the fields that have a value so the
-  // caller does not have to distinguish "absent" from "explicitly undefined".
   const capabilities = toCapabilities(raw as ModelsDevModelEntry);
   const reasoningKey = toReasoningKey(raw as ModelsDevModelEntry);
   const limit = isRecord(raw['limit']) ? (raw['limit'] as Record<string, unknown>) : undefined;
@@ -126,13 +103,6 @@ function modelInfoFrom(
   };
 }
 
-/**
- * Providers consulted after the requested provider's own entry, in order, when
- * a model is missing there. models.dev keys opencode's free tier
- * (`glm-5-free`, `kimi-k2.5-free`, `deepseek-v4-flash-free`) only under
- * `opencode`, so a provider that mirrors the same endpoint — `opencode-go`, or
- * a user provider — still needs to reach it.
- */
 const FALLBACK_PROVIDER_IDS: readonly string[] = ['opencode'];
 
 function lookupInEntry(
@@ -147,35 +117,6 @@ function lookupInEntry(
   );
 }
 
-/**
- * Look up a model in the models.dev catalog, cascading from the narrowest to
- * the widest match:
- *  1. `providerId` + `modelId`,
- *  2. `modelId` under a `FALLBACK_PROVIDER_IDS` provider,
- *  3. `modelId` under any provider.
- *
- * Model ids are matched loosely at every step: many providers append `:free`
- * (OpenRouter, OpenAI-compatible) or `-free` (opencode) to the model id, but
- * models.dev keys the base model without that suffix. Each step therefore
- * tries, in order, the exact id (`tencent/hy3:free`), the id with a trailing
- * `:free` stripped, and the id with a trailing `-free` stripped. A step that
- * finds nothing falls through to the next one; nothing anywhere means
- * `undefined` and the caller keeps its own value.
- *
- * Steps 2 and 3 can return a model whose context window is the one some other
- * provider serves rather than the requested provider's, so they only run when
- * the requested provider has no entry of its own for this model. A
- * provider-reported display name still takes priority over the catalog name at
- * the call site; this only supplies the fallback name + capabilities.
- *
- * Step 3 is advisory on top of that: the same model id is commonly carried by
- * several unrelated gateway/aggregator entries that disagree on
- * `limit.context`, and the catalog's object-key order is a listing order, not
- * a ranking. Its context is therefore returned only when every provider that
- * reports one reports the same value; otherwise the caller keeps its curated
- * or default window. Display name, capabilities and reasoning key still surface
- * from the first candidate.
- */
 export function lookupModelsDevModel(
   providerId: string,
   modelId: string,
@@ -210,11 +151,6 @@ export function lookupModelsDevModel(
   };
 }
 
-/**
- * Fetch the live models.dev catalog (used to warm the built-in memo when a
- * provider/operation needs fresher data than the bundled snapshot). Returns the
- * built-in catalog unchanged if the network fetch fails.
- */
 export async function refreshModelsDevCatalog(
   fetchImpl: typeof fetch = fetch,
   userAgent?: string,

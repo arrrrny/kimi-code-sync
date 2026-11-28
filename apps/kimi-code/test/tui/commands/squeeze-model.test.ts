@@ -1,11 +1,3 @@
-/**
- * Scenario: /squeeze-model and /squeeze-model-secondary command behavior in the TUI.
- * Responsibilities: picker filtering, persistence of `[compaction_model] model` (and
- * `secondary_model` for the secondary command) plus
- * enabling the `compaction-model` experiment flag, and error paths.
- * Wiring: real command and selector with the SDK/session boundaries stubbed by a small host rig.
- * Run: pnpm -C apps/kimi-code exec vitest run test/tui/commands/squeeze-model.test.ts
- */
 import type { ModelAlias } from '@moonshot-ai/kimi-code-sdk';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -45,7 +37,6 @@ function makeHost(options?: {
     availableModels: {
       k2: model('k2'),
       cheap: model('cheap'),
-      // The v1 secondary-model derived entry must never be selectable here.
       '__secondary__': model('cheap'),
     } as Record<string, ModelAlias>,
     availableProviders: {},

@@ -101,8 +101,6 @@ import type {
   CreateWorktreeOptions,
   InspectWorktreeRemovalInput,
   RemoveWorktreeInput,
-  RunSetupScriptInput,
-  RunSetupScriptOptions,
   WorkLocation,
   WorktreeListing,
   WorktreeRemovalCheck,
@@ -132,6 +130,10 @@ export interface ImportContextRpcInput extends SessionIdRpcInput {
 
 export interface ReloadSessionRpcInput extends SessionIdRpcInput {
   readonly forcePluginSessionStartReminder?: boolean;
+}
+
+export interface MoveSessionRpcInput extends SessionIdRpcInput {
+  readonly workDir: string;
 }
 
 export interface SetSessionModelRpcInput extends SessionIdRpcInput {
@@ -245,6 +247,13 @@ export abstract class SDKRpcClientBase {
   abstract resumeSession(input: ResumeSessionInput): Promise<ResumedSessionSummary>;
 
   abstract reloadSession(input: ReloadSessionRpcInput): Promise<ResumedSessionSummary>;
+
+  async moveSession(_input: MoveSessionRpcInput): Promise<ResumedSessionSummary> {
+    throw new KimiError(
+      ErrorCodes.NOT_IMPLEMENTED,
+      'Moving a session is not implemented for this engine',
+    );
+  }
 
   abstract forkSession(input: ForkSessionInput): Promise<SessionSummary>;
 
@@ -569,16 +578,6 @@ abstract setThinking(input: SetSessionThinkingRpcInput): Promise<void>;
     _input: CreateWorktreeInput,
     _options?: CreateWorktreeOptions,
   ): Promise<CreatedWorktree> {
-    throw new KimiError(
-      ErrorCodes.NOT_IMPLEMENTED,
-      'Worktree operations are not implemented for this engine',
-    );
-  }
-
-  async runWorktreeSetupScript(
-    _input: RunSetupScriptInput,
-    _options?: RunSetupScriptOptions,
-  ): Promise<{ readonly exitCode: number }> {
     throw new KimiError(
       ErrorCodes.NOT_IMPLEMENTED,
       'Worktree operations are not implemented for this engine',

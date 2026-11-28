@@ -1,6 +1,3 @@
-// Example graded exercise. Replace with a real load test for YOUR software.
-// The runner waits for a `.submitted` marker in the sandbox, then calls
-// `evaluate(sandbox)` and treats `{ pass: true }` as cleared.
 import fs from 'node:fs';
 
 export default {

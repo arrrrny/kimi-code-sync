@@ -1,10 +1,12 @@
 import { toDisposable } from '#/_base/di/lifecycle';
 import type { IAgentLoopService, LoopErrorHandler, LoopErrorHandlerRegistrationOptions, LoopNotify, LoopNotifyMessage, PromptHandle, PromptPayload, Turn, TurnResult } from '#/agent/loop/loop';
 import type { LoopHooks } from '@moonshot-ai/core/loop/contract/hook';
+import type { FullLoopLlmRequester } from '@moonshot-ai/core/loop/request';
+import { createRequester } from '@moonshot-ai/core/llm/requester';
 import { ToolExecutor } from '#/tool/executor';
 import type { Message, UserMessage } from '@moonshot-ai/core/llm/message';
 import { contextFromHistoryEntry, historyFromContext } from '#/agent/loop/history';
-import { UNKNOWN_CAPABILITY, type ModelCapability } from '#/llm-adapter/contract/capability';
+import { UNKNOWN_CAPABILITY, type ModelCapability } from '#/provider-catalog/capability';
 
 export function submitPromptTurn(
   loop: IAgentLoopService,
@@ -117,6 +119,10 @@ export class StubEffectiveProfileReader {
   removeActiveTool(): void {}
 }
 
+export function stubLoopRequester(): FullLoopLlmRequester {
+  return createRequester() as FullLoopLlmRequester;
+}
+
 export function stubLoopWithHooks(options: StubLoopOptions = {}): StubLoop {
   const hooks = createHooks(['onWillBeginStep', 'onDidFinishStep', 'onBeforeSubmitPrompt']) as IAgentLoopService['hooks'];
   const errorHandlers = registry(); const launches: number[] = []; const cancels: { turnId?: number; reason?: unknown }[] = [];
@@ -135,9 +141,12 @@ export function stubLoopWithHooks(options: StubLoopOptions = {}): StubLoop {
   };
   const hasPending = () => pending.length > 0;
   const messages: ContextMessage[] = [];
+  const requester = stubLoopRequester();
   const stub: StubLoop = {
     _serviceBrand: undefined, hooks, launches, cancels, startTurn, batchStartingHooks,
-    requester: {} as IAgentLoopService['requester'],
+    requester,
+    requesterForModel: () => requester,
+    resolveMaxOutputTokens: () => undefined,
     registerToolBatchStarting(hook) {
       batchStartingHooks.push(hook);
       return toDisposable(() => {

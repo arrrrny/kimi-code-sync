@@ -9,7 +9,6 @@ import {
   type ThinkingEffort,
   type SessionSummary,
 } from '@moonshot-ai/kimi-code-sdk';
-import type { SessionModelOverrideKind } from '@moonshot-ai/agent-core-v2/agent/profile/profile';
 import { isKittyProtocolActive, TuiAltScreen } from '@moonshot-ai/pi-tui';
 
 import { EditorSelectorComponent } from '../components/dialogs/editor-selector';
@@ -26,6 +25,8 @@ import { TabbedModelSelectorComponent } from '../components/dialogs/tabbed-model
 import { PermissionSelectorComponent } from '../components/dialogs/permission-selector';
 import {
   CopyOnSelectSelectorComponent,
+  formatWheelScrollSpeedLabel,
+  ScrollSpeedSelectorComponent,
   SettingsSelectorComponent,
   ThinkingDisplaySelectorComponent,
   ToolCallDensitySelectorComponent,
@@ -41,12 +42,14 @@ import {
   DEFAULT_TUI_CONFIG,
   resolveFollowUpBehavior,
   resolveTuiMode,
+  resolveWheelScrollLines,
   saveTuiConfig,
   type FollowUpBehavior,
   type MarkdownConfig,
   type TranscriptConfig,
   type TuiConfig,
   type TuiMode,
+  type WheelScrollLines,
 } from '../config';
 import type { ThemeName } from '#/tui/theme';
 import { currentTheme, isBuiltInTheme, lightColors, loadCustomThemeMerged } from '#/tui/theme';
@@ -69,7 +72,7 @@ import {
 } from '#/utils/effort-switch-config';
 import { DEFAULT_OAUTH_PROVIDER_NAME } from '#/constant/app';
 import { MAIN_AGENT_ID, NO_ACTIVE_SESSION_MESSAGE, TUI_MODE_RESTART_NOTICE } from '../constant/kimi-tui';
-import { DOCK_PREVIEW_ROWS } from '../constant/rendering';
+import { DOCK_MODEL_SELECTOR_ROWS, DOCK_PREVIEW_ROWS } from '../constant/rendering';
 import type { QueuedModelSwitch } from '../types';
 import { formatErrorMessage } from '../utils/event-payload';
 import { setMarkdownMermaidMode, type MermaidRenderMode } from '../utils/markdown-options';
@@ -84,6 +87,8 @@ import { PERMISSION_MODE_DESCRIPTIONS, PERMISSION_MODE_DISPLAY_NAMES } from '../
 import { showUsage } from './info';
 import { setExperimentalFeatures } from './experimental-flags';
 import type { SlashCommandHost } from './dispatch';
+
+type SessionModelOverrideKind = Parameters<Session['setSessionModelOverride']>[0];
 
 const MODEL_PICKER_REFRESH_TIMEOUT_MS = 2_000;
 
@@ -100,6 +105,7 @@ export function currentTuiConfig(host: Pick<SlashCommandHost, 'state'>): TuiConf
     disablePasteBurst: host.state.appState.disablePasteBurst ?? DEFAULT_TUI_CONFIG.disablePasteBurst,
     copyOnSelect:
       host.state.appState.copyOnSelect ?? DEFAULT_TUI_CONFIG.copyOnSelect,
+    wheelScrollLines: host.state.appState.wheelScrollLines,
     renderLatex: host.state.appState.renderLatex ?? DEFAULT_TUI_CONFIG.renderLatex ?? true,
     cacheExpiryHint: host.state.appState.cacheExpiryHint ?? DEFAULT_TUI_CONFIG.cacheExpiryHint,
     autoSessionTitle: host.state.appState.autoSessionTitle ?? DEFAULT_TUI_CONFIG.autoSessionTitle,
@@ -186,14 +192,11 @@ export async function handleCompactCommand(host: SlashCommandHost, args: string)
   }
 }
 
-/** Accepted range for `/compact-threshold`; the engine re-validates authoritatively. */
 const COMPACT_THRESHOLD_MIN = 0.05;
 const COMPACT_THRESHOLD_MAX = 0.99;
-/** Built-in auto-compaction trigger ratio used when neither override nor config sets one. */
 const COMPACT_THRESHOLD_DEFAULT = 0.85;
 const COMPACT_THRESHOLD_USAGE =
   'Usage: /compact-threshold [<ratio 0.05-0.99>|off] — with no argument, shows the current value.';
-/** Built-in default compaction token budget used when neither override nor config sets one. */
 const COMPACT_TOKEN_BUDGET_DEFAULT = 850_000;
 const COMPACT_THRESHOLD_K_USAGE =
   'Usage: /compact-threshold-k [<tokens in 1000s>|off] — with no argument, shows the current value.';
@@ -210,7 +213,6 @@ export async function handleCompactThresholdCommand(
 
   const value = args.trim();
 
-  // No argument: read-only display of the effective threshold and its source.
   if (value.length === 0) {
     try {
       const status = await session.getStatus();
@@ -228,7 +230,6 @@ export async function handleCompactThresholdCommand(
     return;
   }
 
-  // "off" clears the session override and returns to the global value.
   if (value === 'off' || value === 'reset' || value === 'clear') {
     try {
       await session.setCompactionTriggerRatio(undefined);
@@ -366,18 +367,8 @@ export async function handleModelCommand(host: SlashCommandHost, args: string): 
   await showModelPicker(host, alias);
 }
 
-// ---------------------------------------------------------------------------
-// Bulk session model switch (`/update-all-session-models`)
-// ---------------------------------------------------------------------------
-
-/**
- * How many of the scope's sessions the bulk switch touches by default: the
- * current session plus the most recently used ones. `--all` lifts the limit
- * and reaches every non-archived session.
- */
 const BULK_SESSION_LIMIT = 20;
 
-/** Which sessions the bulk switch may touch. */
 type BulkScope = 'workspace' | 'all';
 
 type BulkSessionOutcome =
@@ -392,14 +383,10 @@ type BulkReloadOutcome =
 interface BulkSelection {
   readonly sessions: readonly SessionSummary[];
   readonly scope: BulkScope;
-  /** Sessions the scope holds in total, before the limit applies. */
   readonly total: number;
-  /** True when the limit left sessions of the scope untouched. */
   readonly truncated: boolean;
 }
 
-/** `--all` widens the scope to every non-archived session; the model alias
- * is the remaining argument. */
 function parseBulkArgs(args: string): { readonly alias: string; readonly scope: BulkScope } {
   const tokens = args.trim().split(/\s+/).filter((token) => token.length > 0);
   let scope: BulkScope = 'workspace';
@@ -414,12 +401,6 @@ function parseBulkArgs(args: string): { readonly alias: string; readonly scope: 
   return { alias: rest.join(' '), scope };
 }
 
-/**
- * The sessions the bulk switch targets. The default scope is the current
- * workspace — the scope the session picker shows by default — limited to the
- * most recently used sessions; the current session is always included, even
- * when the limit dropped it. `--all` targets every non-archived session.
- */
 async function selectBulkSessions(
   host: SlashCommandHost,
   scope: BulkScope,
@@ -447,14 +428,6 @@ function bulkScopeWorkDir(host: SlashCommandHost): string | undefined {
   return sessionWorkDir.length > 0 ? sessionWorkDir : undefined;
 }
 
-/**
- * The current session leads the list — it is the one the user is looking at,
- * and it is reloaded so the new model applies to the next message. A session
- * the listing does not know yet (e.g. freshly created, nothing persisted) is
- * still switched: synthesize a summary. `workDir` is normally a non-empty
- * string, but fall back to the session id so a missing/empty value can never
- * leak `undefined`/blank fields into downstream handling.
- */
 function withCurrentSessionFirst(
   host: SlashCommandHost,
   sessions: readonly SessionSummary[],
@@ -478,8 +451,6 @@ function withCurrentSessionFirst(
   return [summary, ...rest];
 }
 
-/** A setModel rejection is a "skip" when the model itself can't be applied to
- * that session (unavailable/invalid); anything else is a hard "failure". */
 function classifyModelError(error: unknown): 'skipped' | 'failed' {
   const message = formatErrorMessage(error).toLowerCase();
   const modelProblem =
@@ -499,10 +470,6 @@ export async function handleUpdateAllSessionModelsCommand(host: SlashCommandHost
     host.showError(`Unknown model alias: ${alias}`);
     return;
   }
-  // A model switch changes what the running agent talks to, so a live turn has
-  // to be cancelled first — the same guard the session switcher applies
-  // ("Cannot switch sessions while streaming — press Esc or Ctrl-C first.",
-  // apps/kimi-code/src/tui/kimi-tui.ts).
   if (host.state.appState.streamingPhase !== 'idle') {
     host.showError('Cannot update session models while streaming — press Esc or Ctrl-C first.');
     return;
@@ -578,9 +545,6 @@ function showBulkConfirm(host: SlashCommandHost, alias: string, selection: BulkS
           host.showStatus('Cancelled — no sessions were changed.', 'textDim');
           return;
         }
-        // The apply loop is long-running (resume/setModel per session); the
-        // `.catch` is the last line of defense — the CLI's unhandled-rejection
-        // handler exits the whole TUI, so nothing may escape this call.
         void applyModelToAllSessions(host, alias, selection).catch((error) => {
           host.showError(`Failed to update session models: ${formatErrorMessage(error)}`);
         });
@@ -600,9 +564,6 @@ async function applyModelToAllSessions(
   const resumedSessions = new Set<string>();
 
   try {
-    // The current session goes first: it is the session the user is looking
-    // at, and reloading it is what makes the new model the one the next
-    // message uses — no manual `/reload` needed.
     const currentSession = host.session;
     if (currentId !== undefined && currentSession !== undefined) {
       const applied = await applyModelToSession(
@@ -614,9 +575,6 @@ async function applyModelToAllSessions(
       if (applied.status !== 'succeeded') {
         results.push(applied);
       } else {
-        // The read-back proves the profile changed; only the reload makes the
-        // live agent use it. A reload that failed leaves the session on the
-        // old model, so the outcome is a failure, not a success.
         const reload = await reloadCurrentSession(host, currentId, alias);
         results.push(
           reload.ok ? applied : { id: currentId, status: 'failed', reason: reload.reason },
@@ -628,8 +586,6 @@ async function applyModelToAllSessions(
       const id = summary.id;
       if (id === currentId) continue;
       let session: Session | undefined;
-      // `getSession` is a map lookup in practice, but any throw here must
-      // not escape the loop: classify the session as failed and keep going.
       try {
         session = host.harness.getSession(id);
       } catch (error) {
@@ -654,13 +610,6 @@ async function applyModelToAllSessions(
       );
     }
 
-    // Reflect the chosen model in the footer. It follows the pick for the
-    // current session — including a 'skipped' outcome (model-availability
-    // classification on the session side; the alias itself came from the
-    // picker's available models) — and for session-less startup, where
-    // appState.model is the model the yet-to-be-created session will use
-    // (/model updates it in that mode too). Only a hard 'failed' outcome
-    // keeps the old model displayed so the footer never lies.
     const currentResult =
       currentId === undefined ? undefined : results.find((r) => r.id === currentId);
     if (currentResult?.status !== 'failed') {
@@ -674,9 +623,6 @@ async function applyModelToAllSessions(
 
     reportBulkResult(host, displayName, results);
   } catch (error) {
-    // Nothing in the apply loop may escape as an unhandled rejection — the
-    // CLI's unhandled-rejection handler exits the whole TUI (this is the
-    // "kimi is thrown back to the terminal" crash). Report and keep running.
     host.showError(`Failed to update session models: ${formatErrorMessage(error)}`);
   } finally {
     for (const id of resumedSessions) {
@@ -688,12 +634,6 @@ async function applyModelToAllSessions(
   }
 }
 
-/**
- * Switch one session to the model and read the model back: a switch that
- * silently did not stick must not be reported as a success. `readModel` is
- * the probe — the current session reads the full status, the bulk loop reads
- * the alias alone, a local profile read that costs no round-trips.
- */
 async function applyModelToSession(
   session: Session,
   alias: string,
@@ -716,13 +656,6 @@ async function applyModelToSession(
   return { id, status: 'succeeded' };
 }
 
-/**
- * Re-materialize the current session so the new model is what the next
- * message uses. This is the same path `/reload` takes, so the open session
- * ends up exactly as it does after a manual reload. A failed reload is
- * reported back to the caller: the session still runs on the old model, so it
- * must not be counted as a success.
- */
 async function reloadCurrentSession(
   host: SlashCommandHost,
   sessionId: string,
@@ -788,10 +721,6 @@ export async function handleSecondaryModelCommand(host: SlashCommandHost, args: 
   showSecondaryModelPicker(host, models, current, alias.length > 0 ? alias : undefined);
 }
 
-// ---------------------------------------------------------------------------
-// Visual model (`/visual-model`) — persists `[visual_model] model` and enables the `visual-model` experiment flag
-// ---------------------------------------------------------------------------
-
 function showVisualModelPicker(
   host: SlashCommandHost,
   models: Record<string, ModelAlias>,
@@ -855,10 +784,6 @@ async function applySessionModelOverride(
 async function performVisualModelSave(host: SlashCommandHost, alias: string): Promise<void> {
   const displayName = modelDisplayName(alias, host.state.appState.availableModels[alias]);
   try {
-    // Same contract as /squeeze-model: the engine pointer field is `model`
-    // (`[visual_model] model`, resolved by `resolveVisualBinding`), and the
-    // `visual-model` experiment flag gates the resolver — enable it on save
-    // so the pick actually takes effect.
     await host.harness.setConfig({
       visualModel: { model: alias },
       experimental: { 'visual-model': true },
@@ -889,17 +814,9 @@ export async function handleVisualModelCommand(host: SlashCommandHost, args: str
     return;
   }
   const visual = (await host.harness.getConfig()).visualModel;
-  // `model` is the engine-contract pointer; `defaultModel` is the legacy
-  // field an older TUI wrote (honored as a resolver fallback).
   const current = visual?.model ?? visual?.defaultModel ?? '';
   showVisualModelPicker(host, models, current, alias.length > 0 ? alias : undefined);
 }
-
-// ---------------------------------------------------------------------------
-// Squeeze model (`/squeeze-model`) — persists `[compaction_model] model`
-// and enables the `compaction-model` experiment flag.
-// (Renamed from `compaction-model` so `/comp` + Tab completes to `/compact`.)
-// ---------------------------------------------------------------------------
 
 function showSqueezeModelPicker(
   host: SlashCommandHost,
@@ -942,12 +859,6 @@ function showSqueezeModelPicker(
 async function performSqueezeModelSave(host: SlashCommandHost, alias: string): Promise<void> {
   const displayName = modelDisplayName(alias, host.state.appState.availableModels[alias]);
   try {
-    // The engine contract pointer field is `model` (`[compaction_model] model`,
-    // resolved by `resolveCompactionBinding`); `default_model` is a legacy
-    // write from an older TUI that the resolver only treats as a fallback.
-    // Saving also enables the `compaction-model` experiment — the resolver
-    // short-circuits to the session model while the flag is off, so without
-    // this the pick would stay inert on a default build.
     await host.harness.setConfig({
       compactionModel: { model: alias },
       experimental: { 'compaction-model': true },
@@ -962,21 +873,12 @@ async function performSqueezeModelSave(host: SlashCommandHost, alias: string): P
   );
 }
 
-/**
- * `/squeeze-model-secondary`: the fallback squeeze model. Compaction tries
- * the squeeze model first, then this secondary pick, and only then falls
- * back to the current conversation model.
- */
 async function performSqueezeModelSecondarySave(
   host: SlashCommandHost,
   alias: string,
 ): Promise<void> {
   const displayName = modelDisplayName(alias, host.state.appState.availableModels[alias]);
   try {
-    // `secondaryModel` is the second tier of the compaction cascade
-    // (`[compaction_model] secondary_model`): squeeze model → secondary →
-    // current model. Saving enables the same `compaction-model` experiment
-    // flag the primary pick does.
     await host.harness.setConfig({
       compactionModel: { secondaryModel: alias },
       experimental: { 'compaction-model': true },
@@ -1007,9 +909,6 @@ export async function handleSqueezeModelCommand(host: SlashCommandHost, args: st
     return;
   }
   const compaction = (await host.harness.getConfig()).compactionModel;
-  // `model` is the engine-contract pointer; `defaultModel` is the legacy
-  // field an older TUI wrote (inert until the resolver fallback) — shown as
-  // the current value so the picker reflects what compaction will use.
   const current = compaction?.model ?? compaction?.defaultModel ?? '';
   showSqueezeModelPicker(host, models, current, false, alias.length > 0 ? alias : undefined);
 }
@@ -1036,13 +935,6 @@ export async function handleSqueezeModelSecondaryCommand(
   const current = compaction?.secondaryModel ?? '';
   showSqueezeModelPicker(host, models, current, true, alias.length > 0 ? alias : undefined);
 }
-
-// ---------------------------------------------------------------------------
-// Fallback model (`/fallback-model`) — persists `[fallback_model] model` and
-// enables the `fallback-model` experiment flag. After the primary model
-// exhausts its retry budget, the agent loop transparently retries on this
-// alias. Mirrors the `squeeze-model` UX (model picker + persistent save).
-// ---------------------------------------------------------------------------
 
 function showFallbackModelPicker(
   host: SlashCommandHost,
@@ -1099,11 +991,6 @@ async function performFallbackModelSave(host: SlashCommandHost, alias: string): 
   );
 }
 
-/**
- * `/fallback-model-secondary`: the second tier of the fallback cascade. The
- * agent tries the primary model first, then the fallback model, then this
- * secondary alias, before surfacing a terminal error.
- */
 async function performFallbackModelSecondarySave(
   host: SlashCommandHost,
   alias: string,
@@ -1169,10 +1056,6 @@ export async function handleFallbackModelSecondaryCommand(
   const current = fallback?.secondaryModel ?? '';
   showFallbackModelPicker(host, models, current, true, alias.length > 0 ? alias : undefined);
 }
-
-// ---------------------------------------------------------------------------
-// Substitute model (`/substitute-model`) — persists `[substitute_model] default_model`
-// ---------------------------------------------------------------------------
 
 function showSubstituteModelPicker(
   host: SlashCommandHost,
@@ -1452,6 +1335,10 @@ export async function showModelPicker(host: SlashCommandHost, selectedValue: str
     currentValue: host.state.appState.model,
     selectedValue,
     currentThinkingEffort: host.state.appState.thinkingEffort,
+    layout:
+      host.state.dockContainer === undefined
+        ? undefined
+        : { maxBodyRows: DOCK_MODEL_SELECTOR_ROWS },
     favoriteAliases: host.state.appState.favoriteModels ?? [],
     onToggleFavorite: (alias) => {
       void toggleFavoriteModel(host, alias, picker);
@@ -1473,12 +1360,6 @@ export async function showModelPicker(host: SlashCommandHost, selectedValue: str
   host.mountEditorReplacement(picker);
 }
 
-/**
- * Toggle a model's favorite state: append at the end on add (add-order drives
- * the Favorites tab and Alt+M rotation), remove on unmark, persist to
- * tui.toml, and live-refresh the open picker so the tab and ★ markers update
- * without reopening the dialog.
- */
 async function toggleFavoriteModel(
   host: SlashCommandHost,
   alias: string,
@@ -1497,13 +1378,6 @@ async function toggleFavoriteModel(
   }
 }
 
-/**
- * Next favorite after the current model for the Alt+M rotation. Favorites not
- * present in the available catalog are skipped; the current model need not be
- * a favorite (rotation then starts at the first favorite). Returns undefined
- * when there is nothing useful to rotate to (no favorites, the only favorite
- * is already active, or none resolve in the catalog).
- */
 export function nextFavoriteAlias(
   favorites: readonly string[],
   currentModel: string,
@@ -1517,11 +1391,6 @@ export function nextFavoriteAlias(
   return usable[(currentIndex + 1) % usable.length]!;
 }
 
-/**
- * Alt+M from the editor: switch the session straight to the next favorite
- * model — no dialog, no persistence (the saved default model is untouched;
- * /model remains the way to change the default).
- */
 export async function rotateToNextFavoriteModel(host: SlashCommandHost): Promise<void> {
   const favorites = host.state.appState.favoriteModels ?? [];
   const available = new Set(Object.keys(host.state.appState.availableModels));
@@ -1758,6 +1627,10 @@ function showSecondaryModelPicker(
       currentThinkingEffort: 'off',
       thinkingControl: false,
       title: ' Select a secondary model (subagents)',
+      layout:
+        host.state.dockContainer === undefined
+          ? undefined
+          : { maxBodyRows: DOCK_MODEL_SELECTOR_ROWS },
       onSelect: ({ alias }) => {
         host.restoreEditor();
         void performSecondaryModelSave(host, alias);
@@ -2173,6 +2046,43 @@ export async function applyCopyOnSelectChoice(
   host.showStatus(`Copy on select ${enabled ? 'enabled' : 'disabled'}.`);
 }
 
+function showScrollSpeedPicker(host: SlashCommandHost): void {
+  host.mountEditorReplacement(
+    new ScrollSpeedSelectorComponent({
+      currentValue: resolveWheelScrollLines(host.state.appState.wheelScrollLines),
+      onSelect: (lines) => {
+        host.restoreEditor();
+        void applyScrollSpeedChoice(host, lines);
+      },
+      onCancel: () => {
+        host.restoreEditor();
+      },
+    }),
+  );
+}
+
+export async function applyScrollSpeedChoice(
+  host: Pick<SlashCommandHost, 'state' | 'setAppState' | 'showStatus'>,
+  lines: WheelScrollLines,
+): Promise<void> {
+  const label = formatWheelScrollSpeedLabel(lines);
+  if (lines === resolveWheelScrollLines(host.state.appState.wheelScrollLines)) {
+    host.showStatus(`Scroll speed already ${label}.`);
+    return;
+  }
+
+  try {
+    await saveTuiConfig({ ...currentTuiConfig(host), wheelScrollLines: lines });
+  } catch (error) {
+    host.showStatus(`Failed to save scroll speed setting: ${formatErrorMessage(error)}`, 'error');
+    return;
+  }
+
+  host.setAppState({ wheelScrollLines: lines });
+  if (host.state.ui instanceof TuiAltScreen) host.state.ui.setWheelScrollLines(lines);
+  host.showStatus(`Scroll speed set to ${label}.`, 'success');
+}
+
 function showToolCallDensityPicker(host: SlashCommandHost): void {
   host.mountEditorReplacement(
     new ToolCallDensitySelectorComponent({
@@ -2374,6 +2284,7 @@ function handleSettingsSelection(host: SlashCommandHost, value: SettingsSelectio
     case 'toolCallDensity': showToolCallDensityPicker(host); return;
     case 'thinking': showThinkingDisplayPicker(host); return;
     case 'copyOnSelect': showCopyOnSelectPicker(host); return;
+    case 'scrollSpeed': showScrollSpeedPicker(host); return;
     case 'mermaid': showMermaidPreferencePicker(host); return;
     case 'editor': showEditorPicker(host); return;
     case 'followUpBehavior': showFollowUpBehaviorPicker(host); return;

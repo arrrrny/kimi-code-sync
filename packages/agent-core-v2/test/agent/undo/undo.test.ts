@@ -29,7 +29,7 @@ import { ContextUndone } from '#/agent/undo/undoService';
 import { AgentStatusUpdated } from '#/agent/usage/usageEvents';
 import { IEventBus } from '#/app/event/eventBus';
 import { ErrorCodes } from '#/errors';
-import { APIRequestTooLargeError, APIStatusError } from '#/llm-adapter/contract/errors';
+import { APIRequestTooLargeError, APIStatusError } from '#/provider-catalog/errors';
 import { ISessionMetadata } from '#/session/sessionMetadata/sessionMetadata';
 import { ToolsUpdateStore } from '#/features/todo/todoOps';
 import type { TodoItem } from '#/features/todo/todoItem';
@@ -510,10 +510,12 @@ describe('AgentConversationUndoService', () => {
       const originalCount = mode === 'degraded' ? 3 : 1;
       const recoveredCount = mode === 'degraded' ? 2 : 0;
       expect(await runTurn(originalCount)).toBe(0);
+      ctx.expectCacheBreak('media recovery replaces the images an earlier turn sent', { at: 'history' });
       expect(await runTurn(1)).toBe(1);
       expect(imageCounts).toEqual([originalCount, originalCount + 1, recoveredCount]);
       expect(ctx.context.historyRevision()).toBe(revision);
 
+      ctx.expectCacheBreak('undo rewrites the history', { at: 'history' });
       await ctx.get(IAgentConversationUndoService).undo(1);
       expect(await runTurn(0)).toBe(2);
 
@@ -544,6 +546,7 @@ describe('AgentConversationUndoService', () => {
     await runTurn(ctx, 'u2');
     expect(ctx.agentState.get(turnKey).nextTurnId).toBe(2);
 
+    ctx.expectCacheBreak('undo rewrites the history', { at: 'history' });
     await undo.undo(1);
 
     expect(ctx.agentState.get(turnKey).nextTurnId).toBe(2);
@@ -925,6 +928,7 @@ describe('AgentConversationUndoService', () => {
     });
 
     ctx.mockNextResponse({ type: 'text', text: 'task C ack' });
+    ctx.expectCacheBreak('undo rewrites the history', { at: 'history' });
     const resetting = undo.undo(1);
     controlledC.resolve('c\n');
     await resetting;

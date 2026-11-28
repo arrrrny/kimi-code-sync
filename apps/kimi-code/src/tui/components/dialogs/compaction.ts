@@ -1,19 +1,3 @@
-/**
- * Renders a compaction block in the transcript.
- *
- * Lifecycle:
- *   - constructed on `compaction.started` → blinking white bullet +
- *     "Compacting context using <model>..." (or without the model) and
- *     optional custom instruction
- *   - `markDone()` on `compaction.completed` → solid green bullet +
- *     "Compaction complete (X → Y tokens)"
- *   - `markCanceled()` on `compaction.cancelled` → solid warning bullet +
- *     "Compaction cancelled"
- *
- * Bullet animation mirrors `ToolCallComponent` (500ms blink) so the user
- * reads the same "work in progress" signal across the UI.
- */
-
 import { Container, Text, Spacer } from '@moonshot-ai/pi-tui';
 import type { TUI } from '@moonshot-ai/pi-tui';
 

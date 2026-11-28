@@ -22,12 +22,8 @@ import {
   IAgentScopeContext,
   IAgentTaskService,
   IAgentTodoService,
-  IAgentToolPolicyService,
-  IAgentTowerService,
   IEventBus,
   IEventService,
-  IModelCatalog,
-  IModelService,
   IConfigService,
   ISessionActivityView,
   ISessionMetadata,
@@ -35,7 +31,6 @@ import {
   ISessionIndex,
   ISessionManager,
   ISessionTokenCountingService,
-  ISessionToolPolicy,
   ISessionUsageService,
   IProjectInstanceManager,
   IProjectService,
@@ -73,6 +68,7 @@ import {
   SessionEventBroadcaster,
 } from '../src/transport/ws/v1/sessionEventBroadcaster';
 import { USAGE_FRAME_INTERVAL_MS } from '../src/transport/ws/v1/sessionAgentFeed';
+import { IProviderCatalogService } from '@moonshot-ai/agent-core-v2/provider-catalog/providerCatalogService';
 
 type FakeBusEvent = { type: string };
 
@@ -108,9 +104,15 @@ class FakeAgentBus {
   }
 }
 
+interface FakeCoreEvent {
+  type: string;
+  payload: unknown;
+  time?: number;
+}
+
 class FakeEventBus {
-  private handlers: Array<(e: { type: string; payload: unknown }) => void> = [];
-  subscribe(handler: (e: { type: string; payload: unknown }) => void) {
+  private handlers: Array<(e: FakeCoreEvent) => void> = [];
+  subscribe(handler: (e: FakeCoreEvent) => void) {
     this.handlers.push(handler);
     return {
       dispose: () => {
@@ -119,7 +121,7 @@ class FakeEventBus {
       },
     };
   }
-  emit(e: { type: string; payload: unknown }): void {
+  emit(e: FakeCoreEvent): void {
     for (const h of [...this.handlers]) h(e);
   }
 }
@@ -479,7 +481,6 @@ function makeCore(
   eventBus = new FakeEventBus(),
   metaAgents: Record<string, { type?: string; parentAgentId?: string }> = {},
   managerEvents?: FakeManagerEvents,
-  policySources: { sessionPolicy?: unknown; config?: Record<string, unknown> } = {},
 ): Scope {
   const handles = new WeakMap<FakeLifecycle, IScopeHandle>();
   const sessionFor = (sid: string) => {
@@ -492,7 +493,6 @@ function makeCore(
         if (t === IAgentLifecycleService) return lifecycle;
         if (t === ISessionActivityView) return lifecycle.workView;
         if (t === ISessionMetadata) return { read: async () => ({ agents: metaAgents }) };
-        if (t === ISessionToolPolicy) return policySources.sessionPolicy;
         return undefined;
       },
     };
@@ -549,7 +549,7 @@ function makeCore(
         return { get: async () => ({ root: '/repo/a' }) };
       }
       if (token === IConfigService) {
-        return { ready: Promise.resolve(), getAll: () => ({}), ...policySources.config };
+        return { ready: Promise.resolve(), getAll: () => ({}) };
       }
       if (token === IProjectSessions) {
         return { listRecent: async () => [], count: async () => 3 };
@@ -813,6 +813,29 @@ describe('SessionEventBroadcaster', () => {
       session: { id: 'cold-1', workspace_id: 'wd_cold_000000000000' },
     });
     expect(globalView.deliveries).toEqual(['immediate']);
+  });
+
+  it('reports the archive in its frame when the session summary predates it', async () => {
+    const globalView = collectingTarget();
+    bc.addGlobalTarget(globalView.target);
+    const archivedAt = Date.parse('2026-02-01T00:00:00.000Z');
+
+    eventBus.emit({
+      type: 'event.session.archived',
+      time: archivedAt,
+      payload: {
+        sessionId: 'cold-1',
+        workspaceId: 'wd_cold_000000000000',
+        session: { ...sessionInfo('cold-1', 'wd_cold_000000000000'), activity: 'turn', pending_interaction: 'approval' },
+      },
+    });
+
+    await vi.waitFor(() => expect(globalView.envelopes).toHaveLength(1));
+    expect(globalView.envelopes[0]).toMatchObject({
+      type: 'session',
+      change: 'archived',
+      session: { id: 'cold-1', archived: true, archived_at: '2026-02-01T00:00:00.000Z', activity: 'idle', pending_interaction: undefined },
+    });
   });
 
   it('fans out event.session.restored to every connection, including for cold sessions', async () => {
@@ -2231,159 +2254,30 @@ describe('SessionEventBroadcaster', () => {
       expect(stateFramesOf(offView)).toEqual([]);
     });
 
-    it('reports current mode tool availability in the initial agent frame', async () => {
+    it('pushes updated agent state when the model catalog changes', async () => {
       const lc = new FakeLifecycle();
       const main = lc.addAgent('main');
-      main.set(IAgentToolPolicyService, {
-        isToolActive: (name: string) => name !== 'AgentSwarm',
+      let model = 'k2';
+      Object.assign(main.accessor.get(IAgentLoopService) as Record<string, unknown>, {
+        getModel: () => model,
       });
-      main.set(IAgentTowerService, { isActive: false, toolsAvailable: true });
       sessions.set('s1', lc);
       bc = makeBroadcasterForAgents();
 
       const view = collectingTarget();
       await bc.subscribe('s1', view.target, ['main']);
+      expect(stateFramesOf(view)).toContainEqual(expect.objectContaining({ type: 'agent', model: 'k2' }));
 
-      expect(stateFramesOf(view)).toContainEqual(expect.objectContaining({
-        type: 'agent',
-        plan_mode_available: true,
-        swarm_mode_available: false,
-        tower_mode_available: true,
-        goal_mode_available: true,
-      }));
-    });
-
-    it('reports main-only modes as unavailable on subagent frames', async () => {
-      const lc = new FakeLifecycle();
-      const sub = lc.addAgent('agent-0');
-      sub.set(IAgentToolPolicyService, { isToolActive: () => true });
-      sub.set(IAgentTowerService, { isActive: false, toolsAvailable: true });
-      sessions.set('s1', lc);
-      bc = makeBroadcasterForAgents();
-
-      const view = collectingTarget();
-      await bc.subscribe('s1', view.target, ['main', 'agent-0']);
-
-      expect(stateFramesOf(view)).toContainEqual(expect.objectContaining({
-        type: 'agent',
-        agent_id: 'agent-0',
-        plan_mode_available: false,
-        swarm_mode_available: true,
-        tower_mode_available: false,
-        goal_mode_available: false,
-      }));
-    });
-
-    it('pushes updated mode availability when the session tool policy changes', async () => {
-      const lc = new FakeLifecycle();
-      const main = lc.addAgent('main');
-      let planActive = true;
-      main.set(IAgentToolPolicyService, { isToolActive: () => planActive });
-      const policyListeners = new Set<() => void>();
-      sessions.set('s1', lc);
-      bc = new SessionEventBroadcaster({
-        core: makeCore(sessions, eventBus, {}, undefined, {
-          sessionPolicy: {
-            onDidChange: (listener: () => void) => {
-              policyListeners.add(listener);
-              return { dispose: () => policyListeners.delete(listener) };
-            },
-          },
-        }),
-        conversations: conversationService(),
+      model = 'k3';
+      eventBus.emit({
+        type: 'event.model_catalog.changed',
+        payload: { changed: [{ provider_id: 'openai-main', provider_name: 'OpenAI', added: 0, removed: 1 }], unchanged: [], failed: [] },
       });
-
-      const view = collectingTarget();
-      await bc.subscribe('s1', view.target, ['main']);
-      expect(stateFramesOf(view)).toContainEqual(expect.objectContaining({ type: 'agent', plan_mode_available: true }));
-
-      for (const listener of policyListeners) listener();
-      await settle();
-      expect(stateFramesOf(view).filter((frame) => frame.type === 'agent')).toHaveLength(1);
-
-      planActive = false;
-      for (const listener of policyListeners) listener();
       await settle();
 
       const agentFrames = stateFramesOf(view).filter((frame) => frame.type === 'agent');
       expect(agentFrames).toHaveLength(2);
-      expect(agentFrames[1]).toMatchObject({ plan_mode_available: false });
-    });
-
-    it('pushes updated mode availability when global tools config changes', async () => {
-      const lc = new FakeLifecycle();
-      const main = lc.addAgent('main');
-      let goalActive = true;
-      main.set(IAgentToolPolicyService, { isToolActive: () => goalActive });
-      let onSectionChange: ((event: { domain: string }) => void) | undefined;
-      sessions.set('s1', lc);
-      bc = new SessionEventBroadcaster({
-        core: makeCore(sessions, eventBus, {}, undefined, {
-          config: {
-            onDidSectionChange: (listener: (event: { domain: string }) => void) => {
-              onSectionChange = listener;
-              return { dispose: () => {} };
-            },
-          },
-        }),
-        conversations: conversationService(),
-      });
-
-      const view = collectingTarget();
-      await bc.subscribe('s1', view.target, ['main']);
-      expect(stateFramesOf(view)).toContainEqual(expect.objectContaining({ type: 'agent', goal_mode_available: true }));
-
-      goalActive = false;
-      onSectionChange?.({ domain: 'other' });
-      await settle();
-      expect(stateFramesOf(view).filter((frame) => frame.type === 'agent')).toHaveLength(1);
-
-      onSectionChange?.({ domain: 'tools' });
-      await settle();
-
-      const agentFrames = stateFramesOf(view).filter((frame) => frame.type === 'agent');
-      expect(agentFrames).toHaveLength(2);
-      expect(agentFrames[1]).toMatchObject({ goal_mode_available: false });
-    });
-
-    it('pushes updated Tower availability when the experimental config domain changes', async () => {
-      const lc = new FakeLifecycle();
-      const main = lc.addAgent('main');
-      let towerAvailable = true;
-      main.set(IAgentToolPolicyService, { isToolActive: () => true });
-      main.set(IAgentTowerService, {
-        isActive: false,
-        get toolsAvailable() { return towerAvailable; },
-      });
-      let onSectionChange: ((event: { domain: string }) => void) | undefined;
-      sessions.set('s1', lc);
-      bc = new SessionEventBroadcaster({
-        core: makeCore(sessions, eventBus, {}, undefined, {
-          config: {
-            onDidSectionChange: (listener: (event: { domain: string }) => void) => {
-              onSectionChange = listener;
-              return { dispose: () => {} };
-            },
-          },
-        }),
-        conversations: conversationService(),
-      });
-
-      const view = collectingTarget();
-      await bc.subscribe('s1', view.target, ['main']);
-      expect(stateFramesOf(view)).toContainEqual(expect.objectContaining({ type: 'agent', tower_mode_available: true }));
-
-      towerAvailable = false;
-      onSectionChange?.({ domain: 'other' });
-      await settle();
-      expect(stateFramesOf(view).filter((frame) => frame.type === 'agent')).toHaveLength(1);
-
-      onSectionChange?.({ domain: 'experimental' });
-      await settle();
-
-      const agentFrames = stateFramesOf(view).filter((frame) => frame.type === 'agent');
-      expect(agentFrames).toHaveLength(2);
-      expect(agentFrames[1]).toMatchObject({ tower_mode_available: false });
+      expect(agentFrames[1]).toMatchObject({ model: 'k3' });
     });
 
     it('pushes todo, goal and permission changes and stays quiet when nothing changed', async () => {
@@ -2453,8 +2347,10 @@ describe('SessionEventBroadcaster', () => {
           },
         }),
       });
-      main.set(IModelService, { getDefaultModel: () => 'k3' });
-      main.set(IModelCatalog, { get: () => ({ spec: { maxInputSize: 800 } }) });
+      main.set(IProviderCatalogService, {
+        getDefaultModelId: () => 'k3',
+        get: () => ({ spec: { maxInputSize: 800 } }),
+      });
       sessions.set('s1', lc);
       bc = makeBroadcasterForAgents();
 

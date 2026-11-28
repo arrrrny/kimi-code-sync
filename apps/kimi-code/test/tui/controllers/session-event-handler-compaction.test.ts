@@ -138,7 +138,6 @@ describe('SessionEventHandler compaction started indicator', () => {
       } as any,
       vi.fn(),
     );
-    // The indicator prefers the user-facing display name and falls back to the raw alias.
     expect(host.streamingUI.beginCompaction).toHaveBeenCalledWith('keep the recent files', 'Kimi K2');
   });
 

@@ -49,10 +49,6 @@ describe('mergeRefreshedModelAlias', () => {
   });
 
   it('keeps a curated reasoningKey when the managed payload never declares one', () => {
-    // `toManagedModelAlias` has no `reasoningKey` to give, so the managed and
-    // open-platform refreshes must treat a hand-written value as a user extra
-    // rather than as a managed field they own — otherwise every managed refresh
-    // would silently drop it.
     const merged = mergeRefreshedModelAlias(
       {
         provider: 'managed:kimi-code',

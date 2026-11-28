@@ -1,14 +1,29 @@
 {
   "unresolved": [
     {
+      "file": "packages/pi-tui/AGENTS.md",
+      "reference": "packages/tui",
+      "why": "A path in the upstream earendil-works/pi repository that pi-tui is forked from, not in this one."
+    },
+    {
+      "file": "apps/kimi-code/AGENTS.md",
+      "reference": "apps/desktop/web-dist",
+      "why": "The desktop renderer's web build output, ignored by Git."
+    },
+    {
+      "file": "apps/kimi-code/AGENTS.md",
+      "reference": "apps/kimi-code/web-dist",
+      "why": "The web bundle copied into the CLI during prebuild, ignored by Git."
+    },
+    {
       "file": "AGENTS.md",
       "reference": "apps/web",
       "why": "The browser web UI source lives in the code-app repo; only the prebuilt bundle ships here."
     },
     {
       "file": "AGENTS.md",
-      "reference": "apps/kimi-code/dist-web",
-      "why": "The web bundle copied into the CLI during prebuild; gitignored, force-added."
+      "reference": "apps/kimi-code/web-dist",
+      "why": "The web bundle built into the CLI during prebuild; gitignored, not committed."
     },
     {
       "file": "AGENTS.md",
@@ -144,11 +159,6 @@
       "file": "packages/kap-server/AGENTS.md",
       "reference": "src/routes/v2/mcp.ts",
       "why": "Upstream v2 route path; not present in this fork's kap-server tree."
-    },
-    {
-      "file": "packages/pi-tui/AGENTS.md",
-      "reference": "packages/tui",
-      "why": "Path in the upstream earendil-works/pi repository that pi-tui is forked from."
     }
   ]
 }

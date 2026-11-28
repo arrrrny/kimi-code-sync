@@ -1,6 +1,5 @@
 import fs from 'node:fs';
 import path from 'node:path';
-// TS7 ships no JS compiler API; pin TS6 for AST access.
 import ts from 'typescript-legacy';
 
 const ROOT = path.resolve(import.meta.dirname, '..');

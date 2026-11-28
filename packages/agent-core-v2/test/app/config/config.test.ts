@@ -63,7 +63,7 @@ import '#/app/kosongConfig/envOverlay';
 import { IOAuthService } from '#/app/auth/auth';
 import { IAuthLegacyService } from '#/app/authLegacy/authLegacy';
 import { AuthLegacyService } from '#/app/authLegacy/authLegacyService';
-import { type ThinkingConfig } from '#/llm-adapter/model/thinking';
+import { type ThinkingConfig } from '#/provider-catalog/model/thinking';
 import {
   BASH_TASK_TIMEOUT_S_ENV,
   KEEP_ALIVE_ON_EXIT_ENV,
@@ -107,6 +107,7 @@ import {
 import {
   MCP_SECTION,
   MCP_STARTUP_TIMEOUT_ENV,
+  MCP_STARTUP_WAIT_ENV,
   MCP_TOOL_TIMEOUT_ENV,
   McpSectionSchema,
   type McpSection,
@@ -329,6 +330,7 @@ describe('Agent config', () => {
       [emit] prompt.started                  { "time": "<time>", "agentId": "main", "promptId": "<msg-1>" }
       [emit] turn.step.started               { "time": "<time>", "agentId": "main", "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
       [wire] plugin.session_start            { "agentId": "main", "content": null, "time": "<time>" }
+      [wire] tools.settled                   { "agentId": "main", "tools": [ "Agent", "AgentSwarm", "AskUserQuestion", "Bash", "CreateGoal", "CronCreate", "CronDelete", "CronList", "Edit", "ExitPlanMode", "FetchURL", "GetGoal", "Glob", "Grep", "Read", "ReadMediaFile", "select_tools", "SetGoalBudget", "Skill", "TaskList", "TaskOutput", "TaskStop", "TodoList", "UpdateGoal", "WaitFor", "Write" ], "time": "<time>" }
       [wire] context.append_loop_event       { "agentId": "main", "event": { "type": "step.begin", "uuid": "<uuid-2>", "turnId": "0", "step": 1 }, "time": "<time>" }
       [wire] tool_select.initialized         { "agentId": "main", "tools": [ "Agent", "AgentSwarm", "AskUserQuestion", "Bash", "CreateGoal", "CronCreate", "CronDelete", "CronList", "Edit", "ExitPlanMode", "FetchURL", "GetGoal", "Glob", "Grep", "Lookup", "Read", "ReadMediaFile", "select_tools", "SetGoalBudget", "Skill", "TaskList", "TaskOutput", "TaskStop", "TodoList", "UpdateGoal", "WaitFor", "Write" ], "time": "<time>" }
       [wire] llm.tools_snapshot              { "agentId": "main", "hash": "<tools-hash>", "tools": [ "Agent", "AgentSwarm", "AskUserQuestion", "Bash", "CreateGoal", "CronCreate", "CronDelete", "CronList", "Edit", "ExitPlanMode", "FetchURL", "GetGoal", "Glob", "Grep", "Read", "SetGoalBudget", "Skill", "TaskList", "TaskOutput", "TaskStop", "TodoList", "UpdateGoal", "WaitFor", "Write" ], "time": "<time>" }
@@ -2516,6 +2518,39 @@ describe('mcp config section', () => {
     expect(config.get<McpSection | undefined>(MCP_SECTION)?.startupTimeoutMs).toBe(7000);
 
     disposables.dispose();
+  });
+
+  it('reads startup_wait_ms from config.toml and lets the env var win, including 0', async () => {
+    const env: Record<string, string> = {};
+    const { config, disposables } = await createConfig(env, '[mcp]\nstartup_wait_ms = 5000\n');
+    try {
+      expect(config.get<McpSection | undefined>(MCP_SECTION)?.startupWaitMs).toBe(5000);
+
+      env[MCP_STARTUP_WAIT_ENV] = 'abc';
+      expect(config.get<McpSection | undefined>(MCP_SECTION)?.startupWaitMs).toBe(5000);
+
+      env[MCP_STARTUP_WAIT_ENV] = '-1';
+      expect(config.get<McpSection | undefined>(MCP_SECTION)?.startupWaitMs).toBe(5000);
+
+      env[MCP_STARTUP_WAIT_ENV] = '';
+      expect(config.get<McpSection | undefined>(MCP_SECTION)?.startupWaitMs).toBe(5000);
+
+      env[MCP_STARTUP_WAIT_ENV] = '   ';
+      expect(config.get<McpSection | undefined>(MCP_SECTION)?.startupWaitMs).toBe(5000);
+
+      env[MCP_STARTUP_WAIT_ENV] = '0';
+      expect(config.get<McpSection | undefined>(MCP_SECTION)?.startupWaitMs).toBe(0);
+
+      env[MCP_STARTUP_WAIT_ENV] = '2500';
+      expect(config.get<McpSection | undefined>(MCP_SECTION)?.startupWaitMs).toBe(2500);
+    } finally {
+      disposables.dispose();
+    }
+
+    expect(McpSectionSchema.safeParse({ startupWaitMs: 0 }).success).toBe(true);
+    expect(McpSectionSchema.safeParse({ startupWaitMs: -1 }).success).toBe(false);
+    expect(McpSectionSchema.safeParse({ startupWaitMs: 2_147_483_647 }).success).toBe(true);
+    expect(McpSectionSchema.safeParse({ startupWaitMs: 2_147_483_648 }).success).toBe(false);
   });
 
   it('reads tool_timeout_ms from config.toml and lets the env var win', async () => {

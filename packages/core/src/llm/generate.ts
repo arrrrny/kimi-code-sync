@@ -1,8 +1,3 @@
-/**
- * Runs a single request attempt: encode with the protocol, resolve the endpoint and client, send
- * (streaming, or non-streaming replayed through the decoder), and decode chunks into attempt events.
- * Also emits the response request id (`llm.streaming.request_id`) and the attempt timing (`llm.timing`).
- */
 import { mergeHeaders, resolveEndpoint } from '#/llm/endpoint';
 import { opencodeSessionHeaders } from '#/llm/protocol/session-headers';
 import { isAbortError, toLlmErrorMessage, toLlmSyntaxErrorMessage } from '#/llm/protocol/errors';

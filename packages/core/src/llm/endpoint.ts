@@ -1,7 +1,3 @@
-/**
- * Endpoint resolution: environment-variable fallbacks for declared API keys and base URLs, header
- * helpers, and resolving an `LlmEndpoint` (including its credentials) into what a protocol client needs.
- */
 import { ProxyAgent, type Dispatcher } from 'undici';
 
 import { resolveLlmHeadersTimeoutMs } from '#/llm/transport/headers-timeout';

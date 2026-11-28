@@ -1,13 +1,3 @@
-/**
- * ConfirmDialogComponent — a small Yes/No confirmation mounted as an editor
- * replacement. Used by commands that change more than the current session (e.g.
- * `/update-all-session-models`) so the user sees the blast radius and explicitly
- * confirms before anything is written.
- *
- * Pure presentation: it never touches session or config state; it only reports a
- * boolean back through `onResolve`.
- */
-
 import {
   Container,
   Key,
@@ -23,11 +13,9 @@ import { printableChar } from '#/tui/utils/printable-key';
 
 export interface ConfirmDialogOptions {
   readonly title: string;
-  /** Supporting lines shown above the Yes/No choice. */
   readonly body: readonly string[];
   readonly confirmLabel?: string;
   readonly cancelLabel?: string;
-  /** Always invoked exactly once: `true` on confirm, `false` on cancel. */
   readonly onResolve: (confirmed: boolean) => void;
 }
 

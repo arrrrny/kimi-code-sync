@@ -65,14 +65,14 @@ test('keeps turn and operation request tools frozen at the loop-start baseline',
 
   userTools.unregister('UserMid');
   const signal = new AbortController().signal;
-  const requester = await loop.requester.prepareOperation(
-    { source: () => ({ type: 'operation', requestKind: 'verify_active_tools' }), tools: frozenTools },
-    signal,
-  );
-  await requester.generate(
-    { content: { messages: [{ role: 'user', content: [{ type: 'text', text: 'summarize' }] }] }, profile: {} },
-    { signal },
-  );
+  model.expectCacheBreak('the test sends its own messages through an operation request', { at: 'history' });
+  const requester = loop.requesterForModel().with({
+    content: { messages: [{ role: 'user', content: [{ type: 'text', text: 'summarize' }] }] },
+    profile: { tools: frozenTools },
+    attributes: { kind: 'verify_active_tools' },
+    policy: { retry: { maxAttemptsPerStep: 1 } },
+  });
+  await requester.generate({}, { signal });
   const requests = model.requests('main');
   expect(requests).toHaveLength(4);
   expect(toolNames(requests[3]!)).toEqual(first);
@@ -118,11 +118,13 @@ test('keeps the compaction-style operation request prefix-aligned with the turn 
   const instruction = createUserMessage('Compact the conversation.');
   const messages = historyFromContext([...loop.history(), instruction]);
   const signal = new AbortController().signal;
-  const requester = await loop.requester.prepareOperation(
-    { source: () => ({ type: 'operation', requestKind: 'full_compaction' }), tools: frozenTools },
-    signal,
-  );
-  await requester.generate({ content: { messages }, profile: {} }, { signal });
+  const requester = loop.requesterForModel().with({
+    content: { messages },
+    profile: { tools: frozenTools },
+    attributes: { kind: 'compaction' },
+    policy: { retry: { maxAttemptsPerStep: 1 } },
+  });
+  await requester.generate({}, { signal });
 
   const operations = model.requests('compaction');
   expect(operations).toHaveLength(1);

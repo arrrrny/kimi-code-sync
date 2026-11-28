@@ -24,7 +24,7 @@ import {
 import { FeedbackInputDialogComponent, type FeedbackInputDialogResult } from '../components/dialogs/feedback-input-dialog';
 import { ModelSelectorComponent } from '../components/dialogs/model-selector';
 import { PlatformSelectorComponent } from '../components/dialogs/platform-selector';
-import { DOCK_PREVIEW_ROWS } from '../constant/rendering';
+import { DOCK_MODEL_SELECTOR_ROWS, DOCK_PREVIEW_ROWS } from '../constant/rendering';
 import { toTerminalHyperlink } from '#/utils/terminal-hyperlink';
 import type { SlashCommandHost } from './dispatch';
 
@@ -240,12 +240,6 @@ export function promptKeyName(
   });
 }
 
-/**
- * Asks for the provider endpoint the catalog did not declare (or declared
- * only as an env placeholder) — required for catalog imports whose protocol
- * was guessed, where the built-in default endpoint would point at the wrong
- * host. Esc cancels the import.
- */
 export function promptBaseUrl(host: SlashCommandHost, platformName: string): Promise<string | undefined> {
   return new Promise((resolve) => {
     const dialog = new ApiKeyInputDialogComponent(
@@ -355,13 +349,6 @@ export function promptProxyUrl(host: SlashCommandHost, providerName: string): Pr
   });
 }
 
-/**
- * Asks for the optional proxy of one API key. The answer is tri-state:
- * `undefined` = the user cancelled the whole add-key flow, `{}` = accepted
- * with no proxy of its own (inherit the provider's), `{ proxyUrl }` = use
- * this proxy. A non-empty value must parse as an absolute proxy URL;
- * anything else re-prompts instead of being returned.
- */
 export async function promptKeyProxyUrl(
   host: SlashCommandHost,
   platformName: string,
@@ -432,6 +419,10 @@ export function runModelSelector(
       currentValue: firstAlias,
       currentThinkingEffort: initialThinking ? 'on' : 'off',
       searchable: true,
+      layout:
+        host.state.dockContainer === undefined
+          ? undefined
+          : { maxBodyRows: DOCK_MODEL_SELECTOR_ROWS },
       onSelect: ({ alias, thinking }) => {
         host.restoreEditor();
         resolve({ alias, thinking });

@@ -10,8 +10,8 @@ import {
 } from '#/app/agentIdentity/agentIdentity';
 import { IBootstrapService } from '#/app/bootstrap/bootstrap';
 import { IConfigService } from '#/app/config/config';
-import { IProviderService, type ProviderConfig } from '#/llm-adapter/provider/provider';
-import { IModelService } from '#/llm-adapter/model/model';
+import { type ProviderConfig } from '#/provider-catalog/provider/provider';
+import { IProviderCatalogService } from '#/provider-catalog/providerCatalogService';
 import { IWebSearchProviderService } from '#/app/auth/webSearch/webSearch';
 import { WebSearchProviderService } from '#/app/auth/webSearch/webSearchService';
 import { SUBSCRIPTION_SECTION } from '#/app/subscription/configSection';
@@ -46,8 +46,10 @@ describe('WebSearchProviderService', () => {
       .mockReturnValue({ getAccessToken: async () => 'access-token' });
     ix = createServices(disposables, {
       additionalServices: (reg) => {
-        reg.definePartialInstance(IProviderService, {
-          get: ((name: string) => providers[name]) as IProviderService['get'],
+        reg.definePartialInstance(IProviderCatalogService, {
+          getProviderConfig: ((name: string) => providers[name]) as IProviderCatalogService['getProviderConfig'],
+          getModelRecord: (() => undefined) as IProviderCatalogService['getModelRecord'],
+          getDefaultModelId: (() => undefined) as IProviderCatalogService['getDefaultModelId'],
         });
         reg.definePartialInstance(IOAuthService, {
           resolveTokenProvider:
@@ -68,10 +70,6 @@ describe('WebSearchProviderService', () => {
             domain === SUBSCRIPTION_SECTION
               ? subscriptionConfig
               : undefined) as IConfigService['get'],
-        });
-        reg.definePartialInstance(IModelService, {
-          get: (() => undefined) as IModelService['get'],
-          getDefaultModel: (() => undefined) as IModelService['getDefaultModel'],
         });
         reg.define(IWebSearchProviderService, WebSearchProviderService);
       },

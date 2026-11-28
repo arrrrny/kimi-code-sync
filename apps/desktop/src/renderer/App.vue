@@ -27,7 +27,6 @@ import { SessionAdminView, useSessionAdminBatch } from '@moonshot-ai/app-compone
 import { SelectionActionBubble } from '@moonshot-ai/app-components';
 import { MediaLightbox } from '@moonshot-ai/app-components';
 import { FileContextMenuHost } from '@moonshot-ai/app-components';
-import { ModelPicker } from '@moonshot-ai/app-components';
 import { ModelSwitchConfirmDialog } from '@moonshot-ai/app-components';
 import LoginDialog from './components/dialogs/LoginDialog.vue';
 import GlobalFeedbackDialog from './components/feedback/GlobalFeedbackDialog.vue';
@@ -36,6 +35,7 @@ import ScreenshotGuidanceDialog from './components/dialogs/ScreenshotGuidanceDia
 import ForcedUpgradeDialog from './components/ForcedUpgradeDialog.vue';
 import { ErrorBoundary } from '@moonshot-ai/app-components';
 import SettingsDialog from './components/settings/SettingsDialog.vue';
+import UpdateDialog from './components/UpdateDialog.vue';
 import { AddWorkspaceDialog, WorkspaceEditDialog } from '@moonshot-ai/app-components';
 import { ConfirmDialogHost, PastedTextDialog, openPastedTextDialog, usePastedTextStats } from '@moonshot-ai/app-components';
 import BrowserOverlayConfirmHost from './components/browser-overlay/BrowserOverlayConfirmHost.vue';
@@ -50,7 +50,7 @@ import { sessionViewsStore, workspacesStore, modelsStore, notificationsStore, au
 import { FetchTurnFileContentKey, InsertPathMentionKey, ModelDisplayKey, OpenWithDefaultAppKey, ResolveSwarmMembersKey, RevealInFolderKey, SelectionContextMenuKey, SessionRatingKey, SubagentEffortKey } from '@moonshot-ai/app-client/contracts';
 import { OpenFileLinkKey, OpenHtmlFileInPanelKey, OpenLocalHtmlFileKey, OpenMarkdownImageKey, OpenSidebarBrowserUrlKey, ResolveImageKey } from '@moonshot-ai/app-core/contracts';
 import { getKimiWebApi } from './api';
-import { useConfirmDialog, useSelectionQuoteBubble } from '@moonshot-ai/app-client/composables';
+import { useConfirmDialog, useSelectionQuoteBubble, useUpdateStatus } from '@moonshot-ai/app-client/composables';
 import { runComposerMenuEdit } from '@moonshot-ai/app-composer/runtime';
 import { startMentionTooltip } from '@moonshot-ai/app-composer/transcript';
 import type { AttachmentEntry } from '@moonshot-ai/app-composer/features/attachment';
@@ -64,7 +64,7 @@ import { usePanelTabs } from '@moonshot-ai/app-client/composables';
 import { panelApiKey, type PanelApi, type BrowserTabPayload, type BtwTabPayload, type CompactionTabPayload, type FileTabPayload, type PanelLauncherType, type TermTabPayload, type TurnDiffTabPayload, DRAFT_CONTEXT_KEY_PREFIX } from '@moonshot-ai/app-client/panel';
 import { panelLauncherItems } from './lib/panelLauncher';
 import { useIsMobile } from '@moonshot-ai/app-client/composables';
-import { createAppViewportVarsWriter, installImeCompositionLatch, openFileAttachment, restoreSendDraftAtOrigin } from '@moonshot-ai/app-client/lib';
+import { createAppViewportVarsWriter, openFileAttachment, restoreSendDraftAtOrigin } from '@moonshot-ai/app-client/lib';
 import type { FilePreviewRequest, SwarmMember } from '@moonshot-ai/app-core/client';
 import { collectTurnAttachmentImages } from '@moonshot-ai/app-core/client';
 import ServerAuthDialog from './components/ServerAuthDialog.vue';
@@ -76,9 +76,9 @@ import { effectiveThinkingLevel } from '@moonshot-ai/app-core/lib';
 import { isPurePreviewFile, modelDisplayName, subagentEffortSuffix } from '@moonshot-ai/app-core/lib';
 import { stripSkillPrefix, skillCommandArgs } from '@moonshot-ai/app-core/lib';
 import { TOWER_STATUS_PROMPT, TOWER_TEARDOWN_PROMPT } from '@moonshot-ai/app-core/lib';
-import { useContextInspector } from '@moonshot-ai/app-core';
+import { useContextInspector } from '@moonshot-ai/app-core/composables';
 import { sessionDisplayStatus, type SessionDisplayStatus } from '@moonshot-ai/app-core/lib';
-import { Icon, IconButton, StatusDot } from '@moonshot-ai/app-ui';
+import { Icon, IconButton, installImeCompositionLatch, StatusDot } from '@moonshot-ai/app-ui';
 import { hasCustomTitleBar, hasDesktopBridge, isMacosDesktop, isWindowsDesktop } from '@moonshot-ai/app-core/lib';
 import CustomTitleBar from './components/window/CustomTitleBar.vue';
 import TerminalDropZone from './components/terminal/TerminalDropZone.vue';
@@ -87,6 +87,7 @@ import TerminalResizeHandle from './components/terminal/TerminalResizeHandle.vue
 import { selectContentsOf } from '@moonshot-ai/app-core/lib';
 import { useFullscreen } from './composables/useFullscreen';
 import { useNativeTerminal, nativeTerminalDraftKey } from './composables/useNativeTerminal';
+import { selectAllTerminalIn } from './composables/terminalInstances';
 import { runWhenInitialized, useTrayAttention } from './composables/useTrayAttention';
 import { useJumpList } from './composables/useJumpList';
 import { useVibrancy } from './composables/useVibrancy';
@@ -140,6 +141,7 @@ let offAuthRequired: (() => void) | null = null;
 
 useMenuDragRegions();
 const client = useKimiWebClient();
+const updateTracker = useUpdateStatus();
 const desktopBridge = hasDesktopBridge();
 const sessionViews = sessionViewsStore();
 provide(ComposerNativeMenuHostKey, { register: registerBrowserOverlayMenu });
@@ -210,7 +212,7 @@ const workspaces = workspacesStore();
 const { visibleWorkspace, activeWorkspaceId } = storeToRefs(workspaces);
 const { mobileWorkspaceGroups, pinnedSessions, attentionBySession, attentionByWorkspace } =
   storeToRefs(sessionViews);
-const { models, activeModels, starredModelIds, defaultModel } = storeToRefs(modelsStore());
+const { models, activeModels } = storeToRefs(modelsStore());
 const { pending: modelSwitchConfirmPending } = storeToRefs(modelSwitchConfirmStore());
 const { pending: effortSwitchConfirmPending } = storeToRefs(effortSwitchStore());
 const { notifyEnabled, notifySound, notifyPermission } = storeToRefs(notificationsStore());
@@ -248,7 +250,6 @@ const {
   toggleGoalMode,
   toggleSwarmMode,
   setPermission,
-  toggleStarModel,
   renameSession,
   regenerateSessionTitle,
   archiveSessionWithToast,
@@ -377,6 +378,10 @@ onMounted(() => {
   offMenuAction =
     (window as { kimiDesktop?: { onMenuAction?: (cb: (id: string) => void) => () => void } })
       .kimiDesktop?.onMenuAction?.((menuId) => {
+      if (menuId === 'open-update-dialog') {
+        updateTracker.openDialog();
+        return;
+      }
       if (menuId === 'close-panel-tab') {
         if (anyOverlayOpen.value) return;
         if (panel.panelVisible.value && panel.activeTabId.value) {
@@ -674,6 +679,9 @@ function hideWindowFromShortcut(): void {
 
 function selectAllFromMenu(): void {
   const active = document.activeElement;
+  if (active instanceof Element && active.closest('.terminal-host') !== null && selectAllTerminalIn(active)) {
+    return;
+  }
   if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) {
     active.select();
     return;
@@ -1385,7 +1393,6 @@ const {
   showOnboarding,
   showMobileSwitcher,
   showMobileSettings,
-  showModelPicker,
   showLogin,
   showAddWorkspace,
   showStatusPanel,
@@ -1395,9 +1402,6 @@ const {
   settingsInitialTab,
   mobileSettingsInitialTab,
   settingsHighlightKey,
-  modelPickerTargetSid,
-  modelsLoading,
-  modelsUnavailable,
   configSaving,
   addWorkspaceError,
   pendingWorkspaceSubmit,
@@ -1431,6 +1435,7 @@ const {
     track('workspace_added', { workspace_count: client.workspacesView.value.length });
     terminalStore.destroySession(terminalBucketKey('', null));
   },
+  openQuickModelMenu: (targetSid?: string) => conversationPaneRef.value?.openModelMenu(targetSid),
 });
 
 const offQuitConfirm = useQuitConfirm({
@@ -1582,20 +1587,6 @@ provide(OpenSidebarBrowserUrlKey, () => {
     void panelTabsRef.value?.openBrowserUrl(url);
   };
 });
-
-async function handleSelectModel(modelId: string): Promise<void> {
-  showModelPicker.value = false;
-  const targetSid = modelPickerTargetSid.value;
-  modelPickerTargetSid.value = undefined;
-  if (targetSid !== undefined && targetSid !== (client.activeSessionId.value ?? undefined)) {
-    const switched = await client.setSessionModel(targetSid, modelId);
-    if (switched && modelId !== defaultModel.value) {
-      void client.updateConfig({ defaultModel: modelId });
-    }
-    return;
-  }
-  await client.selectModel(modelId);
-}
 
 function onAttachmentOpen(target: { url: string; fileId?: string; name: string; mediaType?: string; kind?: string; sessionId?: string }): void {
   if (target.kind === 'image' || target.kind === 'video') {
@@ -1953,10 +1944,6 @@ let sendGeneration = 0;
 // command, stale row) fails the enable write server-side and toasts the
 // daemon's own error.
 const towerEnabled = computed(() => client.experimentalFlags.value['tower'] === true);
-const towerEntryEnabled = computed(() => towerEnabled.value && client.towerModeAvailable.value);
-const planEntryEnabled = computed(() => client.planModeAvailable.value);
-const swarmEntryEnabled = computed(() => client.swarmModeAvailable.value);
-const goalEntryEnabled = computed(() => client.goalModeAvailable.value);
 
 // Mobile settings sheet's tower toggle: the sheet hides the row while the
 // flag is off, so this only forwards.
@@ -2568,7 +2555,6 @@ function openPr(url: string): void {
       @continue="handleContinue"
       @steer-queued="handleSteerQueued"
       @toggle-pin="togglePinFromHeader"
-      @pick-model="openModelPicker()"
       @configure-model="openProviderSettings()"
       @open-media="onOpenMedia"
       @edit-message="handleEditMessage"
@@ -2692,23 +2678,11 @@ function openPr(url: string): void {
 
     <TerminalDropZone v-if="terminalStore.available && !isMobile" />
 
-    <!-- Model Picker overlay -->
-    <ModelPicker
-      v-if="showModelPicker"
-      :models="activeModels"
-      :current="status.modelId"
-      :starred-ids="starredModelIds"
-      :loading="modelsLoading"
-      :unavailable="modelsUnavailable"
-      @select="handleSelectModel($event)"
-      @toggle-star="toggleStarModel($event)"
-      @close="showModelPicker = false"
-    />
-
     <ModelSwitchConfirmDialog
       v-if="modelSwitchConfirmPending !== null"
       :open="true"
       :session-type="modelSwitchConfirmPending.sessionType"
+      :to-model="modelSwitchConfirmPending.toModel"
       :hint="modelSwitchConfirmPending.hint"
       :warning="modelSwitchConfirmPending.warning"
       @select="modelSwitchConfirmStore().settle($event)"
@@ -2874,16 +2848,13 @@ function openPr(url: string): void {
       :goal-active="mobileGoalActive"
       :swarm-mode="swarmMode"
       :tower-mode="client.towerMode.value"
-      :tower-enabled="towerEntryEnabled"
-      :plan-enabled="planEntryEnabled"
-      :swarm-enabled="swarmEntryEnabled"
-      :goal-enabled="goalEntryEnabled"
+      :tower-enabled="towerEnabled"
       :color-scheme="colorScheme"
       :font-scale="fontScale"
       :managed-provider-status="managedProviderStatus"
       :managed-user-info="managedUserInfo"
       :server-version="serverVersion"
-      @pick-model="openModelPicker()"
+      @pick-model="showMobileSettings = false; void nextTick(() => conversationPaneRef?.openModelMenu())"
       @set-thinking="setThinking($event)"
       @toggle-plan="togglePlanMode()"
       @toggle-goal="toggleGoalMode()"
@@ -2897,6 +2868,7 @@ function openPr(url: string): void {
       @logout="confirmLogout"
     />
     </div>
+    <UpdateDialog v-if="updateTracker.dialogOpen.value" />
     <!-- First-run onboarding wizard (language → appearance → notifications →
          Kimi login). Held back until the first load settled so it can't cover
          the connecting splash. Outside `.app` like LoginDialog — `.app` goes

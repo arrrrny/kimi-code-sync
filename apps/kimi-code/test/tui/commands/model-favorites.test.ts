@@ -1,12 +1,3 @@
-/**
- * Model favorites — rotation logic and host flow (`commands/config.ts`).
- *
- * Covers `nextFavoriteAlias` (pure rotation step: order, wrap-around,
- * non-favorite current model, catalog filtering, single-favorite no-op) and
- * `rotateToNextFavoriteModel` (Alt+M flow: switches the session without
- * persisting a new default, hints when there is nothing to rotate to).
- * Run: pnpm -C apps/kimi-code exec vitest run test/tui/commands/model-favorites.test.ts
- */
 import type { ModelAlias } from '@moonshot-ai/kimi-code-sdk';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -103,7 +94,6 @@ describe('rotateToNextFavoriteModel', () => {
 
     expect(session.setModel).toHaveBeenCalledWith('gpt');
     expect(host.setAppState).toHaveBeenCalledWith(expect.objectContaining({ model: 'gpt' }));
-    // Session-only rotation: the status line says "for this session only".
     expect(host.showStatus).toHaveBeenCalledWith(
       expect.stringContaining('for this session only'),
       'success',

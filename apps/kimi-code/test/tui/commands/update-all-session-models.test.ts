@@ -1,13 +1,3 @@
-/**
- * Scenario: /update-all-session-models command behavior in the interactive TUI.
- * Responsibilities: reuse /model's picker UX, scope the switch to the sessions
- * the user actually works in, reload the current session so the new model
- * applies to the next message, require confirmation, apply the chosen model,
- * skip/fail resiliently, and persist the new-session default.
- * Wiring: real command + dialogs with the SDK/session boundaries stubbed by a
- * small host rig.
- * Run: pnpm -C apps/kimi-code exec vitest run test/tui/commands/update-all-session-models.test.ts
- */
 import type { ModelAlias, Session, SessionSummary, ThinkingEffort } from '@moonshot-ai/kimi-code-sdk';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -45,8 +35,6 @@ function makeSession(id: string, initialModel = 'k2'): Session {
     }),
     getStatus: vi.fn(async () => ({ model: state.model })),
     getModelAlias: vi.fn(async () => state.model),
-    // `hasConversationHistory` reads the resume state for turn counts; no
-    // replay history in these fixtures, so the transcript path decides.
     getResumeState: vi.fn(() => null),
   } as unknown as Session;
 }
@@ -142,7 +130,6 @@ describe('handleUpdateAllSessionModelsCommand', () => {
     await handleUpdateAllSessionModelsCommand(host, '');
 
     expect(host.harness.listSessions).toHaveBeenCalled();
-    // Current session is folded into the listed set, so two active sessions.
     expect(Object.keys(picker(host).models)).toEqual(['k2', 'cheap']);
   });
 
@@ -191,7 +178,6 @@ describe('handleUpdateAllSessionModelsCommand', () => {
     await vi.waitFor(() => {
       expect(host.showNotice).toHaveBeenCalled();
     });
-    // The current session still switches; the unresolvable one is reported, not fatal.
     expect(current.setModel).toHaveBeenCalledWith('cheap');
     expect(host.showStatus).toHaveBeenCalled();
   });
@@ -225,7 +211,6 @@ describe('handleUpdateAllSessionModelsCommand — scope', () => {
 
     expect(host.harness.listSessions).toHaveBeenCalledWith();
     picker(host).onSelect(SELECTION);
-    // The current session plus both listed sessions.
     expect(confirmDialog(host).title).toContain('3 sessions');
   });
 
@@ -238,7 +223,6 @@ describe('handleUpdateAllSessionModelsCommand — scope', () => {
     await handleUpdateAllSessionModelsCommand(host, '');
 
     const dialog = (picker(host).onSelect(SELECTION), confirmDialog(host));
-    // The current session plus the 20 most recent of the scope.
     expect(dialog.title).toContain('21 sessions');
     expect(dialog.body.join(' ')).toContain('30 sessions exist');
   });
@@ -275,9 +259,6 @@ describe('handleUpdateAllSessionModelsCommand — the change takes effect', () =
   });
 
   it('switches and reloads the current session before the other sessions', async () => {
-    // The order is the fix: the open session must be switched and
-    // re-materialized first, or it keeps the old model for the whole
-    // (potentially minutes-long) run over the other sessions.
     const { host, current, other } = makeHost();
 
     await handleUpdateAllSessionModelsCommand(host, '');
@@ -295,9 +276,6 @@ describe('handleUpdateAllSessionModelsCommand — the change takes effect', () =
   });
 
   it('reports a failed reload as a failure and keeps the old model in the footer', async () => {
-    // The read-back proves the profile changed; only the reload makes the
-    // agent use it. A reload that failed leaves the session on the old model,
-    // so it must not be counted as a success.
     const { host } = makeHost();
     host.harness.reloadSession.mockRejectedValueOnce(new Error('reload exploded'));
 
@@ -309,9 +287,7 @@ describe('handleUpdateAllSessionModelsCommand — the change takes effect', () =
       expect(host.showNotice).toHaveBeenCalled();
     });
     expect(host.showNotice.mock.calls[0]![1]).toContain('reload exploded');
-    // The current session is the failed one; the other session still switched.
     expect(host.showStatus).toHaveBeenCalledWith(expect.stringContaining('1 failed'), 'warning');
-    // The footer keeps the old model: the session still runs on it.
     expect(host.setAppState).not.toHaveBeenCalledWith({ model: 'cheap' });
   });
 
@@ -345,9 +321,6 @@ describe('handleUpdateAllSessionModelsCommand — the change takes effect', () =
 
 describe('handleUpdateAllSessionModelsCommand — crash safety and UI reflection', () => {
   it('surfaces an internal apply error instead of an unhandled rejection', async () => {
-    // The CLI's unhandled-rejection handler exits the whole TUI; nothing may
-    // escape the apply step. reportBulkResult runs unguarded inside the try,
-    // so a throwing showStatus exercises the outer catch.
     const unhandled: unknown[] = [];
     const onUnhandled = (reason: unknown): void => {
       unhandled.push(reason);
@@ -367,7 +340,6 @@ describe('handleUpdateAllSessionModelsCommand — crash safety and UI reflection
         expect(host.showError).toHaveBeenCalled();
       });
       expect(host.showError.mock.calls[0]![0]).toContain('render exploded');
-      // Give any escaped rejection a tick to surface, then assert none did.
       await new Promise((resolve) => setImmediate(resolve));
       expect(unhandled).toEqual([]);
     } finally {
@@ -405,7 +377,6 @@ describe('handleUpdateAllSessionModelsCommand — crash safety and UI reflection
     await vi.waitFor(() => {
       expect(host.showNotice).toHaveBeenCalled();
     });
-    // 'skipped' classification — the footer still follows the pick.
     expect(host.setAppState).toHaveBeenCalledWith({ model: 'cheap' });
   });
 
@@ -443,8 +414,6 @@ describe('handleUpdateAllSessionModelsCommand — crash safety and UI reflection
     await handleUpdateAllSessionModelsCommand(host, '');
     picker(host).onSelect(SELECTION);
 
-    // No throw: the synthesized summary falls back to the session id, and the
-    // confirm dialog still reports the current session in its count.
     const dialog = confirmDialog(host);
     expect(dialog.title).toContain('1 session');
   });

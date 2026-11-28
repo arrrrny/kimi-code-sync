@@ -13,8 +13,8 @@ import {
 } from '#/app/kosongConfig/visualModelOverlay';
 import { type VisualModelConfig } from '#/app/kosongConfig/configSection';
 import type { IConfigService } from '#/app/config/config';
-import { fromLlmModelSpec, type ModelCapability } from '#/llm-adapter/contract/capability';
-import type { IModelCatalog } from '#/llm-adapter/model/catalog';
+import { fromLlmModelSpec, type ModelCapability } from '#/provider-catalog/capability';
+import type { IProviderCatalogService } from '#/provider-catalog/providerCatalogService';
 
 import { VISUAL_MODEL_FLAG_ID } from './flag';
 
@@ -71,7 +71,7 @@ export function buildVisualModelDescriptions(
   config: IConfigService,
   flags: IFlagService,
   callerModelAlias: string | undefined,
-  modelCatalog: IModelCatalog,
+  modelCatalog: IProviderCatalogService,
 ): string | undefined {
   const visual = resolveVisualModel(config, flags);
   const visualModel = visual?.model;
@@ -101,7 +101,7 @@ function capabilitiesSuffix(capability: ModelCapability | undefined): string {
 }
 
 function resolvedCapabilities(
-  modelCatalog: IModelCatalog,
+  modelCatalog: IProviderCatalogService,
   model: string,
 ): ModelCapability | undefined {
   try {

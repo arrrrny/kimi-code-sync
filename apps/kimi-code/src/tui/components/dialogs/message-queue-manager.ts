@@ -218,7 +218,6 @@ export class MessageQueueManagerComponent extends Container implements Focusable
     });
   }
 
-  /** The cursor's index, but only when that row exists and is not a barrier. */
   private editableSelection(): number | undefined {
     const selected = this.list.selected();
     if (selected === undefined) return undefined;
@@ -226,7 +225,6 @@ export class MessageQueueManagerComponent extends Container implements Focusable
     return message !== undefined && isEditable(message) ? selected : undefined;
   }
 
-  /** Re-derive the index list when the queue shrank or grew under the dialog. */
   private syncListLength(): void {
     if (this.listLength === this.messages.length) return;
     this.listLength = this.messages.length;
@@ -255,8 +253,6 @@ export class MessageQueueManagerComponent extends Container implements Focusable
       const target = action.kind === 'move'
         ? (action.direction === 'up' ? action.index - 1 : action.index + 1)
         : -1;
-      // The TUI rejects a move it cannot honour (out of range, or across a
-      // compaction barrier), so follow the message only when it really moved.
       if (target >= 0 && target < this.messages.length && this.messages[target] === moved) {
         this.movingIndex = target;
         this.list = this.createList(target);

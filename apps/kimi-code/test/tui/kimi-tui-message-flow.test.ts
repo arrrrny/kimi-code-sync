@@ -10,6 +10,7 @@ import {
   resetCapabilitiesCache,
   setCapabilities,
   setKittyProtocolActive,
+  type Component,
   type TuiMouseEvent,
 } from '@moonshot-ai/pi-tui';
 import {
@@ -28,6 +29,8 @@ import chalk from 'chalk';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApprovalPanelComponent } from '#/tui/components/dialogs/approval-panel';
+import { StatusMessageComponent } from '#/tui/components/messages/status-message';
+import { OAUTH_LOGIN_REQUIRED_CODE } from '#/tui/constant/kimi-tui';
 import { CacheHintDialogComponent } from '#/tui/components/dialogs/cache-hint-dialog';
 import * as cacheHintConfig from '#/utils/cache-hint-config';
 import { clientConfigs } from '#/utils/client-configs';
@@ -69,6 +72,7 @@ import {
   TRANSCRIPT_MAX_TURNS,
 } from '#/tui/utils/transcript-window';
 import { BtwPanelComponent } from '#/tui/components/panes/btw-panel';
+import { ReadGroupComponent } from '#/tui/components/messages/read-group';
 import { ThinkingComponent } from '#/tui/components/messages/thinking';
 import { WelcomeComponent } from '#/tui/components/chrome/welcome';
 import { ModelSelectorComponent } from '#/tui/components/dialogs/model-selector';
@@ -244,6 +248,7 @@ function makeSession(overrides: Record<string, unknown> = {}) {
   let thinkingEffort = 'off';
   return {
     id: 'ses-1',
+    workDir: '/tmp/proj-a',
     model: 'k2',
     summary: { title: null },
     prompt: vi.fn(async (_input: unknown) => {}),
@@ -264,6 +269,7 @@ function makeSession(overrides: Record<string, unknown> = {}) {
       contextUsage: 0,
     })),
     getGoal: vi.fn(async () => ({ goal: null })),
+    getCronTasks: vi.fn(async () => ({ tasks: [] })),
     getEnvironment: vi.fn(async () => ({ environmentId: 'local' })),
     listEnvironments: vi.fn(async () => ({ environments: [] })),
     getEnvironmentState: vi.fn(async () => ({ environmentId: 'local', type: 'local', status: 'ready' })),
@@ -367,6 +373,10 @@ function makeHarness(session = makeSession(), overrides: Record<string, unknown>
     })),
     setConfig: vi.fn(async () => ({ providers: {} })),
     resolveSessionEnvironment: vi.fn(async (options: { environmentId?: string; environmentCwd?: string }) => ({ environmentId: options.environmentId ?? 'local', cwd: options.environmentCwd })),
+    resolveWorkLocation: vi.fn(async (cwd: string) => ({ cwd, projectRoot: '/tmp/proj-a', isGitRepo: true })),
+    getWorkspaceAdditionalDirs: vi.fn(async () => []),
+    getGitStatus: vi.fn(async () => null),
+    getGitPullRequest: vi.fn(async () => null),
     onConfigSectionChanged: vi.fn(() => vi.fn()),
     createSession: vi.fn(async () => session),
     resumeSession: vi.fn(async () => session),
@@ -1099,6 +1109,64 @@ describe('KimiTUI message flow', () => {
     }
   });
 
+  it('keeps skill variants aligned with editor recall when non-adjacent prompts repeat', async () => {
+    const session = makeSession({ id: 'ses-lazy' });
+    const pathA = '/work/A/review/SKILL.md';
+    const pathB = '/work/B/review/SKILL.md';
+    const { driver } = await makeDriver(session, {
+      listWorkspaceSkills: vi.fn(async () => [
+        { name: 'review', description: 'Review skill', path: pathA, source: 'project', workspaceDir: '/work/A' },
+        { name: 'review', description: 'Review skill', path: pathB, source: 'project', workspaceDir: '/work/B' },
+      ]),
+      listPluginCommands: vi.fn(async () => []),
+    });
+    await (driver as unknown as { refreshSkillCommands(): Promise<void> }).refreshSkillCommands();
+    driver.persistInputHistory = Object.getPrototypeOf(driver).persistInputHistory;
+    const { mkdtemp, rm } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('pathe');
+    const home = await mkdtemp(join(tmpdir(), 'kimi-skill-history-dedupe-'));
+    const previousHome = process.env['KIMI_CODE_HOME'];
+    process.env['KIMI_CODE_HOME'] = home;
+    try {
+      driver.restoreInputText('/skill:review alpha', [{ skillName: 'review', path: pathA, start: 0 }]);
+      await driver.persistInputHistory('/skill:review alpha');
+      await driver.persistInputHistory('repeat me');
+      driver.restoreInputText('/skill:review beta', [{ skillName: 'review', path: pathB, start: 0 }]);
+      await driver.persistInputHistory('/skill:review beta');
+      await driver.persistInputHistory('repeat me');
+
+      driver.state.editor.clearHistory();
+      (driver as unknown as { inputHistoryEntries: unknown[] }).inputHistoryEntries = [];
+      driver.restoreInputText('');
+      await (driver as unknown as { loadPersistedInputHistory(): Promise<void> }).loadPersistedInputHistory();
+
+      driver.state.editor.handleInput('\u001B[A');
+      expect(driver.state.editor.getText()).toBe('repeat me');
+      expect(driver.skillVariantPathForCommand('skill:review', 0)).toBeUndefined();
+
+      driver.state.editor.handleInput('\u001B[A');
+      expect(driver.state.editor.getText()).toBe('/skill:review beta');
+      expect(driver.skillVariantPathForCommand('skill:review', 0)).toBe(pathB);
+
+      driver.state.editor.handleInput('\u001B[A');
+      expect(driver.state.editor.getText()).toBe('/skill:review alpha');
+      expect(driver.skillVariantPathForCommand('skill:review', 0)).toBe(pathA);
+
+      driver.state.editor.handleInput('\u001B[B');
+      expect(driver.state.editor.getText()).toBe('/skill:review beta');
+      expect(driver.skillVariantPathForCommand('skill:review', 0)).toBe(pathB);
+
+      driver.state.editor.handleInput('\u001B[B');
+      expect(driver.state.editor.getText()).toBe('repeat me');
+      expect(driver.skillVariantPathForCommand('skill:review', 0)).toBeUndefined();
+    } finally {
+      if (previousHome === undefined) delete process.env['KIMI_CODE_HOME'];
+      else process.env['KIMI_CODE_HOME'] = previousHome;
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
   it('keeps both variants through queue recall and invalidates edited positions', async () => {
     const session = makeSession({ id: 'ses-lazy' });
     const { driver } = await makeDriver(session, {
@@ -1469,6 +1537,40 @@ describe('KimiTUI message flow', () => {
     releasePrompt();
   });
 
+  it('applies the relocated work location when a stale reload moves the session into a worktree', async () => {
+    let staleReload!: () => Promise<void>;
+    const movedDir = await mkdtemp(join(tmpdir(), 'kimi-stale-wt-'));
+    try {
+      const session = makeSession({
+        id: 'ses-moved',
+        setStaleReloadHandler: vi.fn((handler: () => Promise<void>) => {
+          staleReload = handler;
+        }),
+      });
+      const { driver, harness } = await makeDriver(session, {
+        resolveWorkLocation: vi.fn(async (cwd: string) => ({
+          cwd,
+          projectRoot: '/tmp/proj-a',
+          isGitRepo: true,
+          worktree: { root: cwd, name: 'wt-moved', repoRoot: '/tmp/proj-a' },
+        })),
+      });
+
+      session.workDir = movedDir;
+      await staleReload();
+
+      expect(driver.state.appState.workDir).toBe(movedDir);
+      expect(driver.state.appState.worktree).toEqual({
+        root: movedDir,
+        name: 'wt-moved',
+        repoRoot: '/tmp/proj-a',
+      });
+      expect(harness.resolveWorkLocation).toHaveBeenCalledWith(movedDir);
+    } finally {
+      await rm(movedDir, { recursive: true, force: true });
+    }
+  });
+
   it('asks to rerun /undo after the SDK reloaded a stale session (v2 engine)', async () => {
     const session = makeSession({
       id: 'ses-1',
@@ -1512,7 +1614,7 @@ describe('KimiTUI message flow', () => {
     });
     const picker = driver.state.editorContainer.children[0] as {
       handleInput(data: string): void;
-      render(width: number): string[];
+      render(width: number): readonly string[];
     };
     const output = stripSgr(picker.render(40).join(' ')).replaceAll(/\s+/g, ' ');
     expect(output).toContain('Session in use');
@@ -1534,7 +1636,7 @@ describe('KimiTUI message flow', () => {
     const takeOverLock = vi.fn(async () => {});
     const session = makeSession({ prompt, takeOverLock });
     const { driver } = await makeDriver(session);
-    type Picker = { handleInput(data: string): void; render(width: number): string[] };
+    type Picker = { handleInput(data: string): void; render(width: number): readonly string[] };
     const picker = (): Picker => driver.state.editorContainer.children[0] as Picker;
 
     driver.handleUserInput('hello');
@@ -1583,7 +1685,7 @@ describe('KimiTUI message flow', () => {
     await (
       driver as unknown as { refreshSkillCommands(s: unknown): Promise<void> }
     ).refreshSkillCommands(session);
-    type Picker = { handleInput(data: string): void; render(width: number): string[] };
+    type Picker = { handleInput(data: string): void; render(width: number): readonly string[] };
     const picker = (): Picker => driver.state.editorContainer.children[0] as Picker;
 
     (
@@ -3226,11 +3328,6 @@ command = "vim"
   });
 
   it('prints the sign-up page and GitHub Issues links when not signed in', async () => {
-    // Hermetic region: without an explicit oauth host the resolver falls
-    // through to local timezone/locale inference, which yields the global
-    // (.ai) profile on non-CN dev hosts. Pin the mainland profile the same
-    // way cli/telemetry.test.ts does, and pin KIMI_CODE_HOME so the marker /
-    // region-cache files under the real home stay unread (issue #125).
     vi.stubEnv('KIMI_CODE_OAUTH_HOST', 'https://auth.kimi.com');
     resetKimiRegionCache();
     process.env['KIMI_CODE_HOME'] = await makeTempHome();
@@ -7851,7 +7948,7 @@ command = "vim"
 
   describe('steer-draft delivery', () => {
     const occupied = (): KimiError => new KimiError(ErrorCodes.SESSION_OCCUPIED, 'in use');
-    type Picker = { handleInput(data: string): void; render(width: number): string[] };
+    type Picker = { handleInput(data: string): void; render(width: number): readonly string[] };
     const picker = (driver: MessageDriver): Picker => driver.state.editorContainer.children[0] as Picker;
     const userEntries = (driver: MessageDriver) =>
       driver.state.transcriptEntries.filter((entry) => entry.kind === 'user');
@@ -10044,6 +10141,174 @@ capabilities = ["image_in", "video_in"]
     }
   });
 
+  describe('when a step stream is cut and retried', () => {
+    async function makeStreamingDriver() {
+      const { driver } = await makeDriver();
+      const emit = (event: Record<string, unknown>): void => {
+        driver.sessionEventHandler.handleEvent(
+          { agentId: 'main', sessionId: 'ses-1', turnId: 1, ...event } as Event,
+          vi.fn(),
+        );
+      };
+      const transcript = (): string => stripSgr(renderTranscript(driver));
+      const count = (type: abstract new (...args: never[]) => unknown): number =>
+        driver.state.transcriptContainer.children.filter((child) => child instanceof type).length;
+      const replies = (): string[] =>
+        driver.state.transcriptEntries.filter((entry) => entry.kind === 'assistant').map((entry) => entry.content);
+      return { driver, emit, transcript, count, replies };
+    }
+
+    function retryStep(emit: (event: Record<string, unknown>) => void, step: number, stepId: string): void {
+      emit({ type: 'turn.step.stream_reset', step, stepId });
+      emit({
+        type: 'turn.step.retrying',
+        step,
+        failedAttempt: 1,
+        nextAttempt: 2,
+        maxAttempts: 3,
+        delayMs: 0,
+        errorName: 'APIConnectionError',
+        errorMessage: 'stream ended early',
+      });
+      emit({ type: 'turn.step.started', step, stepId });
+    }
+
+    it('keeps only the retried reply', async () => {
+      vi.useFakeTimers();
+      try {
+        const { emit, transcript, count, replies } = await makeStreamingDriver();
+        emit({ type: 'turn.started', origin: { kind: 'user' } });
+        emit({ type: 'turn.step.started', step: 1, stepId: 'step-1' });
+        emit({ type: 'thinking.delta', delta: 'Planning the draft.' });
+        emit({ type: 'assistant.delta', delta: 'Draft answer ' });
+        emit({ type: 'assistant.delta', delta: 'that gets cut' });
+        await vi.runOnlyPendingTimersAsync();
+        expect(transcript()).toContain('Draft answer that gets cut');
+        expect(count(ThinkingComponent)).toBe(1);
+
+        retryStep(emit, 1, 'step-1');
+        emit({ type: 'assistant.delta', delta: 'Final answer after the retry.' });
+        emit({ type: 'turn.step.completed', step: 1, stepId: 'step-1' });
+        emit({ type: 'turn.ended', reason: 'completed' });
+
+        expect(transcript()).toContain('Final answer after the retry.');
+        expect(transcript()).not.toContain('Draft answer');
+        expect(count(ThinkingComponent)).toBe(0);
+        expect(count(AssistantMessageComponent)).toBe(1);
+        expect(replies()).toEqual(['Final answer after the retry.']);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('drops a tool call the cut stream was still writing', async () => {
+      vi.useFakeTimers();
+      try {
+        const { driver, emit, transcript, count } = await makeStreamingDriver();
+        emit({ type: 'turn.started', origin: { kind: 'user' } });
+        emit({ type: 'turn.step.started', step: 1, stepId: 'step-1' });
+        emit({ type: 'assistant.delta', delta: 'Writing the notes.' });
+        const cutCall = 'call_cut';
+        assert(isToolCallId(cutCall));
+        emit({ type: 'tool.call.delta', toolCallId: cutCall, name: 'Write', argumentsPart: '{"path":"notes.md"' });
+        await vi.runOnlyPendingTimersAsync();
+        expect(count(ToolCallComponent)).toBe(1);
+        expect(driver.streamingUI.timeline.call(cutCall)).toBeDefined();
+
+        retryStep(emit, 1, 'step-1');
+        emit({ type: 'assistant.delta', delta: 'Nothing to write after all.' });
+        emit({ type: 'turn.step.completed', step: 1, stepId: 'step-1' });
+        emit({ type: 'turn.ended', reason: 'completed' });
+
+        expect(transcript()).toContain('Nothing to write after all.');
+        expect(transcript()).not.toContain('Writing the notes.');
+        expect(transcript()).not.toContain('notes.md');
+        expect(count(ToolCallComponent)).toBe(0);
+        expect(driver.streamingUI.timeline.call(cutCall)).toBeUndefined();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('drops reads the cut stream had already grouped', async () => {
+      vi.useFakeTimers();
+      try {
+        const { emit, transcript, count } = await makeStreamingDriver();
+        emit({ type: 'turn.started', origin: { kind: 'user' } });
+        emit({ type: 'turn.step.started', step: 1, stepId: 'step-1' });
+        emit({ type: 'tool.call.delta', toolCallId: 'call_read_a', name: 'Read', argumentsPart: '{"path":"first.txt"}' });
+        await vi.runOnlyPendingTimersAsync();
+        emit({ type: 'tool.call.delta', toolCallId: 'call_read_b', name: 'Read', argumentsPart: '{"path":"second.txt"}' });
+        await vi.runOnlyPendingTimersAsync();
+        expect(count(ReadGroupComponent)).toBe(1);
+
+        retryStep(emit, 1, 'step-1');
+        emit({ type: 'assistant.delta', delta: 'No files needed.' });
+        emit({ type: 'turn.step.completed', step: 1, stepId: 'step-1' });
+        emit({ type: 'turn.ended', reason: 'completed' });
+
+        expect(transcript()).toContain('No files needed.');
+        expect(transcript()).not.toContain('first.txt');
+        expect(transcript()).not.toContain('second.txt');
+        expect(count(ReadGroupComponent)).toBe(0);
+        expect(count(ToolCallComponent)).toBe(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('keeps what earlier steps showed', async () => {
+      vi.useFakeTimers();
+      try {
+        const { emit, transcript, count, replies } = await makeStreamingDriver();
+        emit({ type: 'turn.started', origin: { kind: 'user' } });
+        emit({ type: 'turn.step.started', step: 1, stepId: 'step-1' });
+        emit({ type: 'thinking.delta', delta: 'Look at the file first.' });
+        emit({ type: 'assistant.delta', delta: 'Checking the file.' });
+        emit({ type: 'tool.call.delta', toolCallId: 'call_read', name: 'Read', argumentsPart: '{"path":"a.txt"}' });
+        emit({ type: 'tool.call.started', toolCallId: 'call_read', name: 'Read', args: { path: 'a.txt' } });
+        emit({ type: 'tool.result', toolCallId: 'call_read', output: 'hello' });
+        emit({ type: 'turn.step.completed', step: 1, stepId: 'step-1' });
+        emit({ type: 'turn.step.started', step: 2, stepId: 'step-2' });
+        emit({ type: 'assistant.delta', delta: 'It says hel' });
+        await vi.runOnlyPendingTimersAsync();
+
+        retryStep(emit, 2, 'step-2');
+        emit({ type: 'assistant.delta', delta: 'It says hello.' });
+        emit({ type: 'turn.step.completed', step: 2, stepId: 'step-2' });
+        emit({ type: 'turn.ended', reason: 'completed' });
+
+        expect(transcript()).toContain('Checking the file.');
+        expect(transcript()).toContain('It says hello.');
+        expect(replies()).toEqual(['Checking the file.', 'It says hello.']);
+        expect(count(ThinkingComponent)).toBe(1);
+        expect(count(ToolCallComponent)).toBe(1);
+        expect(count(AssistantMessageComponent)).toBe(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('ignores a reset for another step', async () => {
+      vi.useFakeTimers();
+      try {
+        const { emit, transcript, replies } = await makeStreamingDriver();
+        emit({ type: 'turn.started', origin: { kind: 'user' } });
+        emit({ type: 'turn.step.started', step: 2, stepId: 'step-2' });
+        emit({ type: 'assistant.delta', delta: 'Still streaming.' });
+        await vi.runOnlyPendingTimersAsync();
+
+        emit({ type: 'turn.step.stream_reset', step: 1, stepId: 'step-1' });
+        await vi.runOnlyPendingTimersAsync();
+
+        expect(transcript()).toContain('Still streaming.');
+        expect(replies()).toEqual(['Still streaming.']);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
   it('flushes pending assistant deltas before turn completion', async () => {
     vi.useFakeTimers();
     try {
@@ -10322,6 +10587,64 @@ capabilities = ["image_in", "video_in"]
     });
     expect(driver.state.livePane.mode).toBe('idle');
     expect(harness.track).toHaveBeenCalledWith('init_complete', undefined);
+  });
+
+  it('clears busy state after /init completes, though no main turn reports how it ended (v2 engine)', async () => {
+    let resolveInit: (() => void) | undefined;
+    const session = makeSession({
+      init: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveInit = resolve;
+          }),
+      ),
+    });
+    const { driver } = await makeDriver(session);
+    driver.state.appState.loopLifecycleEvents = true;
+
+    driver.handleUserInput('/init');
+
+    await vi.waitFor(() => {
+      expect(session.init).toHaveBeenCalledTimes(1);
+    });
+    expect(driver.state.livePane.mode).toBe('waiting');
+
+    resolveInit?.();
+
+    await vi.waitFor(() => {
+      expect(driver.state.appState.streamingPhase).toBe('idle');
+    });
+    expect(driver.state.livePane.mode).toBe('idle');
+    expect(session.prompt).not.toHaveBeenCalled();
+  });
+
+  it('sends a message typed while /init runs once /init completes (v2 engine)', async () => {
+    let resolveInit: (() => void) | undefined;
+    const session = makeSession({
+      init: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveInit = resolve;
+          }),
+      ),
+    });
+    const { driver } = await makeDriver(session);
+    driver.state.appState.loopLifecycleEvents = true;
+
+    driver.handleUserInput('/init');
+    await vi.waitFor(() => {
+      expect(session.init).toHaveBeenCalledTimes(1);
+    });
+    driver.handleUserInput('What does AGENTS.md say?');
+    expect(driver.state.queuedMessages.map((item) => item.text)).toEqual(['What does AGENTS.md say?']);
+    expect(session.prompt).not.toHaveBeenCalled();
+
+    resolveInit?.();
+
+    await vi.waitFor(() => {
+      expect(session.prompt).toHaveBeenCalledTimes(1);
+    });
+    expect(driver.state.queuedMessages).toEqual([]);
   });
 
   it('starts /btw through a forked side agent without changing the main busy state', async () => {
@@ -17020,6 +17343,202 @@ describe('transcript fold block clicks', () => {
   });
 });
 
+describe('restoring how a turn ended after resume', () => {
+  interface Ending {
+    readonly reason: 'completed' | 'cancelled' | 'failed' | 'blocked';
+    readonly error?: {
+      readonly code: string;
+      readonly message: string;
+      readonly retryable: boolean;
+      readonly details?: Record<string, unknown>;
+    };
+  }
+
+  const refusal = {
+    code: 'provider.api_error',
+    message: 'The example service refused this request.',
+    retryable: false,
+  };
+  const stepLimit = {
+    code: 'loop.max_steps_exceeded',
+    message: 'Turn exceeded maxSteps=3.',
+    retryable: false,
+  };
+  const filtered = {
+    code: 'provider.filtered',
+    message: 'Provider safety policy blocked the response.',
+    details: { finishReason: 'filtered' },
+    retryable: false,
+  };
+  const loginRequired = {
+    code: OAUTH_LOGIN_REQUIRED_CODE,
+    message: 'The login expired.',
+    retryable: false,
+  };
+  const hint = expect.stringContaining('If this persists, run `/export-debug-zip`');
+
+  function liveTurnEndEvents({ reason, error }: Ending): Event[] {
+    const base = { agentId: 'main', sessionId: 'ses-1', turnId: 1 };
+    const events: Event[] = [];
+    if (reason === 'cancelled') {
+      events.push({ ...base, type: 'turn.step.interrupted', step: 1, reason: 'aborted' } as Event);
+    }
+    const failedInsideAStep =
+      reason === 'failed' && error?.code !== stepLimit.code && error?.code !== filtered.code;
+    if (failedInsideAStep) {
+      events.push({
+        ...base,
+        type: 'turn.step.interrupted',
+        step: 1,
+        reason: 'error',
+        message: error?.message,
+      } as Event);
+    }
+    events.push({ ...base, type: 'turn.ended', reason, ...(error === undefined ? {} : { error }) } as Event);
+    if (error !== undefined) events.push({ ...base, type: 'error', ...error } as Event);
+    return events;
+  }
+
+  function statusLines(children: readonly Component[]): string[] {
+    return children
+      .filter((child) => child instanceof StatusMessageComponent)
+      .map((child) => child.render(120).join('\n'));
+  }
+
+  function visible(lines: readonly string[]): string[] {
+    return lines.map((line) => stripSgr(line).trim());
+  }
+
+  async function shownLive(ending: Ending): Promise<string[]> {
+    const { driver } = await makeDriver();
+    const before = driver.state.transcriptContainer.children.length;
+    for (const event of liveTurnEndEvents(ending)) {
+      driver.sessionEventHandler.handleEvent(event, vi.fn());
+    }
+    return statusLines(driver.state.transcriptContainer.children.slice(before));
+  }
+
+  async function resumeWith(replay: readonly Record<string, unknown>[]) {
+    const session = makeSession();
+    const { driver } = await makeDriver(session);
+    (session.getResumeState as ReturnType<typeof vi.fn>).mockReturnValue({
+      sessionMetadata: {},
+      agents: {
+        main: {
+          config: { modelCapabilities: { max_context_tokens: 100 }, modelAlias: 'k2' },
+          plan: null,
+          permission: { mode: 'manual' },
+          swarmMode: false,
+          context: { history: [], tokenCount: 0 },
+          background: [],
+          toolStore: {},
+          replay,
+        },
+      },
+    });
+    const before = driver.state.transcriptContainer.children.length;
+    expect(await driver.sessionReplay.hydrateFromReplay(session as unknown as Session)).toBe(true);
+    return { driver, lines: statusLines(driver.state.transcriptContainer.children.slice(before)) };
+  }
+
+  function prompt(text: string, time: number): Record<string, unknown> {
+    return {
+      type: 'message',
+      time,
+      message: { role: 'user', content: [{ type: 'text', text }], toolCalls: [], origin: { kind: 'user' } },
+    };
+  }
+
+  function reply(text: string, time: number): Record<string, unknown> {
+    return {
+      type: 'message',
+      time,
+      message: { role: 'assistant', content: [{ type: 'text', text }], toolCalls: [] },
+    };
+  }
+
+  function ended(turnId: number, { reason, error }: Ending, time: number): Record<string, unknown> {
+    return { type: 'turn_ended', time, turnId, reason, ...(error === undefined ? {} : { error }) };
+  }
+
+  it.each<[string, Ending, unknown[]]>([
+    [
+      'a turn the model service refused',
+      { reason: 'failed', error: refusal },
+      ['Error: [provider.api_error] The example service refused this request.', hint],
+    ],
+    [
+      'a turn that reached the step limit',
+      { reason: 'failed', error: stepLimit },
+      ['Error: [loop.max_steps_exceeded] Turn exceeded maxSteps=3.', hint],
+    ],
+    [
+      'a turn the provider safety policy stopped',
+      { reason: 'failed', error: filtered },
+      [
+        'Turn stopped: provider safety policy blocked the response.',
+        expect.stringMatching(/^Error: \[provider\.filtered\] /),
+        hint,
+      ],
+    ],
+    [
+      'a turn that needed a new login',
+      { reason: 'failed', error: loginRequired },
+      ['Error: OAuth login expired. Send /login to login.'],
+    ],
+    ['a turn the user stopped', { reason: 'cancelled' }, ['Interrupted by user']],
+    [
+      'a turn a prompt hook blocked',
+      { reason: 'blocked' },
+      ['Turn stopped: prompt hook blocked the request.'],
+    ],
+    ['a turn that completed', { reason: 'completed' }, []],
+  ])('shows %s as it was shown live', async (_name, ending, expected) => {
+    const live = await shownLive(ending);
+    const { lines } = await resumeWith([
+      prompt('Summarise the deployment status.', 1),
+      reply('Checking the deployment.', 2),
+      ended(0, ending, 3),
+    ]);
+
+    expect(visible(live)).toEqual(expected);
+    expect(lines).toEqual(live);
+  });
+
+  it('shows each failed or stopped turn under that turn, also when later turns completed', async () => {
+    const { driver } = await resumeWith([
+      prompt('Summarise the deployment status.', 1),
+      ended(0, { reason: 'failed', error: refusal }, 2),
+      prompt('Estimate the downtime.', 3),
+      reply('Downtime is about five', 4),
+      ended(1, { reason: 'cancelled' }, 5),
+      prompt('Check the build.', 6),
+      reply('The build passed.', 7),
+      ended(2, { reason: 'completed' }, 8),
+    ]);
+
+    const transcript = stripSgr(renderTranscript(driver));
+    const order = [
+      'Summarise the deployment status.',
+      'Error: [provider.api_error] The example service refused this request.',
+      'Estimate the downtime.',
+      'Downtime is about five',
+      'Interrupted by user',
+      'Check the build.',
+      'The build passed.',
+    ].map((text) => transcript.indexOf(text));
+    expect(order.every((index) => index >= 0)).toBe(true);
+    expect(order).toEqual(order.toSorted((a, b) => a - b));
+    expect(transcript.split('Error: [provider.api_error]')).toHaveLength(2);
+
+    const entries = driver.state.transcriptEntries;
+    const turnOf = (text: string) => entries.find((entry) => entry.content.startsWith(text))?.turnId;
+    expect(turnOf('Error: [provider.api_error]')).toBe(turnOf('Summarise the deployment status.'));
+    expect(turnOf('Interrupted by user')).toBe(turnOf('Estimate the downtime.'));
+    expect(turnOf('Summarise the deployment status.')).not.toBe(turnOf('Estimate the downtime.'));
+  });
+});
+
 describe('KimiTUI message queue manager actions', () => {
   const UP = `${String.fromCodePoint(27)}[A`;
   const CTRL_S = '\u0013';
@@ -17031,7 +17550,6 @@ describe('KimiTUI message queue manager actions', () => {
     editorReplacementPanel?: { handleInput(data: string): void };
   };
 
-  /** A driver with a running turn and `texts` queued. */
   async function mountManager(
     texts: readonly QueuedMessage[],
   ): Promise<{ driver: QueueDriver; panel: { handleInput(data: string): void } }> {
@@ -17046,7 +17564,6 @@ describe('KimiTUI message queue manager actions', () => {
     return { driver: queueDriver, panel };
   }
 
-  /** A steer spy that captures the settle callback instead of running it. */
   function spySteer(queueDriver: QueueDriver): {
     steer: ReturnType<typeof vi.spyOn>;
     settle: (outcome: SteerOutcome) => void;

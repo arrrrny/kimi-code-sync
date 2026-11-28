@@ -1,15 +1,3 @@
-/**
- * Scenario: /provider post-add default-model selection, and the
- * `/provider refresh [providerId]` subcommand.
- * Responsibilities: the picked effort is gated for persistence by the model's
- * effective default, and a session-only pick is still applied to the runtime
- * after the config refresh (which only reactivates from persisted values);
- * refresh scopes to one provider when given, reports added/removed/failed,
- * and routes a retired default into the model-migration flow.
- * Wiring: real setDefaultModel / handleProviderCommand with the
- * harness/authFlow boundaries stubbed by a small host rig.
- * Run: pnpm -C apps/kimi-code exec vitest run test/tui/commands/provider.test.ts
- */
 import type { ModelAlias, ProviderConfig, RefreshProviderModelsResponse } from '@moonshot-ai/kimi-code-sdk';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -24,11 +12,6 @@ type MountedPanel = {
   render: (width: number) => string[];
 };
 
-/**
- * Host rig for the provider-manager flows. The harness config surface is a
- * single mutable snapshot, so a write followed by a re-read behaves like the
- * real one; `mountEditorReplacement` records every panel in mount order.
- */
 function makeFlowHost(providers: Record<string, ProviderConfig> = {}) {
   const mounts: MountedPanel[] = [];
   const snapshot: { providers: Record<string, ProviderConfig> } = { providers };

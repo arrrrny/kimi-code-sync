@@ -28,20 +28,7 @@ export type SupportsThinkingType = 'only' | 'no' | 'both';
 export interface ManagedKimiCodeModelInfo {
   readonly id: string;
   readonly contextLength: number;
-  /**
-   * The context window reported by the provider's `/models` endpoint, or
-   * `undefined` when the endpoint omitted it (in which case `contextLength`
-   * holds the conservative default). The catalog refresh uses this to decide
-   * whether to preserve a curated `maxContextSize` instead of clobbering it
-   * with the default.
-   */
   readonly reportedContextLength?: number | undefined;
-  /**
-   * The largest completion the provider's `/models` endpoint reports (OpenAI's
-   * `max_tokens`, OpenRouter's `top_provider.max_completion_tokens`), or
-   * `undefined` when it says nothing. A curated `maxOutputSize` survives an
-   * absent value the same way a curated `maxContextSize` does.
-   */
   readonly reportedMaxOutputSize?: number | undefined;
   readonly supportsReasoning: boolean;
   readonly supportsImageIn: boolean;
@@ -689,20 +676,11 @@ function resolveModelsDevDisplayName(
   endpointName: string | undefined,
 ): string | undefined {
   const catalog = lookupModelsDevModel(providerId, modelId);
-  // The provider's own display name wins; fall back to the catalog name.
   if (endpointName !== undefined && endpointName.length > 0) return endpointName;
   if (catalog?.displayName !== undefined) return catalog.displayName;
   return undefined;
 }
 
-/**
- * Catalog refresh for OpenAI-compatible providers (`/refresh-catalog`). Mirrors
- * `applyManagedApiKeyProviderModels`'s merge contract, but:
- *  - the provider-reported `contextLength` is preserved as-is (never replaced by
- *    the 256K default), so curated windows survive;
- *  - each alias is enriched from the models.dev catalog (display name +
- *    capabilities), with the provider's own name taking priority.
- */
 export function applyOpenAiCompatibleCatalog(
   config: ManagedKimiConfigShape,
   providerId: string,
@@ -722,22 +700,11 @@ export function applyOpenAiCompatibleCatalog(
     const existingMaxContextSize =
       typeof existing['maxContextSize'] === 'number' ? existing['maxContextSize'] : undefined;
     const catalog = lookupModelsDevModel(providerId, model.id);
-    // Resolution order for maxContextSize:
-    //  1. provider-reported `context_length` (kilo/OpenRouter style — most
-    //     authoritative for the current pricing tier);
-    //  2. the models.dev catalog's `limit.context` (covers providers whose
-    //     `/models` endpoint omits context length, e.g. opencode);
-    //  3. an existing curated `maxContextSize` (the user's manual override);
-    //  4. `OPENAI_COMPATIBLE_DEFAULT_CONTEXT` (256K — the safety net for a
-    //     brand-new alias with no other signal).
     const maxContextSize =
       model.reportedContextLength ??
       catalog?.context ??
       existingMaxContextSize ??
       OPENAI_COMPATIBLE_DEFAULT_CONTEXT;
-    // Same shape as `maxContextSize`: the endpoint's `max_tokens` wins, then a
-    // curated value, and an absent answer from both writes nothing — which the
-    // merge reads as "unknown" and leaves the alias alone.
     const existingMaxOutputSize =
       typeof existing['maxOutputSize'] === 'number' ? existing['maxOutputSize'] : undefined;
     const maxOutputSize = model.reportedMaxOutputSize ?? existingMaxOutputSize;
@@ -748,13 +715,9 @@ export function applyOpenAiCompatibleCatalog(
       ...(maxOutputSize !== undefined ? { maxOutputSize } : {}),
       ...(model.displayName !== undefined ? { displayName: model.displayName } : {}),
       ...(catalog?.capabilities !== undefined ? { capabilities: catalog.capabilities } : {}),
-      // The wire field the model streams reasoning in. The provider's own
-      // `/models` payload cannot express it, so the catalog is the only
-      // source; absent here, the merge keeps whatever the alias already had.
       ...(catalog?.reasoningKey !== undefined ? { reasoningKey: catalog.reasoningKey } : {}),
     };
     existingModels[key] = mergeOpenAiCompatibleModelAlias(existing, remoteAlias);
-    // Prefer the provider's own display name; otherwise use the catalog name.
     const displayName = resolveModelsDevDisplayName(providerId, model.id, model.displayName);
     if (displayName !== undefined) existingModels[key].displayName = displayName;
   }

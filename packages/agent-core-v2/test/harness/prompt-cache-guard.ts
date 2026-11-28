@@ -4,16 +4,19 @@ import { isDeepStrictEqual } from 'node:util';
 import { afterEach } from 'vitest';
 
 import { IAgentLoopService } from '#/agent/loop/loop';
+import { requestSourceOf } from '#/agent/loop/requesterContract';
+import type { AgentLLMRequestSource } from '#/agent/usage/usage';
 import type { IAgentJournal } from '#/wire/journal';
-import type {
-  AgentLLMRequestSource,
-  CoreLoopRequester,
-  CoreLoopRequesterOptions,
-  LoopRequester,
-  OperationLoopRequesterOptions,
-} from '#/agent/loop/requesterContract';
 import { TOOL_ARGUMENT_CORRECTION_ORIGIN } from '@moonshot-ai/core/llm/message';
+import {
+  contentsOf,
+  requesterContents,
+  type LlmDimension,
+  type LlmRequestPart,
+  type LlmRequester,
+} from '@moonshot-ai/core/llm/requester';
 import type { LlmRequest } from '@moonshot-ai/core/llm/request';
+import type { FullLoopLlmRequester } from '@moonshot-ai/core/loop/request';
 import type { MockProvider } from './scripted-generate';
 
 import { generateCallOf } from './scripted-generate';
@@ -57,47 +60,45 @@ export function drainPromptCacheViolations(): readonly string[] {
   return violations.splice(0);
 }
 
-export class PromptCacheGuardedLoopRequester implements LoopRequester {
+export class PromptCacheGuardedLoopRequester implements FullLoopLlmRequester {
+  private readonly wrapped: FullLoopLlmRequester;
+  readonly [requesterContents]: LlmRequestPart;
+
   constructor(
-    private readonly inner: LoopRequester,
+    inner: FullLoopLlmRequester,
     private readonly context: IAgentLoopService,
     private readonly journal: IAgentJournal,
     private readonly ready?: () => Promise<void>,
-  ) {}
-
-  coreRequester(options: CoreLoopRequesterOptions): CoreLoopRequester {
-    return this.guard(
-      this.inner.coreRequester(options),
-      options.source,
-      options.runtime.historyRevision,
-    );
+  ) {
+    this.wrapped = this.wrap(inner);
+    this[requesterContents] = contentsOf(this.wrapped);
   }
 
-  async prepareOperation(options: OperationLoopRequesterOptions, signal: AbortSignal): Promise<CoreLoopRequester> {
-    await this.ready?.();
-    const requester = await this.inner.prepareOperation(options, signal);
-    return this.guard(requester, options.source, () => this.context.historyRevision());
-  }
+  readonly with = ((next: LlmRequestPart | LlmRequester<LlmDimension>) =>
+    this.wrapped.with(contentsOf(next))) as FullLoopLlmRequester['with'];
+  readonly request: FullLoopLlmRequester['request'] = (rest) => this.wrapped.request(rest);
+  readonly generate: FullLoopLlmRequester['generate'] = (rest, control) =>
+    this.wrapped.generate(rest, control);
 
-  private guard(
-    requester: CoreLoopRequester,
-    source: () => AgentLLMRequestSource,
-    revision: () => number,
-  ): CoreLoopRequester {
-    const wrap = (inner: CoreLoopRequester): CoreLoopRequester => ({
-      snapshot: () => wrap(inner.snapshot?.() ?? inner),
-      generate: (rest, control) => {
+  private wrap(current: FullLoopLlmRequester): FullLoopLlmRequester {
+    return {
+      [requesterContents]: contentsOf(current),
+      with: ((next: LlmRequestPart | LlmRequester<LlmDimension>) =>
+        this.wrap(current.with(contentsOf(next)))) as FullLoopLlmRequester['with'],
+      request: (rest) => current.request(rest),
+      generate: async (rest, control) => {
+        const source = requestSourceOf(current.request(rest).attributes);
+        if (source.type === 'operation') await this.ready?.();
         const scope: RequestScope = {
           agent: this,
-          source: source(),
+          source,
           branch: this.journal.journalRef.branch,
-          contextRevision: revision(),
+          contextRevision: this.context.historyRevision(),
           attempts: 0,
         };
-        return requestScope.run(scope, () => inner.generate(rest, control));
+        return requestScope.run(scope, () => current.generate(rest, control));
       },
-    });
-    return wrap(requester);
+    };
   }
 }
 

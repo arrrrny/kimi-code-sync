@@ -1,11 +1,3 @@
-/**
- * Scenario: /visual-model command behavior in the interactive TUI.
- * Responsibilities: persistence of the engine-contract pointer `[visual_model] model`
- * plus enabling the `visual-model` experiment flag, and the legacy default_model
- * read-back (an older TUI wrote the wrong field).
- * Wiring: real command with the SDK/session boundaries stubbed by a small host rig.
- * Run: pnpm -C apps/kimi-code exec vitest run test/tui/commands/visual-model.test.ts
- */
 import type { ModelAlias } from '@moonshot-ai/kimi-code-sdk';
 import { describe, expect, it, vi } from 'vitest';
 

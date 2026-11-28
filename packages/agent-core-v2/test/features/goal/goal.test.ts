@@ -36,7 +36,7 @@ import type { ResolvedToolExecutionHookContext } from '#/agent/toolExecutor/tool
 import { IAgentToolRegistryService } from '#/agent/toolRegistry/toolRegistry';
 import type { WireRecord } from '#/wire/record';
 import { IEventBus } from '#/app/event/eventBus';
-import { APIConnectionError, APIStatusError } from '#/llm-adapter/contract/errors';
+import { APIConnectionError, APIStatusError } from '#/provider-catalog/errors';
 import type { ToolCall } from '#human/message';
 import type { TokenUsage } from '@moonshot-ai/core/llm/usage';
 import { ErrorCodes, Error2, errorInfo, toKimiErrorPayload } from '#/errors';
@@ -2274,7 +2274,7 @@ describe('AgentGoalService hard wall-clock deadline', () => {
     );
     try {
       ctx.get(IAgentToolRegistryService).register(tool);
-      ctx.configure({ tools: ['SlowWork', 'UpdateGoal'] });
+      ctx.configure({ tools: ['SlowWork'] });
       await ctx.restorePersisted();
       await ctx.rpc.createGoal({ objective: 'finish bounded work' });
       await ctx
@@ -2344,7 +2344,7 @@ describe('AgentGoalService mid-turn budget stop', () => {
   it('grants one tool-free grace step when a token budget is reached mid-turn', async () => {
     const ctx = createTestAgent();
     try {
-      ctx.configure({ tools: ['GetGoal', 'UpdateGoal'] });
+      ctx.configure({ tools: ['GetGoal'] });
       await ctx.restorePersisted();
       await ctx.rpc.createGoal({ objective: 'work' });
       const goals = ctx.get(IAgentGoalService);
@@ -2397,7 +2397,7 @@ describe('AgentGoalService mid-turn budget stop', () => {
   it('lets an automatic continuation report final status after crossing its token budget', async () => {
     const ctx = createTestAgent();
     try {
-      ctx.configure({ tools: ['GetGoal', 'UpdateGoal'] });
+      ctx.configure({ tools: ['GetGoal'] });
       await ctx.restorePersisted();
       const goals = ctx.get(IAgentGoalService);
         await goals.createGoal({ objective: 'work' });
@@ -2444,7 +2444,7 @@ describe('AgentGoalService mid-turn budget stop', () => {
   it('rejects tool calls made during the budget grace step without executing them', async () => {
     const ctx = createTestAgent();
     try {
-      ctx.configure({ tools: ['GetGoal', 'SetGoalBudget', 'UpdateGoal'] });
+      ctx.configure({ tools: ['GetGoal', 'SetGoalBudget'] });
       await ctx.restorePersisted();
       await ctx.rpc.createGoal({ objective: 'work' });
       const goals = ctx.get(IAgentGoalService);

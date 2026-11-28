@@ -1,38 +1,16 @@
-/**
- * TabbedModelSelectorComponent — a thin wrapper around ModelSelectorComponent
- * that splits the model list into per-provider tabs.
- *
- * Tabs are derived from the `models` passed at construction time:
- *   ['all', ...uniqueProviderIds]   (insertion order, deduplicated)
- *
- * When `favoriteAliases` is provided (the `/model` picker does this), a
- * `favorites` tab is prepended before `all`; it lists only available models
- * whose alias is a favorite, in the favorites array order (add-order), so the
- * Alt+M rotation order and the tab order agree. The tab is opt-in: pickers
- * that don't pass favorites (visual / compaction / substitute / secondary)
- * keep the plain `all` + provider layout.
- *
- * Each tab owns its own inner ModelSelectorComponent built from the filtered
- * subset of models. ↑/↓/Enter/Esc/←/→ (thinking) and typing (filter) are
- * forwarded to the active inner selector; Tab / Shift-Tab cycle between tabs.
- * Shift+A adds the highlighted model to Favorites and Shift+R removes it in
- * every tab, live-refreshing the tab layout via {@link setFavoriteAliases}.
- *
- * The active tab is highlighted with a filled background (matching the
- * AskUserQuestion dialog's tab strip) — see .agents/skills/write-tui/DESIGN.md.
- */
-
 import type { ModelAlias } from '@moonshot-ai/kimi-code-sdk';
 import {
-  Container,
   Key,
   matchesKey,
-  truncateToWidth,
   type Focusable,
+  type TuiMouseEvent,
+  type TuiMouseEventResult,
 } from '@moonshot-ai/pi-tui';
 
+import { DockSection, type DockLayout, type DockPart } from '#/tui/components/chrome/dock-section';
 import { currentTheme } from '#/tui/theme';
-import { renderTabStrip } from '#/tui/utils/tab-strip';
+import { focusOnUnfocusedMouse, handleSegmentedMouse } from '#/tui/utils/mouse-hit-test';
+import { layoutTabStrip, type TabStripHitRange } from '#/tui/utils/tab-strip';
 
 import {
   ModelSelectorComponent,
@@ -55,19 +33,13 @@ export interface TabbedModelSelectorOptions {
   readonly currentThinkingEffort: string;
   readonly title?: string;
   readonly initialTabId?: string;
+  readonly layout?: DockLayout;
   readonly warning?: string;
   readonly thinkingControl?: boolean;
   readonly effortDescriptions?: Readonly<Record<string, string>>;
-  /** Favorite aliases (add-order). When provided, a Favorites tab is prepended
-   * and every list row carries a ★ for favorited models. */
   readonly favoriteAliases?: readonly string[];
-  /** When set, Shift+A adds the highlighted model to Favorites and Shift+R
-   * removes it inside any tab; the host persists the change and calls
-   * {@link setFavoriteAliases} to refresh the layout live. */
   readonly onToggleFavorite?: (alias: string) => void;
   readonly onSelect: (selection: ModelSelection) => void;
-  /** Forwarded to each inner selector; when set, Shift+S applies the choice to
-   * the current session only without persisting it as the default. */
   readonly onSessionOnlySelect?: (selection: ModelSelection) => void;
   readonly onCancel: () => void;
 }
@@ -78,24 +50,22 @@ interface ModelTab {
   readonly selector: ModelSelectorComponent;
 }
 
-export class TabbedModelSelectorComponent extends Container implements Focusable {
-  focused = false;
+export class TabbedModelSelectorComponent extends DockSection implements Focusable {
+  private _focused = false;
   private readonly opts: TabbedModelSelectorOptions;
   private tabs: readonly ModelTab[];
   private activeIndex: number;
   private favoriteAliases: readonly string[];
+  private readonly shownAt = Date.now();
+  private tabStripRow = -1;
+  private tabHitRanges: readonly TabStripHitRange[] = [];
 
   constructor(opts: TabbedModelSelectorOptions) {
-    super();
+    super(opts.layout);
     this.opts = opts;
     this.favoriteAliases = opts.favoriteAliases ?? [];
     this.tabs = buildTabs(opts, this.favoriteAliases);
 
-    // Default to the "All" tab. Only an explicit initialTabId (e.g. the
-    // provider just added via /provider) opens on a specific provider tab —
-    // the current model is still highlighted inside whichever tab is active.
-    // With usable favorites present, the picker opens on the Favorites tab
-    // instead: the curated list is the whole point of having it.
     let initialTabIdx = opts.initialTabId
       ? this.tabs.findIndex((tab) => tab.id === opts.initialTabId)
       : -1;
@@ -104,14 +74,18 @@ export class TabbedModelSelectorComponent extends Container implements Focusable
     }
     this.activeIndex = Math.max(initialTabIdx, 0);
     this.syncFocusToActive();
+    this.ensureActiveSelectionVisible();
   }
 
-  /**
-   * Live-refresh the favorites: rebuilds the tab layout (Favorites membership
-   * and every tab's ★ markers) while preserving the active tab. When the
-   * active tab is Favorites and it becomes empty, the empty-state hint stays
-   * in place — the tab itself is never removed while favorites are enabled.
-   */
+  get focused(): boolean {
+    return this._focused;
+  }
+
+  set focused(value: boolean) {
+    this._focused = value;
+    this.syncFocusToActive();
+  }
+
   setFavoriteAliases(favorites: readonly string[]): void {
     const activeId = this.tabs[this.activeIndex]?.id;
     this.favoriteAliases = favorites;
@@ -125,37 +99,96 @@ export class TabbedModelSelectorComponent extends Container implements Focusable
   handleInput(data: string): void {
     if (this.tabs.length > 1) {
       if (matchesKey(data, Key.tab)) {
-        this.activeIndex = (this.activeIndex + 1) % this.tabs.length;
-        this.syncFocusToActive();
+        this.switchToTab((this.activeIndex + 1) % this.tabs.length);
         return;
       }
       if (matchesKey(data, Key.shift('tab'))) {
-        this.activeIndex = (this.activeIndex - 1 + this.tabs.length) % this.tabs.length;
-        this.syncFocusToActive();
+        this.switchToTab((this.activeIndex - 1 + this.tabs.length) % this.tabs.length);
         return;
       }
     }
-    this.tabs[this.activeIndex]?.selector.handleInput(data);
+    const active = this.tabs[this.activeIndex];
+    if (active === undefined) return;
+    active.selector.handleInput(data);
+    this.ensureActiveSelectionVisible();
   }
 
-  override render(width: number): string[] {
+  protected override handlePartMouse(
+    part: DockPart,
+    event: TuiMouseEvent,
+  ): TuiMouseEventResult | undefined {
+    if (!this.focused) return focusOnUnfocusedMouse(event);
+    const active = this.tabs[this.activeIndex];
+    if (active === undefined) return undefined;
+
+    if (this.layout === undefined && event.type === 'wheel') {
+      return active.selector.handleWheelPaging(event);
+    }
+
+    if (part === 'head') {
+      if (this.tabs.length <= 1) return undefined;
+      if (event.type === 'wheel' && event.y === this.tabStripRow && event.wheelDelta !== undefined) {
+        if (event.wheelDelta === 0) return { handled: true };
+        const next =
+          (this.activeIndex + (event.wheelDelta > 0 ? 1 : -1) + this.tabs.length) %
+          this.tabs.length;
+        if (next === this.activeIndex) return { handled: true, render: false };
+        this.switchToTab(next);
+        return { handled: true, render: true };
+      }
+      return handleSegmentedMouse({
+        event,
+        focused: this.focused,
+        shownAt: this.shownAt,
+        row: this.tabStripRow,
+        regions: this.tabHitRanges,
+        select: (index) => {
+          if (index === this.activeIndex) return false;
+          this.switchToTab(index);
+          return true;
+        },
+      });
+    }
+
+    if (part === 'body') {
+      return active.selector.handleBodyMouse(event, this.focused, this.shownAt);
+    }
+
+    if (part === 'foot') {
+      return active.selector.handleFootMouse(event, this.focused, this.shownAt);
+    }
+
+    return undefined;
+  }
+
+  protected renderPart(part: DockPart, width: number): string[] {
     const active = this.tabs[this.activeIndex];
     if (active === undefined) return [];
-    const inner = active.selector.render(width);
-    if (this.tabs.length <= 1) {
-      return inner.map((line) => truncateToWidth(line, width));
+    const unpaged = this.layout !== undefined;
+
+    switch (part) {
+      case 'head': {
+        if (this.tabs.length <= 1) {
+          this.tabStripRow = -1;
+          this.tabHitRanges = [];
+          return active.selector.renderHeadLines(width);
+        }
+        const strip = layoutTabStrip({
+          labels: this.tabs.map((tab) => tab.label),
+          activeIndex: this.activeIndex,
+          width,
+          colors: currentTheme.palette,
+        });
+        const baseHead = active.selector.renderHeadLines(width, [strip.line, '']);
+        this.tabStripRow = baseHead.length - (active.selector.hasSearchQuery() ? 3 : 2);
+        this.tabHitRanges = strip.hitRanges;
+        return baseHead;
+      }
+      case 'body':
+        return active.selector.renderBodyLines(width, unpaged);
+      case 'foot':
+        return active.selector.renderFootLines(width, unpaged);
     }
-    const stripLine = renderTabStrip({
-      labels: this.tabs.map((tab) => tab.label),
-      activeIndex: this.activeIndex,
-      width,
-      colors: currentTheme.palette,
-    });
-    const headerEnd = inner.findIndex((line) => line === '');
-    const splitAt = headerEnd === -1 ? 3 : headerEnd;
-    const out: string[] = [...inner.slice(0, splitAt + 1), stripLine, ''];
-    for (let i = splitAt + 1; i < inner.length; i++) out.push(inner[i]!);
-    return out.map((line) => truncateToWidth(line, width));
   }
 
   override invalidate(): void {
@@ -165,15 +198,28 @@ export class TabbedModelSelectorComponent extends Container implements Focusable
     }
   }
 
+  private switchToTab(nextIndex: number): void {
+    this.activeIndex = nextIndex;
+    this.syncFocusToActive();
+    this.scrollBodyToTop();
+    this.ensureActiveSelectionVisible();
+  }
+
+  private ensureActiveSelectionVisible(): void {
+    const active = this.tabs[this.activeIndex];
+    if (active === undefined) return;
+    const idx = active.selector.selectedRowIndex();
+    this.ensureBodyVisible(idx, idx + 1);
+  }
+
   private syncFocusToActive(): void {
     for (let i = 0; i < this.tabs.length; i++) {
       const tab = this.tabs[i]!;
-      tab.selector.focused = this.focused && i === this.activeIndex;
+      tab.selector.focused = this._focused && i === this.activeIndex;
     }
   }
 }
 
-/** Favorites that still resolve in the available model catalog, in add-order. */
 function usableFavorites(
   favorites: readonly string[],
   models: Record<string, ModelAlias>,
@@ -181,8 +227,6 @@ function usableFavorites(
   return favorites.filter((alias) => models[alias] !== undefined);
 }
 
-/** Index of the tab the picker should open on: Favorites when it has usable
- * entries (favorites enabled), else All. */
 function defaultTabIndex(
   opts: TabbedModelSelectorOptions,
   favorites: readonly string[],
@@ -200,6 +244,8 @@ function buildTabs(
   favorites: readonly string[],
 ): readonly ModelTab[] {
   const entries = Object.entries(opts.models);
+  const minBodyRows =
+    opts.layout !== undefined ? Math.min(opts.layout.maxBodyRows, entries.length) : undefined;
   const providerIds: string[] = [];
   const seen = new Set<string>();
   for (const [, model] of entries) {
@@ -214,8 +260,6 @@ function buildTabs(
   const tabs: ModelTab[] = [];
 
   if (opts.favoriteAliases !== undefined) {
-    // Favorites first, in add-order (only models still present in the catalog;
-    // stale entries are retained in tui.toml but hidden here).
     const subset: Record<string, ModelAlias> = {};
     for (const alias of favorites) {
       const model = opts.models[alias];
@@ -224,14 +268,14 @@ function buildTabs(
     tabs.push({
       id: FAVORITES_TAB_ID,
       label: FAVORITES_TAB_LABEL,
-      selector: makeSelector(opts, subset, favoriteSet, FAVORITES_EMPTY_MESSAGE),
+      selector: makeSelector(opts, subset, minBodyRows, favoriteSet, FAVORITES_EMPTY_MESSAGE),
     });
   }
 
   tabs.push({
     id: ALL_TAB_ID,
     label: ALL_TAB_LABEL,
-    selector: makeSelector(opts, opts.models, favoriteSet),
+    selector: makeSelector(opts, opts.models, minBodyRows, favoriteSet),
   });
   for (const providerId of providerIds) {
     const subset: Record<string, ModelAlias> = {};
@@ -241,7 +285,7 @@ function buildTabs(
     tabs.push({
       id: providerId,
       label: providerDisplayName(providerId),
-      selector: makeSelector(opts, subset, favoriteSet),
+      selector: makeSelector(opts, subset, minBodyRows, favoriteSet),
     });
   }
   return tabs;
@@ -250,6 +294,7 @@ function buildTabs(
 function makeSelector(
   opts: TabbedModelSelectorOptions,
   subset: Record<string, ModelAlias>,
+  minBodyRows: number | undefined,
   favoriteSet: ReadonlySet<string>,
   emptyMessage?: string,
 ): ModelSelectorComponent {
@@ -262,6 +307,7 @@ function makeSelector(
     currentThinkingEffort: opts.currentThinkingEffort,
     title: opts.title,
     searchable: true,
+    minBodyRows,
     providerSwitchHint: true,
     warning: opts.warning,
     thinkingControl: opts.thinkingControl,

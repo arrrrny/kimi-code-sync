@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { Error2, ErrorCodes, IEnvironmentService, IModelCatalog, ISessionManager, IProjectInstanceManager, ProjectFsService, getLiveSessionById } from '@moonshot-ai/agent-core-v2';
+import { Error2, ErrorCodes, IEnvironmentService, ISessionManager, IProjectInstanceManager, ProjectFsService, getLiveSessionById } from '@moonshot-ai/agent-core-v2';
 import { encodeWorkDirKey } from '@moonshot-ai/agent-core-v2/_base/utils/workdir-slug';
 import { IProjectPermissionRulesService } from '@moonshot-ai/agent-core-v2/agent/permissionRules/projectPermissionRules';
 import { IProjectPersistence } from '@moonshot-ai/agent-core-v2/app/project/projectPersistence';
@@ -19,6 +19,7 @@ import { type RunningServer, startServer } from '../src/start';
 import { TEST_HOST_IDENTITY } from './helpers/hostIdentity';
 import { authHeaders } from './helpers/auth';
 import { fakeModelCatalog } from './helpers/fakeModelCatalog';
+import { IProviderCatalogService } from '@moonshot-ai/agent-core-v2/provider-catalog/providerCatalogService';
 
 interface Envelope<T> {
   code: number;
@@ -44,16 +45,18 @@ describe('server-v2 /api/v1 fs routes', () => {
   let home: string | undefined;
   let work: string | undefined;
   let base: string;
+  const previousKimiCodeHome = process.env['KIMI_CODE_HOME'];
 
   beforeAll(async () => {
     home = await mkdtemp(join(tmpdir(), 'kimi-server-v2-fs-home-'));
+    process.env['KIMI_CODE_HOME'] = home;
     server = await startServer({
       hostIdentity: TEST_HOST_IDENTITY,
       host: '127.0.0.1',
       port: 0,
       homeDir: home,
       logLevel: 'silent',
-      seeds: [[IModelCatalog, fakeModelCatalog()]],
+      seeds: [[IProviderCatalogService, fakeModelCatalog()]],
     });
     base = `http://127.0.0.1:${server.port}`;
   });
@@ -78,6 +81,8 @@ describe('server-v2 /api/v1 fs routes', () => {
       await rm(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
       home = undefined;
     }
+    if (previousKimiCodeHome === undefined) delete process.env['KIMI_CODE_HOME'];
+    else process.env['KIMI_CODE_HOME'] = previousKimiCodeHome;
   });
 
   function git(cwd: string, ...args: string[]): void {
@@ -85,12 +90,14 @@ describe('server-v2 /api/v1 fs routes', () => {
   }
 
   function hasFd(): boolean {
-    try {
-      execFileSync('fd', ['--version'], { stdio: 'ignore' });
-      return true;
-    } catch {
-      return false;
-    }
+    return ['fd', 'fdfind'].some((binary) => {
+      try {
+        execFileSync(binary, ['--version'], { stdio: 'ignore' });
+        return true;
+      } catch {
+        return false;
+      }
+    });
   }
 
   async function createWorkspaceSession(root: string, additionalDirs: string[]): Promise<string> {

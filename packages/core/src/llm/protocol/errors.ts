@@ -15,11 +15,6 @@ export function errorStatusCode(error: unknown): number | undefined {
   return typeof status === 'number' ? status : undefined;
 }
 
-/**
- * Walks an error's `cause` chain looking for a thrown error that carries an
- * HTTP status (provider SDKs wrap fetch rejections in their own connection
- * error classes, keeping the original provider error as the cause).
- */
 export function statusErrorInCauseChain(error: unknown): unknown {
   let current: unknown = error;
   for (let depth = 0; current instanceof Error && depth < 5; depth += 1) {
@@ -139,10 +134,6 @@ export function toLlmErrorMessage(error: unknown): LlmRemoteErrorMessage {
     typeof cause === 'object' && cause !== null && typeof (cause as { code?: unknown }).code === 'string'
       ? (cause as { code: string }).code
       : undefined;
-  // Errors thrown by provider clients carry an HTTP status the same way a
-  // response does — classify them through the status rules so recoveries
-  // (auth rejection, key rotation, context overflow) see the same kinds the
-  // decoded-HTTP path produces.
   const statusCode = errorStatusCode(error);
   if (statusCode !== undefined && statusCode >= 400) {
     const record = error as Record<string, unknown>;

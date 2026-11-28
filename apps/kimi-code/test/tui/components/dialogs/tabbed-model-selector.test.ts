@@ -1,4 +1,6 @@
 import type { ModelAlias } from '@moonshot-ai/kimi-code-sdk';
+import { ScrollView, Text, TuiAltScreen, VStack } from '@moonshot-ai/pi-tui';
+import { VirtualTerminal } from '@moonshot-ai/pi-tui/testing';
 import chalk from 'chalk';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
@@ -160,6 +162,142 @@ describe('TabbedModelSelectorComponent', () => {
     expect(lines[stripIdx + 1]).toBe('');
     expect(lines.findIndex((l) => l.includes('Kimi K2'))).toBeGreaterThan(stripIdx);
   });
+
+  it('switches provider tabs, toggles thinking, and selects a model on mouse clicks in fullscreen', async () => {
+    let now = 50_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const onSelect = vi.fn();
+    const component = new TabbedModelSelectorComponent({
+      models: {
+        k1: model('Kimi One', 'managed:kimi-code'),
+        k2: model('Kimi Two', 'managed:kimi-code'),
+        k3: model('Kimi Three', 'managed:kimi-code'),
+        k4: model('Kimi Four', 'managed:kimi-code'),
+        k5: model('Kimi Five', 'managed:kimi-code'),
+        g1: model('GPT-4o', 'openai'),
+        g2: model('GPT-4.1', 'openai'),
+        g3: model('GPT-4.5', 'openai'),
+        gpt: model('GPT-5', 'openai'),
+      },
+      currentValue: 'gpt',
+      currentThinkingEffort: 'off',
+      layout: { maxBodyRows: 3 },
+      onSelect,
+      onCancel: vi.fn(),
+    });
+    const vt = new VirtualTerminal(90, 18);
+    const ui = new TuiAltScreen(vt);
+    ui.setLayoutRoot(component);
+    ui.start();
+    ui.setFocus(component);
+    await vt.waitForRender();
+    try {
+      now += 500;
+      let screen = vt.getViewport().map(strip);
+      expect(screen.join('\n')).toContain('❯ GPT-5');
+      const tabRow = screen.findIndex((line) => line.includes('All') && line.includes('openai'));
+      expect(tabRow).toBeGreaterThan(0);
+      const openaiCol = screen[tabRow]!.indexOf('openai') + 2;
+      const allCol = screen[tabRow]!.indexOf('All') + 2;
+
+      vt.sendInput(`\u001B[<0;${String(openaiCol)};${String(tabRow + 1)}M`);
+      vt.sendInput(`\u001B[<0;${String(openaiCol)};${String(tabRow + 1)}m`);
+      await vt.waitForRender();
+      screen = vt.getViewport().map(strip);
+      expect(screen.join('\n')).toContain('GPT-5');
+      expect(screen.join('\n')).not.toContain('Kimi One');
+
+      vt.sendInput(`\u001B[<0;${String(allCol)};${String(tabRow + 1)}M`);
+      vt.sendInput(`\u001B[<0;${String(allCol)};${String(tabRow + 1)}m`);
+      await vt.waitForRender();
+      screen = vt.getViewport().map(strip);
+      expect(screen.join('\n')).toContain('❯ GPT-5');
+
+      vt.sendInput(`\u001B[<0;${String(openaiCol)};${String(tabRow + 1)}M`);
+      vt.sendInput(`\u001B[<0;${String(openaiCol)};${String(tabRow + 1)}m`);
+      await vt.waitForRender();
+      screen = vt.getViewport().map(strip);
+
+      const segRow = screen.findIndex((line) => line.includes('[ Off ]') && line.includes('On'));
+      expect(segRow).toBeGreaterThan(0);
+      const onCol = screen[segRow]!.indexOf('On') + 1;
+      vt.sendInput(`\u001B[<0;${String(onCol)};${String(segRow + 1)}M`);
+      vt.sendInput(`\u001B[<0;${String(onCol)};${String(segRow + 1)}m`);
+      await vt.waitForRender();
+
+      screen = vt.getViewport().map(strip);
+      const gptRow = screen.findIndex((line) => line.includes('GPT-5'));
+      vt.sendInput(`\u001B[<0;10;${String(gptRow + 1)}M`);
+      vt.sendInput(`\u001B[<0;10;${String(gptRow + 1)}m`);
+      await vt.waitForRender();
+      expect(onSelect).toHaveBeenCalledExactlyOnceWith({ alias: 'gpt', thinking: 'on' });
+    } finally {
+      ui.stop();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('keeps bottom-anchored provider tab strip stationary across uneven tabs and steps tabs on wheel', async () => {
+    let now = 60_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const component = new TabbedModelSelectorComponent({
+      models: {
+        k1: model('Kimi One', 'managed:kimi-code'),
+        k2: model('Kimi Two', 'managed:kimi-code'),
+        k3: model('Kimi Three', 'managed:kimi-code'),
+        k4: model('Kimi Four', 'managed:kimi-code'),
+        k5: model('Kimi Five', 'managed:kimi-code'),
+        gpt: model('GPT-5', 'openai'),
+      },
+      currentValue: 'k1',
+      currentThinkingEffort: 'on',
+      layout: { maxBodyRows: 5 },
+      onSelect: vi.fn(),
+      onCancel: vi.fn(),
+    });
+    const transcript = new ScrollView(new Text('msg-1\nmsg-2\nmsg-3', 0, 0), {
+      follow: 'end',
+      primary: true,
+    });
+    const vt = new VirtualTerminal(90, 20);
+    const ui = new TuiAltScreen(vt);
+    ui.setLayoutRoot(
+      new VStack([
+        { component: transcript, basis: 0, grow: 1, shrink: 1, minSize: 1 },
+        { component: component, shrink: 1, minSize: 3 },
+      ]),
+    );
+    ui.start();
+    ui.setFocus(component);
+    await vt.waitForRender();
+    try {
+      now += 500;
+      const before = vt.getViewport().map(strip);
+      const tabRowBefore = before.findIndex(
+        (line) => line.includes('All') && line.includes('openai'),
+      );
+      expect(tabRowBefore).toBeGreaterThan(0);
+      const openaiCol = before[tabRowBefore]!.indexOf('openai') + 2;
+
+      vt.sendInput(`\u001B[<0;${String(openaiCol)};${String(tabRowBefore + 1)}M`);
+      vt.sendInput(`\u001B[<0;${String(openaiCol)};${String(tabRowBefore + 1)}m`);
+      await vt.waitForRender();
+      const onOpenai = vt.getViewport().map(strip);
+      const tabRowAfter = onOpenai.findIndex(
+        (line) => line.includes('All') && line.includes('openai'),
+      );
+      expect(tabRowAfter).toBe(tabRowBefore);
+      expect(onOpenai.join('\n')).toContain('GPT-5');
+      expect(onOpenai.join('\n')).not.toContain('Kimi One');
+
+      vt.sendInput(`\u001B[<65;${String(openaiCol)};${String(tabRowBefore + 1)}M`);
+      await vt.waitForRender();
+      expect(vt.getViewport().map(strip).join('\n')).toContain('Kimi One');
+    } finally {
+      ui.stop();
+      vi.restoreAllMocks();
+    }
+  });
 });
 
 describe('TabbedModelSelectorComponent favorites', () => {
@@ -187,7 +325,6 @@ describe('TabbedModelSelectorComponent favorites', () => {
   }
 
   function activeList(lines: string[]): string[] {
-    // The model list starts after the tab strip + blank line.
     const stripIdx = lines.findIndex((l) => l.includes('All') && l.includes('Favorites'));
     return stripIdx === -1 ? lines : lines.slice(stripIdx + 2);
   }
@@ -198,7 +335,6 @@ describe('TabbedModelSelectorComponent favorites', () => {
 
     expect(out.indexOf('Favorites')).toBeGreaterThanOrEqual(0);
     expect(out.indexOf('Favorites')).toBeLessThan(out.indexOf('All'));
-    // gpt was favorited first, so it leads the Favorites list.
     const list = activeList(out.split('\n'));
     expect(list.findIndex((l) => l.includes('GPT-5'))).toBeLessThan(
       list.findIndex((l) => l.includes('Kimi K2')),
@@ -210,7 +346,6 @@ describe('TabbedModelSelectorComponent favorites', () => {
     const { component } = makeFavorites(['k2']);
     const out = strip(component.render(120).join('\n'));
     const list = activeList(out.split('\n'));
-    // Favorites tab active: only k2 is listed.
     expect(list.some((l) => l.includes('Kimi K2'))).toBe(true);
     expect(list.some((l) => l.includes('GPT-5'))).toBe(false);
   });
@@ -219,14 +354,11 @@ describe('TabbedModelSelectorComponent favorites', () => {
     const { component } = makeFavorites([]);
     const out = strip(component.render(120).join('\n'));
 
-    // Empty favorites: the picker opens on All with the full model list.
     expect(out).toContain('Favorites');
     expect(out).toContain('Kimi K2');
     expect(out).toContain('GPT-5');
     expect(out).not.toContain('No favorites yet');
 
-    // Shift+Tab back to Favorites (it sits before All): the empty-state
-    // hint replaces the list.
     component.handleInput(SHIFT_TAB);
     const favoritesOut = strip(component.render(120).join('\n'));
     expect(favoritesOut).toContain('No favorites yet');
@@ -245,7 +377,6 @@ describe('TabbedModelSelectorComponent favorites', () => {
     component.handleInput(SHIFT_A);
     expect(onToggleFavorite).toHaveBeenCalledWith('k2');
 
-    // The host persists and refreshes: both become favorites and are listed.
     component.setFavoriteAliases(['k2', 'gpt']);
     const out = strip(component.render(120).join('\n'));
     const list = activeList(out.split('\n'));
@@ -255,14 +386,12 @@ describe('TabbedModelSelectorComponent favorites', () => {
 
   it('Shift+R forwards the highlighted favorite and live-updates tabs via setFavoriteAliases', () => {
     const { component, onToggleFavorite } = makeFavorites(['k2', 'gpt']);
-    // Opens on the Favorites tab with k2 highlighted.
     component.handleInput(SHIFT_R);
     expect(onToggleFavorite).toHaveBeenCalledWith('k2');
   });
 
   it('live-removes a unfavorited model from the Favorites tab', () => {
     const { component } = makeFavorites(['k2', 'gpt']);
-    // Start on Favorites (both listed), then remove k2.
     component.setFavoriteAliases(['gpt']);
     const out = strip(component.render(120).join('\n'));
     const list = activeList(out.split('\n'));

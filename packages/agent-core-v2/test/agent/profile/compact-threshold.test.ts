@@ -10,8 +10,8 @@ import { IAgentAgentsMdReminderService } from '#/agent/agentsMdReminder/agentsMd
 import { ISessionAgentProfileCatalog } from '#/session/sessionAgentProfileCatalog/sessionAgentProfileCatalog';
 import { IBootstrapService } from '#/app/bootstrap/bootstrap';
 import { IConfigService } from '#/app/config/config';
-import { IModelCatalog, type Model } from '#/llm-adapter/model/catalog';
-import { IProtocolAdapterRegistry, type Protocol } from '#/llm-adapter/protocol/protocol';
+import { type Model } from '#/provider-catalog/model/catalog';
+import { IProviderCatalogService } from '#/provider-catalog/providerCatalogService';
 import { ITelemetryService } from '#/app/telemetry/telemetry';
 import { IAgentScopeContext, makeAgentScopeContext } from '#/agent/scopeContext/scopeContext';
 import { IAgentStateService } from '#/agent/state/agentState';
@@ -80,7 +80,7 @@ function createTestModel(): Model {
   };
 }
 
-function createModelCatalogStub(model: Model): IModelCatalog {
+function createProviderCatalogStub(model: Model): Partial<IProviderCatalogService> {
   return {
     _serviceBrand: undefined,
     get: (id) => {
@@ -100,33 +100,23 @@ function createModelCatalogStub(model: Model): IModelCatalog {
     setDefaultModel: () => {
       throw new Error('not exercised');
     },
-  };
-}
-
-function createProtocolRegistryStub(): IProtocolAdapterRegistry {
-  return {
-    _serviceBrand: undefined,
     supportedProtocols: () => ['anthropic', 'openai', 'openai_responses', 'google-genai'],
-    resolveAdapterIdentity: (protocol: Protocol, providerType?: string) => ({
-      baseId: protocol,
-      traits:
-        providerType === 'kimi' && protocol === 'openai'
-          ? [
-              {
-                trait: { withThinking: () => undefined, strictThinkingValidation: true },
-                context: {},
-              },
-            ]
-          : [],
-    }),
-    resolveProviderBaseId: (protocol: Protocol) => protocol,
+    resolveAdapterIdentity: (protocol, providerType) => {
+      const kimiOpenAI = providerType === 'kimi' && protocol === 'openai';
+      return {
+        baseId: protocol,
+        thinkingDriven: kimiOpenAI ? true : undefined,
+        strictThinkingValidation: kimiOpenAI ? true : undefined,
+      };
+    },
+    resolveProviderBaseId: (protocol) => protocol,
     resolveCapability: () => {
       throw new Error('not exercised');
     },
-    createChatProvider: () => {
+    createRequester: () => {
       throw new Error('not exercised');
     },
-  } as unknown as IProtocolAdapterRegistry;
+  };
 }
 
 function stubUnused<T>(): T {
@@ -160,8 +150,7 @@ function buildHost(key: string): IAgentProfileService {
   host.stub(ITelemetryService, createTelemetryStub());
   host.stub(IAgentScopeContext, makeAgentScopeContext({ agentId: 'main', agentScope: '' }));
   host.stub(IConfigService, createConfigStub());
-  host.stub(IModelCatalog, createModelCatalogStub(createTestModel()));
-  host.stub(IProtocolAdapterRegistry, createProtocolRegistryStub());
+  host.stub(IProviderCatalogService, createProviderCatalogStub(createTestModel()));
   host.stub(IHostEnvironment, stubUnused());
   host.stub(IHostFileSystem, stubUnused());
   host.stub(IBootstrapService, stubUnused());
@@ -360,8 +349,7 @@ describe('AgentProfileService.setCompactionTokenBudget telemetry (U11)', () => {
     } as unknown as ITelemetryService);
     host.stub(IAgentScopeContext, makeAgentScopeContext({ agentId: 'main', agentScope: '' }));
     host.stub(IConfigService, createConfigStub());
-    host.stub(IModelCatalog, createModelCatalogStub(createTestModel()));
-    host.stub(IProtocolAdapterRegistry, createProtocolRegistryStub());
+    host.stub(IProviderCatalogService, createProviderCatalogStub(createTestModel()));
     host.stub(IHostEnvironment, stubUnused());
     host.stub(IHostFileSystem, stubUnused());
     host.stub(IBootstrapService, stubUnused());

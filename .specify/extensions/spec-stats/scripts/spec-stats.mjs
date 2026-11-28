@@ -1,29 +1,9 @@
 #!/usr/bin/env node
-// Spec Stats — spec portfolio dashboard generator.
-//
-// Subcommands:
-//   report [--json] [--out <path>] [--render-in <stats.json>]   scan + render (default)
-//   scan   [--json] [--out <path>]                              emit stats.json only
-//   render [--in <stats.json>] [--out <path>]                  stats.json -> markdown
-//   open   [--stale-after <days>] [--json]                      specs not complete
-//   not-green [--json]                                         specs with red/unknown health
-//   reconcile [--all|<spec>...] [--dry-run] [--drop-mark checked|unchecked]
-//                                                          fix tasks.md checkboxes from TDD behaviors
-//   runs   [--all|<spec>...] [--dry-run]                       run verified suite per spec
-//   record-run --spec <s> --status pass|fail --ms <n> [--tail "..."]
-//
-// All reads are relative to the current working directory (the host project).
-// The TDD-deep table appears only when the TDD extension is installed in that project.
-
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
 const ROOT = process.cwd();
-
-// ---------------------------------------------------------------------------
-// Config
-// ---------------------------------------------------------------------------
 
 function loadConfig() {
   const defaults = {
@@ -53,13 +33,9 @@ function loadConfig() {
       else if (/^\d+$/.test(v)) defaults[m[1]] = Number(v);
       else defaults[m[1]] = v;
     }
-  } catch { /* keep defaults */ }
+  } catch {}
   return defaults;
 }
-
-// ---------------------------------------------------------------------------
-// Filesystem helpers
-// ---------------------------------------------------------------------------
 
 const exists = (p) => fs.existsSync(path.join(ROOT, p));
 const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
@@ -78,10 +54,6 @@ function listSpecDirs(cfg) {
     .map((n) => ({ dir: n, number: parseInt(n, 10), slug: n.replace(/^\d+-/, '') }))
     .toSorted((a, b) => (cfg.sort_by === 'number' ? a.number - b.number : a.dir.localeCompare(b.dir)));
 }
-
-// ---------------------------------------------------------------------------
-// Stage + progress
-// ---------------------------------------------------------------------------
 
 function countTasks(specDir) {
   const md = readOpt(path.join(specDir, 'tasks.md'));
@@ -115,17 +87,13 @@ function lastUpdated(specDir, cfg) {
         const [date, sha] = out.split(' ');
         return { date, sha };
       }
-    } catch { /* fall through */ }
+    } catch {}
   }
   try {
     const st = fs.statSync(path.join(ROOT, specDir));
     return { date: st.mtime.toISOString().slice(0, 10), sha: null };
   } catch { return { date: null, sha: null }; }
 }
-
-// ---------------------------------------------------------------------------
-// TDD deep parsing
-// ---------------------------------------------------------------------------
 
 function tddInstalled() {
   return exists(path.join('.specify', 'memory', 'tdd-profile.md')) ||
@@ -143,7 +111,6 @@ function parseFrontmatter(text) {
   return fm;
 }
 
-// Parse a TDD test-list.md into behavior rows.
 function parseTestList(text) {
   const fm = parseFrontmatter(text);
   const rows = [];
@@ -179,10 +146,6 @@ function tddStatsFor(specDir) {
   const parsed = parseTestList(read(tl));
   return { ...parsed, tasks: tasksMarked(specDir) ? 'updated' : 'absent' };
 }
-
-// ---------------------------------------------------------------------------
-// Scan
-// ---------------------------------------------------------------------------
 
 function scan(cfg) {
   const specs = listSpecDirs(cfg).map((s) => {
@@ -222,10 +185,6 @@ function scan(cfg) {
   return { generatedAt: new Date().toISOString(), repoName: path.basename(ROOT), specs, summary, tdd };
 }
 
-// ---------------------------------------------------------------------------
-// Box table renderer (left-aligned, UTF-8 box drawing)
-// ---------------------------------------------------------------------------
-
 function boxTable(headers, rows) {
   const widths = headers.map((h, i) => {
     let w = h.length;
@@ -248,10 +207,6 @@ function boxTable(headers, rows) {
   return out;
 }
 
-// ---------------------------------------------------------------------------
-// Render (markdown)
-// ---------------------------------------------------------------------------
-
 function renderMarkdown(data, _cfg) {
   const lines = [];
   lines.push(`# Spec Stats Dashboard: ${data.repoName}`);
@@ -259,7 +214,6 @@ function renderMarkdown(data, _cfg) {
   lines.push(`*Generated: ${data.generatedAt} | Repo: ${data.repoName} | TDD: ${data.tdd.installed ? 'installed' : 'not installed'}*`);
   lines.push('');
 
-  // Portfolio summary
   lines.push('## Portfolio Summary');
   lines.push('');
   lines.push('| Stage | Count |');
@@ -275,7 +229,6 @@ function renderMarkdown(data, _cfg) {
   lines.push(`**Overall**: ${data.summary.total} specs`);
   lines.push('');
 
-  // At a glance (stage / progress)
   lines.push('## At a Glance');
   lines.push('');
   const glance = [['#', 'feature', 'stage', 'progress']];
@@ -290,7 +243,6 @@ function renderMarkdown(data, _cfg) {
   lines.push(boxTable(glance[0], glance.slice(1)));
   lines.push('');
 
-  // TDD deep table
   if (data.tdd.installed) {
     lines.push('## TDD Deep Stats');
     lines.push('');
@@ -326,10 +278,6 @@ function renderMarkdown(data, _cfg) {
   return lines.join('\n');
 }
 
-// ---------------------------------------------------------------------------
-// Open view
-// ---------------------------------------------------------------------------
-
 function openView(data, cfg) {
   const rows = data.specs.filter((s) => s.stage !== 'complete' && s.stage !== 'absent');
   const lines = ['# Spec Stats — Open (not complete)', ''];
@@ -346,10 +294,6 @@ function openView(data, cfg) {
   return lines.join('\n');
 }
 
-// ---------------------------------------------------------------------------
-// Not-green view
-// ---------------------------------------------------------------------------
-
 function notGreenView(data, _cfg) {
   const lines = ['# Spec Stats — Not Green', ''];
   let any = false;
@@ -364,13 +308,8 @@ function notGreenView(data, _cfg) {
   return lines.join('\n');
 }
 
-// ---------------------------------------------------------------------------
-// Reconcile — fix tasks.md checkboxes based on TDD test-list.md DONE behaviors
-// ---------------------------------------------------------------------------
-
-// Parse test-list.md and return behavior IDs with their states.
 function parseTestListFull(text) {
-  const behaviors = new Map(); // id → state
+  const behaviors = new Map();
   for (const line of text.split('\n')) {
     if (!line.startsWith('|')) continue;
     const cells = line.split('|').slice(1, -1).map((c) => c.trim());
@@ -383,7 +322,6 @@ function parseTestListFull(text) {
   return behaviors;
 }
 
-// Extract behavior markers from a task line (e.g., [A1], [U8], [U44]).
 function extractBehaviorMarkers(line) {
   const markers = [];
   const re = /\[([AUC]\d+)\]/g;
@@ -394,16 +332,13 @@ function extractBehaviorMarkers(line) {
   return markers;
 }
 
-// Check if a file path referenced in a task exists.
 function extractFilePaths(line) {
   const paths = [];
-  // Match backtick-quoted paths: `lib/src/foo.dart`
   const backtickRe = /`([^`]+\.[a-z]{1,5})`/g;
   let m;
   while ((m = backtickRe.exec(line)) !== null) {
     paths.push(m[1]);
   }
-  // Match bare paths: lib/src/foo.dart or test/unit/foo_test.dart
   const bareRe = /((?:lib|test|bin|src)\/[\w/._-]+\.(?:dart|ts|js|py|go|rs))/g;
   while ((m = bareRe.exec(line)) !== null) {
     if (!paths.includes(m[1])) paths.push(m[1]);
@@ -417,13 +352,11 @@ function reconcileSpec(specDir, cfg, opts) {
   const dryRun = opts.dryRun;
   const dropMark = opts.dropMark || 'unchecked';
 
-  // Read tasks.md
   if (!fs.existsSync(path.join(ROOT, tasksPath))) {
     return { spec: specDir, changed: 0, skipped: 0, verified: 0, needsCheck: 0, error: 'no tasks.md' };
   }
   const tasksText = fs.readFileSync(path.join(ROOT, tasksPath), 'utf8');
 
-  // Parse test-list.md for DONE/DROPPED behaviors
   let doneBehaviors = new Set();
   let droppedBehaviors = new Set();
   const hasTestList = fs.existsSync(path.join(ROOT, tlPath));
@@ -436,7 +369,6 @@ function reconcileSpec(specDir, cfg, opts) {
     }
   }
 
-  // Process each line in tasks.md
   const lines = tasksText.split('\n');
   let changed = 0, skipped = 0, verified = 0, needsCheck = 0;
   const report = [];
@@ -458,7 +390,6 @@ function reconcileSpec(specDir, cfg, opts) {
     let shouldCheck = false;
     let reason = '';
 
-    // Strategy 1: behavior markers — check if all marked behaviors are DONE
     if (markers.length > 0) {
       const allDone = markers.every((m) => doneBehaviors.has(m));
       const anyDropped = markers.some((m) => droppedBehaviors.has(m));
@@ -472,7 +403,6 @@ function reconcileSpec(specDir, cfg, opts) {
       }
     }
 
-    // Strategy 2: no behavior markers — check file existence
     if (!shouldCheck && markers.length === 0) {
       const paths = extractFilePaths(rest);
       if (paths.length > 0) {
@@ -486,7 +416,6 @@ function reconcileSpec(specDir, cfg, opts) {
           report.push(`  ⚠ T${String(i).padStart(3, '0')} needs check: missing ${missing.join(', ')}`);
         }
       } else {
-        // No paths to verify — can't auto-check
         needsCheck++;
       }
     }
@@ -499,7 +428,6 @@ function reconcileSpec(specDir, cfg, opts) {
     }
   }
 
-  // Write back if changed
   if (changed > 0 && !dryRun) {
     fs.writeFileSync(path.join(ROOT, tasksPath), lines.join('\n'));
   }
@@ -545,10 +473,6 @@ function reconcileView(targets, opts) {
   return lines.join('\n');
 }
 
-// ---------------------------------------------------------------------------
-// Runs view (execute verified suite per spec)
-// ---------------------------------------------------------------------------
-
 function loadTddProfile() {
   const p = path.join(ROOT, '.specify', 'memory', 'tdd-profile.md');
   if (!fs.existsSync(p)) return null;
@@ -582,7 +506,6 @@ function runsView(targets, dryRun) {
     lines.push(`  - ${status} in ${ms}ms`);
   }
 
-  // record to runs.json
   try {
     const rp = path.join(ROOT, '.specify', 'stats', 'runs.json');
     fs.mkdirSync(path.dirname(rp), { recursive: true });
@@ -592,13 +515,9 @@ function runsView(targets, dryRun) {
     const limit = loadConfig().runs_history_limit || 50;
     arr = arr.slice(-limit);
     fs.writeFileSync(rp, JSON.stringify(arr, null, 2));
-  } catch { /* ignore */ }
+  } catch {}
   return lines.join('\n');
 }
-
-// ---------------------------------------------------------------------------
-// Output helpers
-// ---------------------------------------------------------------------------
 
 function writeOut(content, outPath) {
   if (outPath) {
@@ -610,10 +529,6 @@ function writeOut(content, outPath) {
     console.log(content);
   }
 }
-
-// ---------------------------------------------------------------------------
-// CLI
-// ---------------------------------------------------------------------------
 
 function parseArgs(argv) {
   const o = { _: [] };
@@ -704,7 +619,6 @@ function main() {
     return;
   }
 
-  // default: report
   const data = scan(cfg);
   if (args.json) { console.log(JSON.stringify(data, null, 2)); return; }
   writeOut(renderMarkdown(data, cfg), args.out || path.join(ROOT, cfg.output_path));

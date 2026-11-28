@@ -7,7 +7,7 @@ import {
   IConfigService,
   type ResolvedConfig,
 } from '#/app/config/config';
-import type { IModelOAuthTokens } from '#/llm-adapter/model/model-oauth';
+import type { IModelOAuthTokens } from '#/provider-catalog/model/model-oauth';
 
 export class StubConfigService implements IConfigService {
   declare readonly _serviceBrand: undefined;

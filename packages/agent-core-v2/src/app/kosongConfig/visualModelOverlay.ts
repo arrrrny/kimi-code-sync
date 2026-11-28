@@ -2,7 +2,7 @@
 import type { ConfigEffectiveOverlay } from '#/app/config/config';
 import { registerConfigOverlay } from '#/app/config/configOverlayContributions';
 import { isPlainObject } from '#/app/config/toml';
-import type { ModelOverride } from '#/llm-adapter/model/model';
+import type { ModelOverride } from '#/provider-catalog/model/model';
 
 import {
   DEFAULT_MODEL_SECTION,

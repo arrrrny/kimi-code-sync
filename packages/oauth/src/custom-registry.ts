@@ -80,11 +80,6 @@ export interface CustomRegistryProviderEntry {
   readonly models: Record<string, CustomRegistryModelEntry>;
 }
 
-/**
- * Tuned slightly below typical real values so the local compactor kicks in
- * before the upstream rejects with a context-overflow 4xx. Users can override
- * by editing `~/.kimi-code/config.toml`.
- */
 export const CUSTOM_REGISTRY_DEFAULT_MAX_CONTEXT = 262144;
 export const CUSTOM_REGISTRY_DEFAULT_CAPABILITIES = ['tool_use'] as const;
 
@@ -114,12 +109,6 @@ export function oauthManagedProviderMessage(providerId: string): string {
   return `Custom registry provider "${providerId}" is managed by OAuth; log out before importing it.`;
 }
 
-/**
- * Mirrors the provider-id rule the models.dev import path and the REST
- * `providerIdSchema` enforce. A remote `api.json` is untrusted input and its
- * `id` becomes an own key on `config.providers`, so an id such as `__proto__`
- * would otherwise reach the object prototype instead of creating a provider.
- */
 const PROVIDER_ID_PATTERN = /^[\p{L}\p{N}][\p{L}\p{N}\-_ ]*$/u;
 
 export function invalidProviderIdMessage(providerId: string): string {

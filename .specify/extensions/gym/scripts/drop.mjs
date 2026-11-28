@@ -1,12 +1,4 @@
 #!/usr/bin/env node
-// GYM — drop card recorder.
-//
-// Records a mis-fire as a card to the configured redundant stores (default:
-// <project>/drops/ + the extension's append-only .drop-ledger.md). A card is a
-// discovery to keep, never a mistake to punish.
-//
-//   node drop.mjs --agent <you> --where "GYM ex-1" \
-//     --did "..." --expected "..." --happened "..."
 import fs from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -60,7 +52,7 @@ function loadConfig() {
   try {
     const parsed = parseSimpleYaml(readFileSync(CONFIG_PATH, 'utf8'));
     if (parsed.drop_stores !== undefined) cfg.drop_stores = parsed.drop_stores;
-  } catch { /* defaults */ }
+  } catch {}
   return cfg;
 }
 
@@ -110,9 +102,7 @@ async function main() {
       try {
         execFileSync('gh', ['issue', 'create', '--title', `Drop: ${o.where || agent}`, '--body', card], { stdio: 'ignore' });
         written.push('github-issue');
-      } catch {
-        /* gh unavailable or failed — skip */
-      }
+      } catch {}
     }
   }
 

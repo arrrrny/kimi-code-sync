@@ -10,5 +10,4 @@ export const NOTIFY_USER_MARK_FOREGROUND = '#FFFFFF';
 export const SELECT_POINTER = '❯';
 export const CURRENT_MARK = '← current';
 
-// Marks a model the user favorited (drives the /model Favorites tab).
 export const FAVORITE_MARK = '★';

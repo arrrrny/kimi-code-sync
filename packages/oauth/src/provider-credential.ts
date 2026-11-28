@@ -1,13 +1,3 @@
-/**
- * Shared provider-credential rules for every layer that reads or rewrites a
- * provider record: this package's refresh orchestrator, the agent-core-v2
- * runtime (model-auth / catalog / auth readiness), and the kap-server provider
- * write routes. The precedence chain (the rotation map's active named key, then
- * the inline `apiKey`, vs declared `apiKeyEnv`), the mutual-exclusion conflicts,
- * and the user-facing messages live here once so no layer re-derives — and
- * silently diverges on — the same rules.
- */
-
 export interface ProviderCredentialView {
   readonly apiKey?: unknown;
   readonly apiKeyEnv?: unknown;
@@ -27,13 +17,6 @@ interface InlineApiKey {
   readonly field: 'apiKey' | 'apiKeys';
 }
 
-/**
- * Resolves the inline key a provider record declares: the named key selected by
- * `activeApiKeyId` inside `apiKeys`, falling back to the legacy `apiKey` field.
- * Every layer reads the inline key through this, so a rotation provider paired
- * with a contradicting credential is rejected identically by the catalog, the
- * refresh path, and the request path.
- */
 function activeInlineApiKey(provider: ProviderCredentialView): InlineApiKey | undefined {
   const activeId = nonEmptyString(provider.activeApiKeyId);
   const entries = provider.apiKeys;
@@ -49,15 +32,6 @@ function activeInlineApiKey(provider: ProviderCredentialView): InlineApiKey | un
   return legacy === undefined ? undefined : { key: legacy, field: 'apiKey' };
 }
 
-/**
- * Reads the credential a provider record declares, without resolving any
- * environment variable. The inline side counts a rotation map's active key, so
- * `apiKeys`+`apiKeyEnv` and `apiKeys`+`oauth` are conflicts too, and the message
- * names `apiKeys` rather than the unused `apiKey` field. Conflict kinds mirror
- * what the chat path rejects: `apiKey`+`apiKeyEnv`, `apiKeyEnv`+`oauth`, and
- * `apiKey`+`oauth` — refresh and write paths must not honor a configuration the
- * runtime would refuse.
- */
 export function declaredProviderCredential(
   provider: ProviderCredentialView,
   providerName: string,

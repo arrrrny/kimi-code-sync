@@ -8,6 +8,7 @@ import {
   resolveCatalogImport,
   SECONDARY_DERIVED_MODEL_ALIAS,
   type Catalog,
+  type ModelAlias,
   type RefreshProviderModelsResponse,
   type ProviderConfig,
   type ThinkingEffort,
@@ -27,6 +28,7 @@ import {
   type ProviderManagerOptions,
 } from '../components/dialogs/provider-manager';
 import { TabbedModelSelectorComponent } from '../components/dialogs/tabbed-model-selector';
+import { DOCK_MODEL_SELECTOR_ROWS } from '../constant/rendering';
 import { DEFAULT_OAUTH_PROVIDER_NAME } from '../constant/kimi-tui';
 import { formatErrorMessage } from '../utils/event-payload';
 import { thinkingEffortToConfig } from '../utils/thinking-config';
@@ -198,10 +200,6 @@ async function handleProviderDelete(host: SlashCommandHost, providerId: string):
   }
 }
 
-// ---------------------------------------------------------------------------
-// API Key management for providers
-// ---------------------------------------------------------------------------
-
 async function handleProviderKeyAdd(host: SlashCommandHost, providerId: string): Promise<void> {
   const provider = host.state.appState.availableProviders[providerId];
   if (!provider) {
@@ -209,28 +207,24 @@ async function handleProviderKeyAdd(host: SlashCommandHost, providerId: string):
     return;
   }
 
-  // Prompt for key name
   const name = await promptKeyName(host);
   if (name === undefined) {
     reopenProviderManager(host);
     return;
   }
 
-  // Prompt for API key value
   const apiKey = await promptApiKey(host, `API key for ${providerId}/${name}`);
   if (apiKey === undefined) {
     reopenProviderManager(host);
     return;
   }
 
-  // Prompt for the key's optional proxy; empty means "inherit the provider's".
   const keyProxy = await promptKeyProxyUrl(host, `${providerId}/${name}`);
   if (keyProxy === undefined) {
     reopenProviderManager(host);
     return;
   }
 
-  // Generate a unique key ID
   const keyId = generateKeyId(provider);
 
   const config = await host.harness.getConfig();
@@ -247,11 +241,9 @@ async function handleProviderKeyAdd(host: SlashCommandHost, providerId: string):
   providers[providerId] = {
     ...existingProvider,
     apiKeys,
-    activeApiKeyId: existingProvider.activeApiKeyId ?? keyId, // First key becomes active
+    activeApiKeyId: existingProvider.activeApiKeyId ?? keyId,
   };
 
-  // Use replaceConfigSections if available (v2) to ensure full replacement,
-  // otherwise fall back to setConfig (v1 deep merge).
   if (host.harness.supportsAtomicSectionReplace()) {
     await host.harness.replaceConfigSections({ providers });
   } else {
@@ -282,21 +274,17 @@ async function handleProviderKeyRemove(host: SlashCommandHost, providerId: strin
 
   let activeApiKeyId = provider.activeApiKeyId;
   if (activeApiKeyId === keyId) {
-    // Select another key as active if available
     const remainingKeys = Object.keys(apiKeys);
     activeApiKeyId = remainingKeys.length > 0 ? remainingKeys[0] : undefined;
   }
 
   if (Object.keys(apiKeys).length === 0) {
-    // No keys left, remove the apiKeys field entirely
     const { apiKeys: _, activeApiKeyId: __, ...rest } = provider;
     providers[providerId] = rest;
   } else {
     providers[providerId] = { ...provider, apiKeys, activeApiKeyId };
   }
 
-  // Use replaceConfigSections if available (v2) to ensure full replacement,
-  // otherwise fall back to setConfig (v1 deep merge).
   if (host.harness.supportsAtomicSectionReplace()) {
     await host.harness.replaceConfigSections({ providers });
   } else {
@@ -317,8 +305,6 @@ async function handleProviderKeySetActive(host: SlashCommandHost, providerId: st
   }
 
   providers[providerId] = { ...provider, activeApiKeyId: keyId };
-  // Use replaceConfigSections if available (v2) to ensure full replacement,
-  // otherwise fall back to setConfig (v1 deep merge).
   if (host.harness.supportsAtomicSectionReplace()) {
     await host.harness.replaceConfigSections({ providers });
   } else {
@@ -352,8 +338,6 @@ async function handleProviderKeyRotationToggle(
   }
   providers[providerId] = { ...provider, rotateKeys };
 
-  // Use replaceConfigSections if available (v2) to ensure full replacement,
-  // otherwise fall back to setConfig (v1 deep merge).
   if (host.harness.supportsAtomicSectionReplace()) {
     await host.harness.replaceConfigSections({ providers });
   } else {
@@ -530,36 +514,15 @@ async function handleCatalogProviderAdd(host: SlashCommandHost): Promise<void> {
     );
   }
 
-  // The config's model table already holds the newly-persisted provider's
-  // models next to the existing ones, so the tabbed selector shows every
-  // provider's tab (the new provider's tab starts active via initialTabId).
-  // The v1 runtime may carry the synthesized `__secondary__` derived entry —
-  // never selectable in a picker.
   const stateModels = await host.harness.getConfig().then((c) => c.models ?? {});
   const mergedModels = { ...stateModels };
   delete mergedModels[SECONDARY_DERIVED_MODEL_ALIAS];
-
-  const selector = new TabbedModelSelectorComponent({
-    models: mergedModels,
-    currentValue: host.state.appState.model,
-    selectedValue: Object.keys(mergedModels).find((a) => a.startsWith(`${providerId}/`)),
-    currentThinkingEffort: host.state.appState.thinkingEffort,
-    initialTabId: providerId,
-    onSelect: ({ alias, thinking }) => {
-      host.restoreEditor();
-      void setDefaultModel(host, alias, thinking).catch((error: unknown) => {
-        host.showError(`Set default model failed: ${formatErrorMessage(error)}`);
-      });
-    },
-    onSessionOnlySelect: ({ alias, thinking }) => {
-      host.restoreEditor();
-      void performModelSwitch(host, alias, thinking, 'session');
-    },
-    onCancel: () => {
-      host.restoreEditor();
-    },
-  });
-  host.mountEditorReplacement(selector);
+  mountProviderDefaultModelSelector(
+    host,
+    mergedModels,
+    Object.keys(mergedModels).find((alias) => alias.startsWith(`${providerId}/`)),
+    providerId,
+  );
 }
 
 export async function setDefaultModel(
@@ -640,9 +603,6 @@ async function handleCustomRegistryAddViaDialog(host: SlashCommandHost): Promise
     );
   }
 
-  // Offer the model selector so the user can pick a default, just like the
-  // catalog (known-provider) flow. Copy without the v1-synthesized
-  // `__secondary__` derived entry — never selectable in a picker.
   const stateModels = { ...(await host.harness.getConfig().then((c) => c.models ?? {})) };
   delete stateModels[SECONDARY_DERIVED_MODEL_ALIAS];
   const firstNewAlias = Object.keys(stateModels).find((a) =>
@@ -651,12 +611,26 @@ async function handleCustomRegistryAddViaDialog(host: SlashCommandHost): Promise
   const firstNewProvider = firstNewAlias
     ? stateModels[firstNewAlias]?.provider
     : addedProviderIds[0];
+  mountProviderDefaultModelSelector(host, stateModels, firstNewAlias, firstNewProvider);
+  return true;
+}
+
+function mountProviderDefaultModelSelector(
+  host: SlashCommandHost,
+  models: Record<string, ModelAlias>,
+  selectedValue: string | undefined,
+  initialTabId: string | undefined,
+): void {
   const selector = new TabbedModelSelectorComponent({
-    models: stateModels,
+    models,
     currentValue: host.state.appState.model,
-    selectedValue: firstNewAlias,
+    selectedValue,
     currentThinkingEffort: host.state.appState.thinkingEffort,
-    initialTabId: firstNewProvider,
+    initialTabId,
+    layout:
+      host.state.dockContainer === undefined
+        ? undefined
+        : { maxBodyRows: DOCK_MODEL_SELECTOR_ROWS },
     onSelect: ({ alias, thinking }) => {
       host.restoreEditor();
       void setDefaultModel(host, alias, thinking).catch((error: unknown) => {
@@ -672,7 +646,6 @@ async function handleCustomRegistryAddViaDialog(host: SlashCommandHost): Promise
     },
   });
   host.mountEditorReplacement(selector);
-  return true;
 }
 
 function promptCustomRegistryImport(
@@ -715,8 +688,6 @@ async function handleProviderProxyUrl(host: SlashCommandHost, providerId: string
     proxyUrl,
   };
 
-  // Use replaceConfigSections if available (v2) to ensure full replacement,
-  // otherwise fall back to setConfig (v1 deep merge).
   if (host.harness.supportsAtomicSectionReplace()) {
     await host.harness.replaceConfigSections({ providers });
   } else {
@@ -728,15 +699,6 @@ async function handleProviderProxyUrl(host: SlashCommandHost, providerId: string
   reopenProviderManager(host);
 }
 
-// ---------------------------------------------------------------------------
-// /refresh-catalog command
-// ---------------------------------------------------------------------------
-
-/**
- * On-demand OpenAI-compatible catalog refresh. Fetches each matching provider's
- * `/models` endpoint, preserves curated `maxContextSize`, and enriches names from
- * models.dev. Pass `providerId` to scope the refresh to a single provider.
- */
 export async function handleRefreshCatalogCommand(
   host: SlashCommandHost,
   providerId: string | undefined,

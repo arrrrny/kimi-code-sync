@@ -160,20 +160,13 @@ describe('fetchOpenAIProviderModels', () => {
       new Response(
         JSON.stringify({
           data: [
-            // A plausible completion cap (smaller than the context window): used.
             { id: 'cap-ok', context_length: 200000, max_tokens: 8192 },
-            // A gateway echoing its context window into max_tokens: ignored, so a
-            // curated maxOutputSize is not inflated to the context length.
             { id: 'cap-echo', context_length: 1000000, max_tokens: 1000000 },
-            // OpenRouter's documented field: always trusted, even when it is not
-            // smaller than the context window.
             {
               id: 'cap-openrouter',
               context_length: 200000,
               top_provider: { max_completion_tokens: 16384 },
             },
-            // No reported context window: a bare max_tokens has nothing to be an
-            // echo of, so it is used.
             { id: 'cap-no-ctx', max_tokens: 4096 },
           ],
         }),
@@ -208,8 +201,6 @@ describe('refreshProviderCatalog — OpenAI-compatible on-demand', () => {
 
     const result = await refreshProviderModels(host, { scope: 'all' });
 
-    // Branch 3.5 was removed from the startup refresh; openai providers are
-    // only refreshed via /refresh-catalog.
     expect(fetchMock).toHaveBeenCalledTimes(0);
     expect(result.changed).toEqual([]);
     expect(result.unchanged).toEqual([]);
@@ -255,7 +246,6 @@ describe('refreshProviderCatalog — OpenAI-compatible on-demand', () => {
       { providerId: 'opencode', providerName: 'opencode', added: 1, removed: 1 },
     ]);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    // Stale model removed, new model added under the provider prefix.
     const models = (await host.getConfig()).models ?? {};
     expect(models['opencode/old-model']).toBeUndefined();
     expect(models['opencode/new-model']).toBeDefined();
@@ -281,7 +271,6 @@ describe('refreshProviderCatalog — OpenAI-compatible on-demand', () => {
       telemetry: true,
     };
     const host = makeRefreshHost(config);
-    // z.ai's /models returns no context fields, like the real endpoint.
     const fetchMock = vi.fn<FetchMock>(async () =>
       new Response(
         JSON.stringify({ data: [{ id: 'glm-5.3' }] }),
@@ -294,7 +283,6 @@ describe('refreshProviderCatalog — OpenAI-compatible on-demand', () => {
 
     expect(result.failed).toEqual([]);
     const alias = (await host.getConfig()).models?.['zai-coding-plan/glm-5.3'];
-    // Curated 1M window survives the catalog refresh instead of being reset.
     expect(alias?.maxContextSize).toBe(1000000);
   });
 
@@ -311,8 +299,6 @@ describe('refreshProviderCatalog — OpenAI-compatible on-demand', () => {
     };
     const host = makeRefreshHost(config);
 
-    // Warm the models.dev memo with a catalog entry for the opencode-style id
-    // (no `nvidia/` namespace, no `:free` suffix — opencode renames the model).
     const catalog = {
       opencode: {
         models: {
@@ -336,9 +322,6 @@ describe('refreshProviderCatalog — OpenAI-compatible on-demand', () => {
     const { refreshModelsDevCatalog } = await import('../src/modelsDevCatalog');
     await refreshModelsDevCatalog();
 
-    // opencode's real /models returns { id, object, created, owned_by } with
-    // no `context_length` — the bug was that this collapsed the alias to the
-    // 262144 default instead of using the catalog's 1000000.
     const endpointFetch = vi.fn<FetchMock>(async () =>
       new Response(
         JSON.stringify({ data: [{ id: 'nemotron-3-ultra-free' }] }),
@@ -350,20 +333,12 @@ describe('refreshProviderCatalog — OpenAI-compatible on-demand', () => {
     const result = await refreshProviderCatalog(host, {});
     expect(result.failed).toEqual([]);
     const alias = (await host.getConfig()).models?.['opencode/nemotron-3-ultra-free'];
-    // Without the fix this would be 262144 (OPENAI_COMPATIBLE_DEFAULT_CONTEXT).
     expect(alias?.maxContextSize).toBe(1000000);
     expect(alias?.displayName).toBe('Nemotron 3 Ultra Free');
-    // `image_in` is the discriminating assertion here: `tool_use` is added
-    // unconditionally by `toCapabilities`, so it would pass even if the
-    // catalog→alias capabilities merge were a no-op. `image_in` only appears
-    // because the catalog fixture's `modalities.input` includes `'image'`.
     expect(alias?.capabilities).toEqual(expect.arrayContaining(['tool_use', 'image_in']));
   });
 
   it('preserves curated reasoningKey and supportEfforts when the endpoint reports no reasoning metadata', async () => {
-    // zstart-style endpoint: `/models` returns no reasoning fields at all, so the
-    // curated effort ladder and the interleaved-reasoning field are the only
-    // source of truth. A refresh must not replace them with a default on/off.
     const config: ManagedKimiConfigShape = {
       providers: {
         zstart: { type: 'openai', baseUrl: 'http://127.0.0.1:8790/v1', apiKey: 'zstart-local' },
@@ -401,9 +376,6 @@ describe('refreshProviderCatalog — OpenAI-compatible on-demand', () => {
   });
 
   it('lets the models.dev catalog override a curated reasoningKey', async () => {
-    // The complement of the test above: when the catalog declares a reasoning
-    // key (`interleaved.field`), its answer is the newer one and must win over
-    // the curated value.
     const config: ManagedKimiConfigShape = {
       providers: {
         zai: { type: 'openai', baseUrl: 'https://api.z.ai/api/v1', apiKey: 'sk-zai' },
@@ -481,8 +453,6 @@ describe('refreshProviderCatalog — OpenAI-compatible on-demand', () => {
     };
     const host = makeRefreshHost(config);
 
-    // The catalog reports 1000000 while the user has curated 500000 — the
-    // catalog corrects the stale curated value.
     const catalog = {
       opencode: {
         models: {
@@ -517,16 +487,10 @@ describe('refreshProviderCatalog — OpenAI-compatible on-demand', () => {
     const result = await refreshProviderCatalog(host, {});
     expect(result.failed).toEqual([]);
     const alias = (await host.getConfig()).models?.['opencode/nemotron-3-ultra-free'];
-    // The catalog (1000000) outranks both the stale curated 500000 and the
-    // OPENAI_COMPATIBLE_DEFAULT_CONTEXT fallback.
     expect(alias?.maxContextSize).toBe(1000000);
   });
 
   it('still uses the catalog context for a deprecated/alpha opencode model', async () => {
-    // Deprecation/alpha in the catalog strips capabilities (toCapabilities
-    // returns undefined) but the `limit.context` is independent — it must
-    // still be surfaced. Regression test for the v1.1 follow-up to the
-    // original bug.
     const config: ManagedKimiConfigShape = {
       providers: {
         opencode: {
@@ -574,19 +538,11 @@ describe('refreshProviderCatalog — OpenAI-compatible on-demand', () => {
     const result = await refreshProviderCatalog(host, {});
     expect(result.failed).toEqual([]);
     const alias = (await host.getConfig()).models?.['opencode/nemotron-3-ultra-free'];
-    // Catalog context survives the deprecated/alpha gate.
     expect(alias?.maxContextSize).toBe(1000000);
-    // The catalog marks the model deprecated, so toCapabilities returns an
-    // explicit empty set and the merge retracts any capabilities — here there
-    // are none curated, so the alias carries none.
     expect(alias?.capabilities).toBeUndefined();
   });
 
   it('retracts a curated capabilities set when the catalog marks the model deprecated/alpha', async () => {
-    // The complement of the test above: an alias that already advertises
-    // capabilities must LOSE them when the catalog says the model is
-    // deprecated/alpha. A deprecation is a negative answer, not silence, so the
-    // union must not keep `tool_use` / `image_in` alive forever.
     const config: ManagedKimiConfigShape = {
       providers: {
         opencode: {
@@ -642,9 +598,7 @@ describe('refreshProviderCatalog — OpenAI-compatible on-demand', () => {
     const result = await refreshProviderCatalog(host, {});
     expect(result.failed).toEqual([]);
     const alias = (await host.getConfig()).models?.['opencode/nemotron-3-ultra-free'];
-    // Context is independent of the deprecation and still surfaces ...
     expect(alias?.maxContextSize).toBe(1000000);
-    // ... but the curated capabilities are retracted, not unioned.
     expect(alias?.capabilities).toBeUndefined();
   });
 
@@ -699,8 +653,6 @@ describe('refreshProviderCatalog — OpenAI-compatible on-demand', () => {
     };
     const host = makeRefreshHost(config);
 
-    // Warm the models.dev memo with a catalog entry for the free-stripped base
-    // id, fetched via refreshModelsDevCatalog (stubbed network).
     const catalog = {
       openrouter: {
         models: {
@@ -725,9 +677,6 @@ describe('refreshProviderCatalog — OpenAI-compatible on-demand', () => {
     const { refreshModelsDevCatalog } = await import('../src/modelsDevCatalog');
     await refreshModelsDevCatalog();
 
-    // Endpoint supplies its own display name ("MiniMax M3 (free)") and no
-    // context; enrichment fills capabilities from the catalog and keeps the
-    // endpoint's name.
     const endpointFetch = vi.fn<FetchMock>(async () =>
       new Response(
         JSON.stringify({
@@ -741,7 +690,7 @@ describe('refreshProviderCatalog — OpenAI-compatible on-demand', () => {
     const result = await refreshProviderCatalog(host, {});
     expect(result.failed).toEqual([]);
     const alias = (await host.getConfig()).models?.['openrouter/minimax/minimax-m3:free'];
-    expect(alias?.displayName).toBe('MiniMax M3 (free)'); // endpoint name wins
+    expect(alias?.displayName).toBe('MiniMax M3 (free)');
     expect(alias?.capabilities).toEqual(expect.arrayContaining(['tool_use', 'thinking', 'image_in']));
   });
 
@@ -819,7 +768,6 @@ describe('refreshProviderCatalog — free_models_only filter', () => {
 
     expect(result.failed).toEqual([]);
     const models = (await host.getConfig()).models ?? {};
-    // Only the free model is kept; gpt-4o (no "free") is dropped.
     expect(Object.keys(models)).toEqual(['openrouter/anthropic/claude-3.5-sonnet:free']);
   });
 
@@ -963,8 +911,6 @@ describe('refreshProviderCatalog — free_models_only filter', () => {
     };
     const host = makeRefreshHost(config);
 
-    // Warm models.dev with the base (free-stripped) id so we can confirm the
-    // retained model is enriched and the dropped one is not.
     const catalog = {
       openrouter: {
         models: {
@@ -1008,8 +954,8 @@ describe('refreshProviderCatalog — free_models_only filter', () => {
     const models = (await host.getConfig()).models ?? {};
     const retained = models['openrouter/anthropic/claude-3.5-sonnet:free'];
     expect(retained).toBeDefined();
-    expect(retained?.displayName).toBe('Claude 3.5 Sonnet'); // enriched from catalog
-    expect(models['openrouter/gpt-4o']).toBeUndefined(); // dropped, never enriched
+    expect(retained?.displayName).toBe('Claude 3.5 Sonnet');
+    expect(models['openrouter/gpt-4o']).toBeUndefined();
   });
 
   it('keeps a free model absent from models.dev (fallback to base id, else provider name/id)', async () => {
@@ -1020,7 +966,6 @@ describe('refreshProviderCatalog — free_models_only filter', () => {
       telemetry: true,
     };
     const host = makeRefreshHost(config);
-    // No catalog match (tencent/hy3 not in models.dev) — must still be kept.
     const catalogFetch = vi.fn<FetchMock>(async () => new Response('{}', { status: 200 }));
     vi.stubGlobal('fetch', catalogFetch);
     const { refreshModelsDevCatalog } = await import('../src/modelsDevCatalog');
@@ -1040,7 +985,6 @@ describe('refreshProviderCatalog — free_models_only filter', () => {
     const models = (await host.getConfig()).models ?? {};
     const kept = models['openrouter/tencent/hy3:free'];
     expect(kept).toBeDefined();
-    // Provider-reported name wins; never dropped by enrichment.
     expect(kept?.displayName).toBe('Tencent HY3 Free');
   });
 
@@ -1096,8 +1040,6 @@ describe('lookupModelsDevModel — provider/model cascade', () => {
   });
 
   it('falls back to opencode when the requested provider does not carry the model', async () => {
-    // models.dev keys opencode's free tier only under `opencode`; a provider
-    // that mirrors the same endpoint (`opencode-go`) must reach it.
     await warmCatalog({
       'opencode-go': { models: {} },
       opencode: { models: { 'glm-5-free': { name: 'GLM-5 Free', limit: { context: 204800 } } } },
@@ -1119,10 +1061,6 @@ describe('lookupModelsDevModel — provider/model cascade', () => {
   });
 
   it('surfaces the reasoning key from the any-provider step', async () => {
-    // The widest cascade step used to rebuild its result as
-    // { displayName, capabilities, context } and drop `reasoningKey`, so a model
-    // id picked up `interleaved.field` from the opencode fallback but not from
-    // any other provider. It must propagate here too.
     await warmCatalog({
       'opencode-go': { models: {} },
       opencode: { models: {} },

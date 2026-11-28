@@ -27,7 +27,7 @@
 // references become '(circular)', and class instances collapse to a '(ClassName)'
 // marker — the wire shape of an entry is the JSON projection of the type here.
 //
-// Index (App: 0 keys · Workspace: 8 keys · Session: 9 keys · Agent: 63 keys)
+// Index (App: 0 keys · Workspace: 8 keys · Session: 9 keys · Agent: 62 keys)
 //   App
 //   Workspace
 //     workspaceDirs.ephemeralDirs          src/project/projectDirs/projectDirsService.ts
@@ -56,7 +56,6 @@
 //     changeNotifier.snapshot                         src/agent/changeNotifier/changeNotifierOps.ts
 //     contextProjector.lastRepairSignature            src/agent/loop/requestObservation.ts
 //     environmentBinding                              src/agent/environmentBinding/environmentBindingOps.ts
-//     externalHooks.stopHookContinuationUsed          src/features/externalHooks/agent/agentExternalHooksService.ts
 //     fileHistory                                     src/features/fileHistory/fileHistoryOps.ts
 //     fullCompaction                                  src/agent/fullCompaction/compactionOps.ts
 //     fullCompaction.activeTurnId                     src/agent/fullCompaction/fullCompactionService.ts
@@ -93,7 +92,6 @@
 //     shellCommand.tasks                              src/agent/shellCommand/shellCommandService.ts
 //     squeezeModel                                    src/agent/fullCompaction/squeezeForkOps.ts
 //     swarm                                           src/features/swarm/swarmOps.ts
-//     swarmReminderDelivered                          src/features/swarm/swarmOps.ts
 //     task                                            src/agent/task/taskOps.ts
 //     toolDedupe.activeStep                           src/agent/toolDedupe/toolDedupeService.ts
 //     toolDedupe.activeTurnId                         src/agent/toolDedupe/toolDedupeService.ts
@@ -112,6 +110,7 @@
 //     tower.owner                                     src/features/tower/towerOps.ts
 //     turn                                            src/agent/loop/turnOps.ts
 //     userTool                                        src/agent/userTool/userToolOps.ts
+//     workdirMove                                     src/agent/workdirMove/workdirMoveOps.ts
 
 /** App-scope keys registered into IAppStateService. */
 export interface AppStateSnapshot {
@@ -992,7 +991,7 @@ export interface AgentStateSnapshot {
     readonly historyHash: string;
   } | undefined;
   // src/agent/loop/turnOps.ts
-  // replayable · durable — folds: ContextAppendLoopEvent, TurnPrompt, TurnSteer, ContextUndo, ContextApplyCompaction, ContextClear, TurnCancel, TurnEnded
+  // replayable · durable — folds: ContextAppendLoopEvent, TurnPrompt, TurnSteer, ToolsSettled, ContextUndo, ContextApplyCompaction, ContextClear, TurnCancel, TurnEnded
   'turn': /* TurnModelState — packages/agent-core-v2/src/agent/loop/turnOps.ts */ {
     readonly nextTurnId: number;
     readonly cancelledTurnIds: readonly number[];
@@ -1179,7 +1178,7 @@ export interface AgentStateSnapshot {
       readonly description: string;
       readonly parameters: Record<string, unknown>;
       readonly source: /* ToolSource — packages/agent-core-v2/src/tool/toolContract.ts */ 'user' | 'builtin' | 'mcp';
-      readonly disclosure?: 'inline' | 'deferred';
+      readonly disclosure?: 'deferred' | 'inline';
       readonly origin: 'initial' | 'runtime';
     }[] | undefined;
     readonly current: readonly /* ToolSelectTool — packages/agent-core-v2/src/agent/toolSelect/toolSelectOps.ts */ {
@@ -1187,7 +1186,7 @@ export interface AgentStateSnapshot {
       readonly description: string;
       readonly parameters: Record<string, unknown>;
       readonly source: /* ToolSource — packages/agent-core-v2/src/tool/toolContract.ts */ 'user' | 'builtin' | 'mcp';
-      readonly disclosure?: 'inline' | 'deferred';
+      readonly disclosure?: 'deferred' | 'inline';
       readonly origin: 'initial' | 'runtime';
     }[];
     readonly changes: readonly /* ToolSelectChange — packages/agent-core-v2/src/agent/toolSelect/toolSelectOps.ts */ {
@@ -1196,7 +1195,7 @@ export interface AgentStateSnapshot {
         readonly description: string;
         readonly parameters: Record<string, unknown>;
         readonly source: /* ToolSource — packages/agent-core-v2/src/tool/toolContract.ts */ 'user' | 'builtin' | 'mcp';
-        readonly disclosure?: 'inline' | 'deferred';
+        readonly disclosure?: 'deferred' | 'inline';
         readonly origin: 'initial' | 'runtime';
       }[];
       readonly removed: readonly /* ToolSelectTool — packages/agent-core-v2/src/agent/toolSelect/toolSelectOps.ts */ {
@@ -1204,7 +1203,7 @@ export interface AgentStateSnapshot {
         readonly description: string;
         readonly parameters: Record<string, unknown>;
         readonly source: /* ToolSource — packages/agent-core-v2/src/tool/toolContract.ts */ 'user' | 'builtin' | 'mcp';
-        readonly disclosure?: 'inline' | 'deferred';
+        readonly disclosure?: 'deferred' | 'inline';
         readonly origin: 'initial' | 'runtime';
       }[];
     }[];
@@ -1215,10 +1214,22 @@ export interface AgentStateSnapshot {
     readonly name: string;
     readonly description: string;
     readonly parameters: Record<string, unknown>;
-    readonly disclosure?: 'inline' | 'deferred';
+    readonly disclosure?: 'deferred' | 'inline';
   }>;
-  // src/features/externalHooks/agent/agentExternalHooksService.ts
-  'externalHooks.stopHookContinuationUsed': boolean;
+  // src/agent/workdirMove/workdirMoveOps.ts
+  // replayable · durable — folds: EnvironmentSetBinding
+  'workdirMove': /* WorkdirMoveState — packages/agent-core-v2/src/agent/workdirMove/workdirMoveOps.ts */ {
+    readonly originCwd?: string;
+    readonly pendingBaseline?: /* WorkdirMoveBaseline — packages/agent-core-v2/src/agent/environmentBinding/environmentBindingOps.ts */ {
+      readonly cwd: string;
+      readonly checkoutRoot: string;
+      readonly projectAgentsMd: readonly /* ProjectAgentsMdBelief — packages/agent-core-v2/src/agent/environmentBinding/environmentBindingOps.ts */ {
+        readonly relativePath: string;
+        readonly path: string;
+        readonly hash: string;
+      }[];
+    };
+  };
   // src/features/fileHistory/fileHistoryOps.ts
   // replayable · durable — folds: FileHistoryCheckpointed, FileHistoryTracked
   'fileHistory': /* FileHistoryState — packages/agent-core-v2/src/features/fileHistory/fileHistory.ts */ {
@@ -1249,8 +1260,6 @@ export interface AgentStateSnapshot {
   // src/features/swarm/swarmOps.ts
   // replayable · durable — folds: SwarmModeEnter, SwarmModeExit
   'swarm': 'manual' | 'task' | 'tool' | null;
-  // replayable · durable — folds: SwarmModeEnter, SwarmModeExit, ContextAppendMessage, ContextSpliced
-  'swarmReminderDelivered': boolean;
   // src/features/tower/towerOps.ts
   // replayable · durable — folds: TowerModeEnter, TowerModeExit
   'tower': boolean;

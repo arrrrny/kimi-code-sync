@@ -20,7 +20,7 @@ import { IPluginService } from '#/app/plugin/plugin';
 import { PluginService } from '#/app/plugin/pluginService';
 import type { PluginReloadEvent } from '#/app/plugin/types';
 import { ITelemetryService, noopTelemetryService } from '#/app/telemetry/telemetry';
-import { IProviderService } from '#/llm-adapter/provider/provider';
+
 import type { McpOAuthService } from '#/mcpCore/oauth/service';
 import { IAppStateService } from '#/app/state/appState';
 import { AppStateService } from '#/app/state/appStateService';
@@ -59,6 +59,7 @@ import { stubFlag } from '../../../app/flag/stubs';
 import { stubSkill } from '../catalog/stubs';
 import { stubProviderService } from '../../../app/provider/stubs';
 import { stubLog } from '../../../_base/log/stubs';
+import { IProviderCatalogService } from '#/provider-catalog/providerCatalogService';
 
 const watchMockState = vi.hoisted(() => ({
   calls: [] as { path: string; options?: WatchOptions }[],
@@ -407,6 +408,99 @@ describe('WorkspaceSkillCatalogService', () => {
       for (const dir of [primary, secondary, third]) {
         expect(watchedPaths).toContain(await realpath(dir));
       }
+    } finally {
+      host.dispose();
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+
+  it('resolves relative extra skill dirs against every workspace directory and lists their roots', async () => {
+    const base = await mkdtemp(join(tmpdir(), 'skill-catalog-multi-root-extra-'));
+    const primary = join(base, 'primary');
+    const secondary = join(base, 'secondary');
+    const seedExtra = async (workDir: string, name: string, description: string) => {
+      const dir = join(workDir, 'team-skills', name);
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, 'SKILL.md'), `---\nname: ${name}\ndescription: ${description}\n---\n\n${description}\n`, 'utf8');
+    };
+    await seedExtra(primary, 'primary-team', 'from primary');
+    await seedExtra(primary, 'shared-team', 'from primary');
+    await seedExtra(secondary, 'secondary-team', 'from secondary');
+    await seedExtra(secondary, 'shared-team', 'from secondary');
+    const { host, workspace, config } = makeHost(
+      new FileSkillDiscovery(stubLog()),
+      workspaceContextStub(primary),
+      [],
+      undefined,
+      undefined,
+      workspaceDirsStub([secondary]),
+    );
+    config.setExtraSkillDirs(['team-skills']);
+
+    try {
+      const catalog = workspace.accessor.get(IProjectSkillCatalog);
+      await catalog.load();
+
+      expect(catalog.catalog.getSkill('primary-team')?.description).toBe('from primary');
+      expect(catalog.catalog.getSkill('secondary-team')?.description).toBe('from secondary');
+      expect(catalog.catalog.getSkill('shared-team')?.description).toBe('from primary');
+      expect(catalog.catalog.getSkillRoots()).toEqual([
+        await realpath(join(primary, 'team-skills')),
+        await realpath(join(secondary, 'team-skills')),
+      ]);
+      expect(catalog.catalog.getModelSkillListing()).toContain(`- \`${await realpath(join(secondary, 'team-skills'))}\``);
+    } finally {
+      host.dispose();
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+
+  it('re-resolves relative extra skill dirs when a workspace directory is added, in the same change as its project skills', async () => {
+    const base = await mkdtemp(join(tmpdir(), 'skill-catalog-extra-dir-change-'));
+    const primary = join(base, 'primary');
+    const added = join(base, 'added');
+    for (const [workDir, name] of [[primary, 'primary-team'], [added, 'added-team']] as const) {
+      const dir = join(workDir, 'team-skills', name);
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, 'SKILL.md'), `---\nname: ${name}\ndescription: ${name}\n---\n\n${name}\n`, 'utf8');
+    }
+    await seedCatalogSkill(added, 'added-project', 'added-project');
+    const dirChanges = new Emitter<void>();
+    let additionalDirs: readonly string[] = [];
+    const dirs: IProjectDirs = {
+      ...workspaceDirsStub(),
+      get sharedAdditionalDirs() {
+        return additionalDirs;
+      },
+      onDidChange: dirChanges.event,
+    };
+    const { host, workspace, config } = makeHost(
+      new FileSkillDiscovery(stubLog()),
+      workspaceContextStub(primary),
+      [],
+      undefined,
+      undefined,
+      dirs,
+    );
+    config.setExtraSkillDirs(['team-skills']);
+
+    try {
+      const catalog = workspace.accessor.get(IProjectSkillCatalog);
+      await catalog.load();
+      expect(catalog.catalog.getSkill('added-team')).toBeUndefined();
+
+      additionalDirs = [added];
+      const firstChange = new Promise<readonly string[]>((resolve) => {
+        const listener = catalog.onDidChange(() => {
+          listener.dispose();
+          resolve(catalog.catalog.listSkills().map((skill) => skill.name));
+        });
+      });
+      dirChanges.fire();
+
+      expect(await firstChange).toEqual(expect.arrayContaining(['added-project', 'added-team']));
+      expect(catalog.catalog.getSkill('added-team')?.description).toBe('added-team');
+      expect(catalog.catalog.getSkillRoots()).toContain(await realpath(join(added, 'team-skills')));
     } finally {
       host.dispose();
       await rm(base, { recursive: true, force: true });
@@ -1243,7 +1337,7 @@ describe('WorkspaceSkillCatalogService', () => {
       stubPair(IBootstrapService, stubBootstrap(homeDir)),
       stubPair(IConfigService, configStub()),
       stubPair(ILogService, stubLog()),
-      stubPair(IProviderService, stubProviderService()),
+      stubPair(IProviderCatalogService, stubProviderService()),
       stubPair(IRegionService, {
         _serviceBrand: undefined,
         current: () => ({ region: 'mainland-cn', source: 'default' }),

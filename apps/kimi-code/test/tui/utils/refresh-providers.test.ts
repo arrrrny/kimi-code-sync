@@ -838,13 +838,11 @@ describe('refreshAllProviderModels', () => {
     expect(result.changed).toEqual([
       { providerId: 'my-kimi', providerName: 'my-kimi', added: 1, removed: 1 },
     ]);
-    // The provider record is user-owned and must survive untouched.
     expect(host.current().providers['my-kimi']).toEqual({
       type: 'kimi',
       baseUrl,
       apiKey: 'sk-distributed-key',
     });
-    // Upstream-owned fields merge; the dropped model disappears; the new one appears.
     expect(host.current().models?.['my-kimi/kimi-for-coding']?.displayName).toBe('Fresh Kimi');
     expect(host.current().models?.['my-kimi/kimi-for-coding']?.capabilities).toEqual([
       'thinking',
@@ -852,7 +850,6 @@ describe('refreshAllProviderModels', () => {
     ]);
     expect(host.current().models?.['my-kimi/kimi-k2']).toBeDefined();
     expect(host.current().models?.['my-kimi/kimi-old']).toBeUndefined();
-    // Non-prefix user aliases and the default selection are preserved.
     expect(host.current().models?.['my-fav']).toEqual(userAliasModel);
     expect(host.current().defaultModel).toBe('my-kimi/kimi-for-coding');
   });
@@ -1034,8 +1031,6 @@ describe('refreshAllProviderModels', () => {
         removed: 0,
       },
     ]);
-    // The OAuth branch must not run: no token resolution, and the provider
-    // record keeps the user's API-key shape (no oauth ref, no apiKey reset).
     expect(resolveOAuthToken).not.toHaveBeenCalled();
     expect(host.current().providers[KIMI_CODE_PROVIDER_NAME]).toEqual({
       type: 'kimi',
@@ -1187,9 +1182,6 @@ describe('refreshAllProviderModels', () => {
 
     expect(result.failed).toEqual([]);
     expect(result.changed).toHaveLength(1);
-    // The v1 removeProvider RPC clears defaultProvider when it points at the
-    // refreshed provider; the setConfig patch must carry the original value
-    // back.
     expect(host.setConfig).toHaveBeenCalledWith(
       expect.objectContaining({ defaultProvider: 'my-kimi' }),
     );
@@ -1282,9 +1274,6 @@ describe('refreshCatalogProviderModels', () => {
     } as unknown as KimiConfig);
 
     const fetchMock = vi.fn<FetchMock>(async (input, init) => {
-      // `/refresh-catalog` pulls the live models.dev catalog before the
-      // provider endpoints. Nothing here matches, so the curated window must
-      // survive the refresh.
       if (fetchInputUrl(input) === MODELS_DEV_URL) {
         return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
@@ -1305,12 +1294,8 @@ describe('refreshCatalogProviderModels', () => {
     });
 
     expect(result.failed).toEqual([]);
-    // Nothing the remote declared actually differs from the curated alias
-    // (`maxContextSize` 1000000, `capabilities` already `tool_use`), so the
-    // refresh reports the provider as unchanged rather than churning the file.
     expect(result.changed).toEqual([]);
     expect(result.unchanged).toEqual(['zai-coding-plan']);
-    // The curated 1M window survives the catalog refresh.
     expect(host.current().models?.['zai-coding-plan/glm-5.3']?.maxContextSize).toBe(1000000);
   });
 
@@ -1355,10 +1340,6 @@ describe('refreshCatalogProviderModels', () => {
   });
 
   it('enriches from the live models.dev catalog instead of the 256K default', async () => {
-    // Regression: the catalog memo is seeded from the snapshot bundled at build
-    // time, so a provider/model added to models.dev after the installed release
-    // used to collapse to OPENAI_COMPATIBLE_DEFAULT_CONTEXT and lose its
-    // display name until a newer release shipped a fresh snapshot.
     const baseUrl = 'https://opencode.ai/zen/v1';
     const host = makeRefreshHost({
       providers: {
@@ -1387,7 +1368,6 @@ describe('refreshCatalogProviderModels', () => {
           { status: 200, headers: { 'Content-Type': 'application/json' } },
         );
       }
-      // opencode-go's real `/models` returns no context length.
       return new Response(
         JSON.stringify({ data: [{ id: 'deepseek-v4.1-flash' }] }),
         { status: 200, headers: { 'Content-Type': 'application/json' } },
@@ -1406,9 +1386,6 @@ describe('refreshCatalogProviderModels', () => {
     const alias = host.current().models?.['opencode-go/deepseek-v4.1-flash'];
     expect(alias?.maxContextSize).toBe(1000000);
     expect(alias?.displayName).toBe('DeepSeek V4.1 Flash');
-    // The live catalog is what supplied it — the bundled snapshot would not —
-    // and the app-level pre-warm must fetch it before the provider endpoint:
-    // drop the pre-warm call and the enrichment silently reads the snapshot.
     const requestedUrls = fetchMock.mock.calls.map(([input]) => fetchInputUrl(input));
     const catalogIndex = requestedUrls.indexOf(MODELS_DEV_URL);
     const providerIndex = requestedUrls.indexOf(`${baseUrl}/models`);
@@ -1418,11 +1395,6 @@ describe('refreshCatalogProviderModels', () => {
   });
 
   it('keeps the zstart effort ladder and reasoning key across a refresh', async () => {
-    // The reported bug, on the user's real provider: `zstart` is a local
-    // OpenAI-compatible gateway whose `/models` reports no reasoning metadata
-    // at all, and models.dev has no `zstart` entry. The curated
-    // `support_efforts` / `reasoning_key` are therefore the only source of
-    // truth, and the refresh must not replace them with a default on/off.
     const baseUrl = 'http://127.0.0.1:8790/v1';
     const host = makeRefreshHost({
       providers: { zstart: { type: 'openai', baseUrl, apiKey: 'zstart-local' } },
@@ -1454,11 +1426,9 @@ describe('refreshCatalogProviderModels', () => {
 
     const fetchMock = vi.fn<FetchMock>(async (input) => {
       if (fetchInputUrl(input) === MODELS_DEV_URL) {
-        // models.dev carries no `zstart` provider.
         return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
       expect(fetchInputUrl(input)).toBe(`${baseUrl}/models`);
-      // Exactly what the real gateway returns.
       return new Response(
         JSON.stringify({
           object: 'list',
@@ -1489,13 +1459,9 @@ describe('refreshCatalogProviderModels', () => {
       expect(model?.reasoningKey).toBe('reasoning_content');
       expect(model?.supportEfforts).toEqual(['low', 'high', 'max']);
       expect(model?.maxContextSize).toBe(1000000);
-      // The gateway echoes its context window into `max_tokens` (1000000); a
-      // curated `maxOutputSize` of 131072 must survive rather than be inflated
-      // to the context length.
       expect(model?.maxOutputSize).toBe(131072);
       expect(model?.capabilities).toEqual(expect.arrayContaining(expected));
     }
-    // The effort selection itself is untouched.
     expect(after.thinking).toEqual({ enabled: true, effort: 'max' });
   });
 });

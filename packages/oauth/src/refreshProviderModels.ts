@@ -81,23 +81,9 @@ interface ProviderView {
   readonly oauth?: ManagedKimiOAuthRef;
   readonly source?: unknown;
   readonly env?: unknown;
-  /** When true, the OpenAI-compatible catalog refresh keeps only free models. */
   readonly freeModelsOnly?: boolean;
 }
 
-/**
- * Resolves the Bearer key for `type: 'kimi'` providers: the rotation map's
- * active named key, then the inline `apiKey`, then a declared `apiKeyEnv` naming
- * an environment variable (read from `process.env` at refresh time), with
- * `env.KIMI_API_KEY` as the documented config-file fallback. A declared
- * `apiKeyEnv` whose variable is unset or empty throws — silently falling through
- * to another key source could send requests (and bill) under the wrong account.
- *
- * Credential conflicts (`apiKey`/`apiKeys`+`apiKeyEnv`, `apiKeyEnv`+`oauth`,
- * `apiKey`/`apiKeys`+`oauth`) throw here too: refresh must not honor a
- * configuration the chat path would refuse, and the open-platform rewrite must
- * never pick one side of a conflict to persist.
- */
 function resolveProviderApiKey(provider: ProviderView, providerName: string): string | undefined {
   const declared = declaredProviderCredential(provider, providerName);
   if (declared.kind === 'conflict') {
@@ -396,30 +382,6 @@ function pickDefaultModel(
   return firstModel.id;
 }
 
-/**
- * Refresh remote model metadata for the configured providers and persist any
- * changes through the host. Handles four provider kinds, in order:
- *
- *  1. Managed Kimi Code (OAuth) — `GET /models` against the runtime endpoint.
- *  2. Open platforms (moonshot-cn, moonshot-ai, …) — platform catalog fetch.
- *  2.5. Managed-endpoint API-key providers — hand-written `type: 'kimi'`
- *     providers (including a hand-written `managed:kimi-code` without an oauth
- *     ref) whose baseUrl is exactly the managed Kimi Code endpoint; refreshed
- *     via `GET /models` with the configured API key as Bearer. Only model
- *     aliases are merged; the provider record is user-owned and never
- *     rewritten.
- *  3. Custom registries (models.dev-style, keyed by `provider.source`).
- *  3.5. OpenAI-compatible providers (`type: 'openai'` / `'openai_responses'`)
- *     with a `baseUrl` and API key but no custom-registry `source`; refreshed
- *     from the provider's own `{baseUrl}/models` endpoint. This is what brings
- *     plain OpenAI-compatible gateways (e.g. opencode, kilo) into the refresh
- *     loop instead of silently skipping them.
- *
- * Each branch diffs old vs new and only writes when something actually changed
- * (`removeProvider` then `setConfig`). Failures are collected per-provider and
- * never abort the whole refresh. Pass `providerId` to scope the refresh to a
- * single provider; pass `scope: 'oauth'` to refresh only the managed provider.
- */
 export async function refreshProviderModels(
   host: RefreshProviderHost,
   options: RefreshProviderOptions = {},
@@ -848,16 +810,6 @@ export async function refreshProviderModels(
   }
 
   return { changed, unchanged, failed, retiredDefault };
-  // ---------------------------------------------------------------------------
-  // 3.5. OpenAI-compatible providers (type: 'openai' / 'openai_responses')
-  // ---------------------------------------------------------------------------
-  // Intentionally removed from the automatic startup refresh. OpenAI-compatible
-  // gateways (e.g. opencode, kilo, z.ai) expose an inconsistent `/models`
-  // schema — many omit context length or display names — so an unattended
-  // refresh would clobber curated `maxContextSize` values (e.g. a 1M window
-  // imported from models.dev). Use `/refresh-catalog` (refreshProviderCatalog)
-  // instead: it is on-demand, preserves context like OpenRouter, and enriches
-  // names/capabilities from the models.dev catalog.
 }
 
 export interface RefreshCatalogResult {
@@ -866,22 +818,6 @@ export interface RefreshCatalogResult {
   readonly failed: ReadonlyArray<{ provider: string; reason: string }>;
 }
 
-/**
- * On-demand catalog refresh for OpenAI-compatible providers (type 'openai' /
- * 'openai_responses'), triggered by the `/refresh-catalog` slash command.
- *
- * Unlike the startup refresh, this path:
- *  - fetches each provider's `{baseUrl}/models` endpoint and **preserves the
- *    provider-reported context length** (OpenRouter-style) instead of
- *    substituting a default, so a curated `maxContextSize` is never clobbered;
- *  - **enriches** every model from the models.dev catalog — display name and
- *    capabilities — so names render correctly; the provider's own display name
- *    (when present) takes priority over the catalog;
- *  - adds newly-discovered models and drops ones the endpoint no longer lists,
- *    while keeping any hand-written alias extras.
- *
- * Pass `providerId` to scope the refresh to a single provider.
- */
 export async function refreshProviderCatalog(
   host: RefreshProviderHost,
   options: { providerId?: string; userAgent?: string } = {},
@@ -912,16 +848,10 @@ export async function refreshProviderCatalog(
       });
       if (models.length === 0) continue;
 
-      // Per-provider opt-in: when `free_models_only` is set, keep only models
-      // whose id contains "free" (case-insensitive — matches `:free` on
-      // OpenRouter/kilo and `-free` on opencode). The filter runs before
-      // enrichment so dropped (paid) models are never looked up or written.
       const filteredModels = provider.freeModelsOnly
         ? models.filter((m) => m.id.toLowerCase().includes('free'))
         : models;
       if (filteredModels.length === 0) {
-        // No free models returned: nothing to add. Skip so an existing catalog
-        // is left untouched (toggle the flag off to restore paid models).
         continue;
       }
 

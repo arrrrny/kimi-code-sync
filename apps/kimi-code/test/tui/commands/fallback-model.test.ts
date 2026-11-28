@@ -1,8 +1,3 @@
-/**
- * Scenario: /fallback-model and /fallback-model-secondary command behavior in the TUI.
- * Mirrors the squeeze-model test: picker filtering, persistence of `[fallback_model]`
- * `model` and `secondary_model`, plus enabling the `fallback-model` experiment flag.
- */
 import type { ModelAlias } from '@moonshot-ai/kimi-code-sdk';
 import { describe, expect, it, vi } from 'vitest';
 

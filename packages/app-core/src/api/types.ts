@@ -1,5 +1,6 @@
 
 import type { ToolMedia } from '../client/types';
+import type { AppNoticeCopyLink, AppNoticeDetail, AppNoticePosition } from '../contracts';
 import type { ConversationFrame, ConversationTurnsPage } from '../conversation/types';
 import type { RcDeviceList } from '../lib/rcDevicesApi';
 
@@ -20,19 +21,6 @@ export interface PageRequest {
 }
 
 export type AppNoticeSeverity = 'info' | 'success' | 'warning' | 'error';
-
-export type AppNoticePosition = 'top-center' | 'top-right' | 'bottom-center' | 'bottom-right';
-
-export interface AppNoticeDetail {
-  label: string;
-  value: string;
-}
-
-export interface AppNoticeCopyLink {
-  label: string;
-  copiedLabel: string;
-  url: string;
-}
 
 export interface AppNotice {
   severity: AppNoticeSeverity;
@@ -471,10 +459,6 @@ export interface AppAgentState {
   planMode: boolean;
   swarmMode: boolean;
   towerMode: boolean;
-  planModeAvailable?: boolean;
-  swarmModeAvailable?: boolean;
-  towerModeAvailable?: boolean;
-  goalModeAvailable?: boolean;
 }
 
 export interface AppAgentUsage {
@@ -758,11 +742,6 @@ export interface AppConfigProvider {
   hasApiKey: boolean;
 }
 
-export interface AppToolsConfig {
-  enabled?: string[];
-  disabled?: string[];
-}
-
 export interface AppHostDefinition {
   host: string;
   identityFile?: string;
@@ -827,7 +806,6 @@ export interface AppConfig {
     force?: boolean;
     defaultEffort?: string;
   } | null;
-  tools?: AppToolsConfig;
   models?: Record<string, unknown>;
   thinking?: { enabled?: boolean; effort?: string };
   planMode?: boolean;
@@ -846,11 +824,6 @@ export interface AppConfig {
   telemetry?: boolean;
   disableFeedbackSurvey?: boolean;
   raw?: Record<string, unknown>;
-}
-
-export interface AppToolCatalogEntry {
-  name: string;
-  source: 'builtin' | 'skill' | 'mcp';
 }
 
 export interface EditableTextFile {
@@ -1148,7 +1121,6 @@ export interface KimiWebApi {
   respondApproval(sessionId: string, approvalId: string, response: ApprovalResponse): Promise<InteractionRespondResult>;
   respondQuestion(sessionId: string, questionId: string, response: QuestionResponse): Promise<InteractionRespondResult>;
   dismissQuestion(sessionId: string, questionId: string): Promise<InteractionRespondResult>;
-  listToolCatalog(): Promise<AppToolCatalogEntry[]>;
   listSkills(sessionId: string, options?: ReadRequestOptions): Promise<AppSkill[]>;
   listSkillsForWorkspace(workspaceId: string, options?: ReadRequestOptions): Promise<AppSkill[]>;
   activateSkill(sessionId: string, skillName: string, args?: string, attachments?: AppSkillAttachment[], options?: AppSkillActivationOptions): Promise<{ activated: true; skillName: string }>;

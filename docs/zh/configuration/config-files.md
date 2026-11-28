@@ -411,14 +411,15 @@ max_output_size = 8192
 | 字段 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `startup_timeout_ms` | `integer` | `30000`（30 秒） | 所有 MCP server 的全局默认连接（启动 + 工具发现）超时（毫秒）；`mcp.json` 的 `startupTimeoutMs` 优先于本节 |
+| `startup_wait_ms` | `integer` | `2000`（2 秒） | 会话初始化时等待首轮 MCP 工具发现的时间上限（毫秒），到点即带着已就绪的工具开始对话，未就绪的 server 继续在后台连接且不会被终止；`0` 表示不等待，取值范围为 `0` 到 `2147483647` |
 | `tool_timeout_ms` | `integer` | `60000`（60 秒） | 所有 MCP server 的全局默认单次工具调用超时（毫秒）；`mcp.json` 的 `toolTimeoutMs` 优先于本节 |
-| `default_deferred` | `boolean` | `false` | [按需加载工具](../customization/mcp.md#按需加载工具)的全局默认：设为 `true` 时所有 MCP server 的工具按需加载，除非 server 自行排除；`mcp.json` 中单个 server 的 `deferred` 字段优先于本节 |
-| `reconnect_initial_delay_ms` | `integer` | `5000`（5 秒） | workspace 级 MCP server 首次连接失败或意外断连后，首次自动重连前的等待时间（毫秒）；每次失败后再翻倍 |
-| `reconnect_max_delay_ms` | `integer` | `300000`（5 分钟） | workspace 级 MCP server 自动重连退避等待的上限（毫秒） |
+| `default_deferred` | `boolean` | `true` | [按需加载工具](../customization/mcp.md#按需加载工具)的全局默认：默认所有 MCP server 的工具按需加载，除非 server 在 `mcp.json` 中显式设置 `deferred: false`；server 字段始终优先于本节 |
+| `reconnect_initial_delay_ms` | `integer` | `5000`（5 秒） | MCP server 进入自动重连时，首次重试前的等待时间（毫秒）；每次失败后再翻倍 |
+| `reconnect_max_delay_ms` | `integer` | `300000`（5 分钟） | MCP server 自动重连退避等待的上限（毫秒） |
 
-`startup_timeout_ms` 和 `tool_timeout_ms` 可分别被环境变量 `KIMI_MCP_STARTUP_TIMEOUT_MS` 和 `KIMI_MCP_TOOL_TIMEOUT_MS` 覆盖，优先级高于配置文件。MCP server 的完整配置方式见 [MCP](../customization/mcp.md)。
+`startup_timeout_ms`、`startup_wait_ms` 和 `tool_timeout_ms` 可分别被环境变量 `KIMI_MCP_STARTUP_TIMEOUT_MS`、`KIMI_MCP_STARTUP_WAIT_MS` 和 `KIMI_MCP_TOOL_TIMEOUT_MS` 覆盖，优先级高于配置文件。MCP server 的完整配置方式见 [MCP](../customization/mcp.md)。
 
-`reconnect_initial_delay_ms` 和 `reconnect_max_delay_ms` 同样可分别被环境变量 `KIMI_MCP_RECONNECT_INITIAL_DELAY_MS` 和 `KIMI_MCP_RECONNECT_MAX_DELAY_MS` 覆盖。自动重连只作用于 workspace 级 MCP server，遇到无法自行恢复的失败（命令不存在、配置非法、server 拒绝静态凭据）会停止重试；详见 [MCP](../customization/mcp.md)。
+`reconnect_initial_delay_ms` 和 `reconnect_max_delay_ms` 同样可分别被环境变量 `KIMI_MCP_RECONNECT_INITIAL_DELAY_MS` 和 `KIMI_MCP_RECONNECT_MAX_DELAY_MS` 覆盖。自动重连作用于 HTTP/SSE server 启动失败以及已建立连接后的意外断连；stdio server 首次启动失败会保持 `failed`，需手动重连。详见 [MCP](../customization/mcp.md)。
 
 ## `identity`
 
@@ -686,6 +687,7 @@ defaultCwd = "/workspace"
 | `theme` | `string` | `auto` | 配色主题：`auto`、`dark`、`light` 或[自定义主题](../customization/themes.md)名 |
 | `tui_mode` | `string` | `regular` | 界面布局：`regular` 渲染进终端滚动缓冲区；`fullscreen`（实验性）部分组件支持鼠标交互，交互更顺手 |
 | `copy_on_select` | `boolean` | `true` | 仅全屏模式：选中文本即复制；也可以按 `Ctrl-C` 复制 |
+| `wheel_scroll_lines` | `"auto" \| integer` | `"auto"` | 仅全屏模式：每次鼠标滚轮事件滚动的行数（`"auto"` 或正整数）；`"auto"` 会在快速滚动时自动提速 |
 | `render_latex` | `boolean` | `true` | 将 Markdown 中的 LaTeX 公式渲染为 Unicode 文本；`false` 保留原始源码 |
 | `disable_paste_burst` | `boolean` | `false` | 禁用非 bracketed paste 的粘贴突发兜底；默认开启，避免快速多行粘贴被逐行提交 |
 | `cache_expiry_hint` | `boolean` | `true` | resume 或长时间空闲后发消息时，若上下文缓存可能过期则提醒，可先压缩或新建会话（仅 v2 引擎） |
@@ -712,6 +714,7 @@ model、cwd、git 分支、permission 模式、plan 模式、上下文用量、s
 theme = "auto" # "auto" | "dark" | "light" | 自定义主题名
 # tui_mode = "regular" # "regular" | "fullscreen"（"fullscreen" 为实验性）
 copy_on_select = true # 仅全屏模式：false 表示按 Ctrl-C 才复制
+# wheel_scroll_lines = "auto" # 仅全屏模式："auto" 或每次滚轮事件滚动的行数（如 1、2、3、5、10）
 render_latex = true # false 表示消息中的 LaTeX 公式保留原始源码
 disable_paste_burst = false # true 表示禁用非 bracketed paste 的粘贴突发兜底
 cache_expiry_hint = true # false 表示关闭 resume / 空闲提交时的"缓存已过期"提醒弹窗

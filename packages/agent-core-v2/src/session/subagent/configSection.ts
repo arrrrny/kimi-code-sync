@@ -12,14 +12,15 @@ import {
 import { registerConfigSection } from '#/app/config/configSectionContributions';
 import { THINKING_SECTION } from '#/app/kosongConfig/configSection';
 import type { IAgentProfileService, SessionModelOverrideKind } from '#/agent/profile/profile';
-import type { IModelCatalog, Model } from '#/llm-adapter/model/catalog';
+import type { Model } from '#/provider-catalog/model/catalog';
 import {
   declaredDefaultEffortForModel,
   modelSupportsThinking,
   modelSupportsThinkingEffort,
   normalizeRequestedThinkingEffort,
 } from '@moonshot-ai/core/llm/thinking';
-import type { ThinkingConfig } from '#/llm-adapter/model/thinking';
+import type { ThinkingConfig } from '#/provider-catalog/model/thinking';
+import { IProviderCatalogService } from '#/provider-catalog/providerCatalogService';
 
 export const SUBAGENT_SECTION = 'subagent';
 export const SECONDARY_MODEL_SECTION = 'secondaryModel';
@@ -136,7 +137,7 @@ export const SECONDARY_MODEL_PRIMARY_MODEL_RESERVED_MESSAGE = `[secondary_model.
 
 export function assertValidSubagentModelPool(
   pool: SubagentModelPool,
-  modelCatalog: IModelCatalog,
+  modelCatalog: IProviderCatalogService,
 ): void {
   if (Object.hasOwn(pool.models, PRIMARY_SUBAGENT_MODEL_CHOICE)) {
     throw new Error2(ErrorCodes.CONFIG_INVALID, SECONDARY_MODEL_PRIMARY_MODEL_RESERVED_MESSAGE, {
@@ -175,7 +176,7 @@ export function assertValidSubagentModelPool(
 
 export function assertValidSubagentModelConfig(
   config: IConfigService,
-  modelCatalog: IModelCatalog,
+  modelCatalog: IProviderCatalogService,
 ): void {
   const section = config.get<SecondaryModelConfig | undefined>(SECONDARY_MODEL_SECTION);
   const pool = resolveSubagentModelPool(config);
@@ -186,7 +187,7 @@ export function assertValidSubagentModelConfig(
 function assertValidSubagentDefaultEffort(
   section: SecondaryModelConfig | undefined,
   pool: SubagentModelPool | undefined,
-  modelCatalog: IModelCatalog,
+  modelCatalog: IProviderCatalogService,
 ): void {
   const effort =
     section?.defaultEffort === undefined

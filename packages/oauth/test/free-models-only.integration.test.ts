@@ -3,11 +3,6 @@ import { refreshProviderCatalog } from '../src/refreshProviderModels';
 import type { ManagedKimiConfigShape } from '../src/managed-kimi-code';
 import { fetchOpenAIProviderModels } from '../src/openai-compatible';
 
-// ---------------------------------------------------------------------------
-// Integration test: verify free_models_only filter with REAL API endpoints.
-// These endpoints do NOT require OAuth — just a valid API key in the header.
-// ---------------------------------------------------------------------------
-
 const OPENROUTER_BASE = 'https://openrouter.ai/api/v1';
 const OPENROUTER_KEY = process.env['OPENROUTER_API_KEY'] ?? '';
 const OPENCODE_BASE = 'https://opencode.ai/zen/v1';

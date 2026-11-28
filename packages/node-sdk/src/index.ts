@@ -133,8 +133,6 @@ export type {
   InspectWorktreeRemovalInput,
   KimiWorktree,
   RemoveWorktreeInput,
-  RunSetupScriptInput,
-  RunSetupScriptOptions,
   WorkLocation,
   WorktreeCreateEvent,
   WorktreeCreateStep,

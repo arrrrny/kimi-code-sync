@@ -28,7 +28,7 @@ apps/kimi-code/test/tui/commands/fallback-model.test.ts                :: fallba
 # --- squeeze-model + secondary cascade (PR rename) ---
 apps/kimi-code/src/tui/commands/registry.ts                             :: squeeze-model-secondary
 apps/kimi-code/src/tui/commands/config.ts                               :: Squeeze model
-apps/kimi-code/test/tui/commands/squeeze-model.test.ts                 :: squeeze-model
+apps/kimi-code/test/tui/commands/squeeze-model.test.ts                 :: handleSqueezeModelSecondaryCommand
 # Pickers must exclude the synthesized `__secondary__` derived entry — the
 # sentinel-exclusion filter was silently dropped by a clean merge once (sync
 # 2026-11-01) even though the file's other markers still resolved.
@@ -42,7 +42,7 @@ apps/kimi-code/test/tui/commands/registry.test.ts                       :: fork-
 apps/kimi-code/test/tui/kimi-tui-message-flow.test.ts                   :: title: 'Fork: Source title',
 
 # --- model favorites (PR #5, spec 004) ---
-apps/kimi-code/test/tui/commands/model-favorites.test.ts                :: model-favorites
+apps/kimi-code/test/tui/commands/model-favorites.test.ts                :: rotateToNextFavoriteModel
 
 # --- compaction-model display (compactionModel overlay) ---
 packages/agent-core-v2/src/app/kosongConfig/compactionModelOverlay.ts   :: compactionModel
@@ -90,7 +90,7 @@ packages/core/src/llm/request.ts                                      :: proxyUr
 packages/core/test/llm/protocol/x-opencode-session.test.ts            :: x-opencode-session
 
 # --- fallback cascade terminal-400 extension (bug fallback-model-skipped) ---
-packages/agent-core-v2/src/llm-adapter/contract/errors.ts           :: isTerminalProviderApiError
+packages/agent-core-v2/src/provider-catalog/errors.ts                     :: isTerminalProviderApiError
 
 # --- /refresh-catalog live models.dev enrichment (OpenAI-compatible providers) ---
 packages/oauth/src/modelsDevCatalog.ts                              :: lookupModelsDevModel
@@ -109,7 +109,7 @@ packages/agent-core-v2/src/app/subscription/subscription.ts          :: SUBSCRIP
 # TOML serializer (`rotate_keys` and the per-key `proxy_url`), the recovery
 # hook that advances to the next key, the keyed credential provider wiring,
 # and the `/provider` TUI entry points.
-packages/agent-core-v2/src/llm-adapter/provider/apiKeyRotation.ts      :: createKeyedCredentialProvider
+packages/agent-core-v2/src/provider-catalog/provider/apiKeyRotation.ts    :: createKeyedCredentialProvider
 packages/agent-core-v2/src/human/credentials/keyRotationRecovery.ts    :: API_KEY_ROTATION_STRATEGY
 packages/core/src/llm/request.ts                                      :: LlmKeyRotationController
 packages/core/src/llm/policy/recovery.ts                              :: readonly detail?: string
@@ -117,9 +117,9 @@ packages/agent-core-v2/src/agent/loop/turnProjection.ts                :: keyRot
 packages/agent-core-v2/src/agent/loop/turnProjection.ts                :: api-key-rotation
 packages/core/src/llm/endpoint.ts                                     :: credential?.proxyUrl
 packages/agent-core-v2/src/app/kosongConfig/configSection.ts           :: apiKeyEntryFromToml
-packages/agent-core-v2/src/llm-adapter/provider/provider.ts            :: rotateKeys
-packages/agent-core-v2/src/llm-adapter/provider/provider-service.ts    :: setActiveApiKey
-packages/agent-core-v2/src/llm-adapter/model/catalog-service.ts        :: createKeyedCredentialProvider
+packages/agent-core-v2/src/provider-catalog/provider/apiKeyRotation.ts    :: rotateKeys
+packages/agent-core-v2/src/provider-catalog/providerCatalogService.ts       :: setActiveApiKey
+packages/agent-core-v2/src/provider-catalog/providerCatalogService.ts       :: createKeyedCredentialProvider
 packages/node-sdk/src/config/schema.ts                                 :: rotateKeys
 packages/node-sdk/src/config/toml.ts                                   :: transformApiKeys
 packages/klient/src/contract/global/providers.ts                       :: rotateKeys
@@ -127,7 +127,7 @@ apps/kimi-code/src/tui/commands/provider.ts                            :: handle
 apps/kimi-code/src/tui/commands/prompts.ts                             :: promptKeyProxyUrl
 apps/kimi-code/src/tui/components/dialogs/provider-manager.ts          :: onToggleRotation
 apps/kimi-code/src/tui/components/dialogs/api-key-input-dialog.ts      :: allowEmpty
-packages/agent-core-v2/test/llm-adapter/provider/apiKeyRotation.test.ts       :: createKeyedCredentialProvider
+packages/agent-core-v2/test/provider-catalog/provider/apiKeyRotation.test.ts       :: createKeyedCredentialProvider
 # --- auth-rejection key rotation (feature 833) ---
 # Widening the rotation trigger to a rejected credential (401) is fork-owned behavior on a
 # file upstream also edits; the auth-rejection predicate and its acceptance tests are the
@@ -166,7 +166,7 @@ apps/kimi-code/src/tui/kimi-tui.ts                 :: rotateToNextFavoriteModel
 # the engine keeps clearing the observed context-overflow window when the
 # threshold changes (fork fix a73a5c1e6). The tests below pin that fork-only
 # behavior; upstream keeps the commands 'idle-only' and has neither test.
-apps/kimi-code/src/tui/commands/registry.ts         :: a mid-turn change can move the compaction trigger point
+apps/kimi-code/src/tui/commands/registry.ts         :: Show or set the per-session auto-compaction token budget
 apps/kimi-code/test/tui/commands/resolve.test.ts    :: keeps the compaction-threshold commands usable while streaming and compacting
 apps/kimi-code/test/tui/kimi-tui-message-flow.test.ts :: applies /compact-threshold-k while a turn is streaming
 packages/agent-core-v2/test/agent/fullCompaction/fullCompaction.test.ts :: drops the observed provider context window when the compaction threshold changes

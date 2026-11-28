@@ -1,17 +1,32 @@
 import { effectiveModelAlias, type ModelAlias, type ThinkingEffort } from '@moonshot-ai/kimi-code-sdk';
 import {
-  Container,
   Key,
   matchesKey,
   truncateToWidth,
   visibleWidth,
   wrapTextWithAnsi,
   type Focusable,
+  type TuiMouseEvent,
+  type TuiMouseEventResult,
 } from '@moonshot-ai/pi-tui';
 
 import { DEFAULT_OAUTH_PROVIDER_NAME, PRODUCT_NAME } from '#/constant/app';
+import {
+  DockSection,
+  finishDialogLines,
+  type DockLayout,
+  type DockPart,
+} from '#/tui/components/chrome/dock-section';
 import { CURRENT_MARK, FAVORITE_MARK, SELECT_POINTER } from '#/tui/constant/symbols';
 import { currentTheme } from '#/tui/theme';
+import {
+  focusOnUnfocusedMouse,
+  handleSearchableListMouse,
+  handleSearchableListWheel,
+  handleSegmentedMouse,
+  type MouseColRegion,
+  type MouseRowRegion,
+} from '#/tui/utils/mouse-hit-test';
 import { SearchableList } from '#/tui/utils/searchable-list';
 import { printableChar } from '#/tui/utils/printable-key';
 
@@ -63,22 +78,16 @@ export interface ModelSelectorOptions {
   readonly title?: string;
   readonly searchable?: boolean;
   readonly pageSize?: number;
+  readonly layout?: DockLayout;
+  readonly minBodyRows?: number;
   readonly providerSwitchHint?: boolean;
   readonly warning?: string;
   readonly thinkingControl?: boolean;
   readonly effortDescriptions?: Readonly<Record<string, string>>;
-  /** Aliases currently marked as favorites; those rows render ★ after the
-   * model name. Absent means favorites are not surfaced in this picker. */
   readonly favoriteAliases?: ReadonlySet<string>;
-  /** When set, Shift+A adds the highlighted model to Favorites and Shift+R
-   * removes it ( forwarded to the host, which persists it and refreshes the UI). */
   readonly onToggleFavorite?: (alias: string) => void;
-  /** Replaces the 'No matches' line when the list is empty (e.g. the
-   * Favorites tab's how-to hint). */
   readonly emptyMessage?: string;
   readonly onSelect: (selection: ModelSelection) => void;
-  /** When provided, Shift+S invokes this instead of onSelect — used to apply
-   * the choice to the current session only, without persisting it as default. */
   readonly onSessionOnlySelect?: (selection: ModelSelection) => void;
   readonly onCancel: () => void;
 }
@@ -133,25 +142,43 @@ function commitEffort(choice: ModelChoice, draft: ThinkingEffort): ThinkingEffor
   return draft;
 }
 
-export class ModelSelectorComponent extends Container implements Focusable {
+export class ModelSelectorComponent extends DockSection implements Focusable {
   focused = false;
   private readonly opts: ModelSelectorOptions;
   private readonly list: SearchableList<ModelChoice>;
   private readonly thinkingOverrides = new Map<string, string>();
+  private readonly minBodyRows: number;
+  private readonly shownAt = Date.now();
+  private choiceRegions: readonly MouseRowRegion[] = [];
+  private thinkingRow = -1;
+  private thinkingRegions: readonly MouseColRegion[] = [];
 
   constructor(opts: ModelSelectorOptions) {
-    super();
+    super(opts.layout);
     this.opts = opts;
     const choices = createModelChoices(opts.models);
+    this.minBodyRows =
+      opts.minBodyRows ??
+      (opts.layout !== undefined ? Math.min(opts.layout.maxBodyRows, choices.length) : 0);
     const selectedValue = opts.selectedValue ?? opts.currentValue;
     const selectedIdx = choices.findIndex((choice) => choice.alias === selectedValue);
+    const initialIndex = Math.max(selectedIdx, 0);
     this.list = new SearchableList({
       items: choices,
       toSearchText: (choice) => choice.label,
       pageSize: opts.pageSize,
-      initialIndex: Math.max(selectedIdx, 0),
+      initialIndex,
       searchable: opts.searchable === true,
     });
+    this.ensureBodyVisible(initialIndex, initialIndex + 1);
+  }
+
+  selectedRowIndex(): number {
+    return this.list.view().selectedIndex;
+  }
+
+  hasSearchQuery(): boolean {
+    return this.opts.searchable === true && this.list.view().query.length > 0;
   }
 
   private draftFor(choice: ModelChoice): string {
@@ -175,20 +202,20 @@ export class ModelSelectorComponent extends Container implements Focusable {
 
   handleInput(data: string): void {
     if (matchesKey(data, Key.escape)) {
-      if (this.list.clearQuery()) return;
+      if (this.list.clearQuery()) {
+        const idx = this.selectedRowIndex();
+        this.ensureBodyVisible(idx, idx + 1);
+        return;
+      }
       this.opts.onCancel();
       return;
     }
 
-    // Single-key favorites + session-only, intercepted before the search
-    // filter would swallow the character. Only the Shift variants (uppercase
-    // letters) are shortcuts, so lowercase letters still type-filter the list.
     const ch = printableChar(data);
     if ((ch === 'A' || ch === 'R') && this.opts.onToggleFavorite !== undefined) {
       const selected = this.selectedChoice();
       if (selected !== undefined) {
         const isFavorite = this.opts.favoriteAliases?.has(selected.alias) ?? false;
-        // 'A' adds only when not already a favorite; 'R' removes only when it is.
         if ((ch === 'A') !== isFavorite) this.opts.onToggleFavorite(selected.alias);
       }
       return;
@@ -203,8 +230,9 @@ export class ModelSelectorComponent extends Container implements Focusable {
       return;
     }
 
-    // ↑/↓, PgUp/PgDn, and — when searchable — typing + Backspace.
     if (this.list.handleKey(data)) {
+      const idx = this.selectedRowIndex();
+      this.ensureBodyVisible(idx, idx + 1);
       return;
     }
 
@@ -236,18 +264,99 @@ export class ModelSelectorComponent extends Container implements Focusable {
     if (matchesKey(data, Key.enter)) {
       const selected = this.selectedChoice();
       if (selected === undefined) return;
-      this.opts.onSelect({
-        alias: selected.alias,
-        thinking: commitEffort(selected, this.effectiveEffort(selected)),
-      });
+      this.commitChoice(selected, false);
       return;
+    }
+
+    if (matchesKey(data, Key.alt('s')) && this.opts.onSessionOnlySelect !== undefined) {
+      const selected = this.selectedChoice();
+      if (selected === undefined) return;
+      this.commitChoice(selected, true);
     }
   }
 
-  override render(width: number): string[] {
+  protected override handlePartMouse(
+    part: DockPart,
+    event: TuiMouseEvent,
+  ): TuiMouseEventResult | undefined {
+    if (!this.focused) return focusOnUnfocusedMouse(event);
+    if (this.layout === undefined && event.type === 'wheel') {
+      return this.handleWheelPaging(event);
+    }
+    if (part === 'body') {
+      return this.handleBodyMouse(event, this.focused, this.shownAt);
+    }
+    if (part === 'foot') {
+      return this.handleFootMouse(event, this.focused, this.shownAt);
+    }
+    return undefined;
+  }
+
+  handleWheelPaging(event: TuiMouseEvent): TuiMouseEventResult {
+    return handleSearchableListWheel(this.list, event);
+  }
+
+  handleBodyMouse(
+    event: TuiMouseEvent,
+    focused: boolean,
+    shownAt: number,
+  ): TuiMouseEventResult | undefined {
+    return handleSearchableListMouse(this.list, {
+      event,
+      focused,
+      shownAt,
+      regions: this.choiceRegions,
+      activate: (choice, clickEvent) => {
+        this.commitChoice(choice, clickEvent.alt);
+      },
+    });
+  }
+
+  handleFootMouse(
+    event: TuiMouseEvent,
+    focused: boolean,
+    shownAt: number,
+  ): TuiMouseEventResult | undefined {
+    if (this.opts.thinkingControl === false || this.thinkingRegions.length === 0) {
+      return undefined;
+    }
+    const selected = this.selectedChoice();
+    if (selected === undefined) return undefined;
+    const segments = segmentsFor(selected.model);
+    if (segments.length <= 1) return undefined;
+
+    return handleSegmentedMouse({
+      event,
+      focused,
+      shownAt,
+      row: this.thinkingRow,
+      regions: this.thinkingRegions,
+      select: (index) => {
+        const target = segments[index];
+        if (target === undefined) return false;
+        const previous = this.effectiveEffort(selected);
+        if (previous === target) return false;
+        this.thinkingOverrides.set(selected.alias, target);
+        return true;
+      },
+    });
+  }
+
+  protected renderPart(part: DockPart, width: number): string[] {
+    const unpaged = this.layout !== undefined;
+    switch (part) {
+      case 'head':
+        return this.renderHeadLines(width);
+      case 'body':
+        return this.renderBodyLines(width, unpaged);
+      case 'foot':
+        return this.renderFootLines(width, unpaged);
+    }
+  }
+
+  renderHeadLines(width: number, extraBelowHeader?: readonly string[]): string[] {
     const searchable = this.opts.searchable === true;
     const view = this.list.view();
-    const totalCount = Object.keys(this.opts.models).length;
 
     const titleSuffix =
       searchable && view.query.length === 0
@@ -274,57 +383,89 @@ export class ModelSelectorComponent extends Container implements Focusable {
       }
     }
     lines.push('');
-
+    if (extraBelowHeader !== undefined) {
+      lines.push(...extraBelowHeader);
+    }
     if (searchable && view.query.length > 0) {
       lines.push(currentTheme.fg('primary', ' Search: ') + currentTheme.fg('text', view.query));
     }
+    return finishDialogLines(lines, width, this.focused);
+  }
 
+  renderBodyLines(width: number, unpaged: boolean): string[] {
+    const view = this.list.view();
     if (view.items.length === 0) {
-      lines.push(currentTheme.fg('textMuted', `   ${this.opts.emptyMessage ?? 'No matches'}`));
-    } else {
-      // Column width for model names so the provider column lines up. Capped so
-      // the provider + "← current" marker still fit on normal terminal widths.
-      // The favorite ★ (plus one space) is counted into the column so starred
-      // rows do not push their provider out of alignment.
-      const nameCap = Math.max(8, Math.floor(width * 0.5));
-      const favoriteAliases = this.opts.favoriteAliases;
-      const starWidth = (alias: string): number =>
-        favoriteAliases !== undefined && favoriteAliases.has(alias) ? 2 : 0;
-      let nameWidth = 0;
-      for (let i = view.page.start; i < view.page.end; i++) {
-        const choice = view.items[i];
-        if (choice !== undefined) nameWidth = Math.max(nameWidth, visibleWidth(choice.name) + starWidth(choice.alias));
+      this.choiceRegions = [];
+      const emptyLines = [
+        currentTheme.fg('textMuted', `   ${this.opts.emptyMessage ?? 'No matches'}`),
+      ];
+      if (unpaged) {
+        while (emptyLines.length < this.minBodyRows) emptyLines.push('');
       }
-      nameWidth = Math.min(nameWidth, nameCap);
+      return finishDialogLines(emptyLines, width, this.focused);
+    }
 
-      for (let i = view.page.start; i < view.page.end; i++) {
-        const choice = view.items[i];
-        if (choice === undefined) continue;
-        const isSelected = i === view.selectedIndex;
-        const isCurrent = choice.alias === this.opts.currentValue;
-        const isFavorite = favoriteAliases !== undefined && favoriteAliases.has(choice.alias);
-        const pointer = isSelected ? SELECT_POINTER : ' ';
-        const truncatedName = truncateToWidth(choice.name, nameWidth - starWidth(choice.alias), '…');
-        const star = isFavorite ? ' ' + currentTheme.fg('warning', FAVORITE_MARK) : '';
-        const namePad = ' '.repeat(
-          Math.max(0, nameWidth - visibleWidth(truncatedName) - starWidth(choice.alias)),
-        );
-        let line = currentTheme.fg(isSelected ? 'primary' : 'textDim', `  ${pointer} `);
-        line += (isSelected ? currentTheme.boldFg('primary', truncatedName) : currentTheme.fg('text', truncatedName)) + star + namePad;
-        line += '  ' + currentTheme.fg('textMuted', choice.provider);
-        if (isCurrent) {
-          line += ' ' + currentTheme.fg('success', CURRENT_MARK);
-        }
-        lines.push(line);
+    const start = unpaged ? 0 : view.page.start;
+    const end = unpaged ? view.items.length : view.page.end;
+
+    const nameCap = Math.max(8, Math.floor(width * 0.5));
+    const favoriteAliases = this.opts.favoriteAliases;
+    const starWidth = (alias: string): number =>
+      favoriteAliases !== undefined && favoriteAliases.has(alias) ? 2 : 0;
+    let nameWidth = 0;
+    for (let i = start; i < end; i++) {
+      const choice = view.items[i];
+      if (choice !== undefined) {
+        nameWidth = Math.max(nameWidth, visibleWidth(choice.name) + starWidth(choice.alias));
       }
     }
+    nameWidth = Math.min(nameWidth, nameCap);
+
+    const lines: string[] = [];
+    const regions: MouseRowRegion[] = [];
+    for (let i = start; i < end; i++) {
+      const choice = view.items[i];
+      if (choice === undefined) continue;
+      const row = lines.length;
+      const isSelected = i === view.selectedIndex;
+      const isCurrent = choice.alias === this.opts.currentValue;
+      const isFavorite = favoriteAliases !== undefined && favoriteAliases.has(choice.alias);
+      const pointer = isSelected ? SELECT_POINTER : ' ';
+      const truncatedName = truncateToWidth(choice.name, nameWidth - starWidth(choice.alias), '…');
+      const star = isFavorite ? ' ' + currentTheme.fg('warning', FAVORITE_MARK) : '';
+      const namePad = ' '.repeat(
+        Math.max(0, nameWidth - visibleWidth(truncatedName) - starWidth(choice.alias)),
+      );
+      let line = currentTheme.fg(isSelected ? 'primary' : 'textDim', `  ${pointer} `);
+      line +=
+        (isSelected
+          ? currentTheme.boldFg('primary', truncatedName)
+          : currentTheme.fg('text', truncatedName)) + star + namePad;
+      line += '  ' + currentTheme.fg('textMuted', choice.provider);
+      if (isCurrent) {
+        line += ' ' + currentTheme.fg('success', CURRENT_MARK);
+      }
+      lines.push(line);
+      regions.push({ start: row, end: lines.length, index: i });
+    }
+    this.choiceRegions = regions;
+    if (unpaged) {
+      while (lines.length < this.minBodyRows) lines.push('');
+    }
+    return finishDialogLines(lines, width, this.focused);
+  }
+
+  renderFootLines(width: number, unpaged: boolean): string[] {
+    const view = this.list.view();
+    const totalCount = Object.keys(this.opts.models).length;
+    const lines: string[] = [];
 
     if (view.query.length > 0) {
       lines.push('');
       lines.push(
         currentTheme.fg('textMuted', ` ${String(view.items.length)} / ${String(totalCount)}`),
       );
-    } else {
+    } else if (!unpaged) {
       const below = view.items.length - view.page.end;
       if (below > 0) {
         lines.push('');
@@ -338,23 +479,57 @@ export class ModelSelectorComponent extends Container implements Focusable {
       const canSwitch = segmentsFor(selected.model).length > 1;
       const thinkingHeader = canSwitch ? ' Thinking  (←→ to switch)' : ' Thinking';
       lines.push(currentTheme.fg('textMuted', thinkingHeader));
-      lines.push(this.renderThinkingControl(selected));
-      const description =
-        selected.model.provider === DEFAULT_OAUTH_PROVIDER_NAME
-          ? this.opts.effortDescriptions?.[this.effectiveEffort(selected)]
-          : undefined;
-      if (description !== undefined) lines.push(currentTheme.fg('textMuted', ` ${description}`));
+      const { line: controlLine, regions } = this.renderThinkingControl(selected);
+      this.thinkingRow = canSwitch ? lines.length : -1;
+      this.thinkingRegions = canSwitch ? regions : [];
+      lines.push(controlLine);
+      if (this.hasEffortDescriptions()) {
+        const description =
+          selected.model.provider === DEFAULT_OAUTH_PROVIDER_NAME
+            ? this.opts.effortDescriptions?.[this.effectiveEffort(selected)]
+            : undefined;
+        lines.push(
+          description !== undefined && description.length > 0
+            ? currentTheme.fg('textMuted', ` ${description}`)
+            : '',
+        );
+      }
       lines.push('');
+    } else {
+      this.thinkingRow = -1;
+      this.thinkingRegions = [];
     }
     lines.push(currentTheme.fg('primary', '─'.repeat(width)));
-    return lines.map((line) => truncateToWidth(line, width));
+    return finishDialogLines(lines, width, this.focused);
+  }
+
+  private hasEffortDescriptions(): boolean {
+    return (
+      this.opts.effortDescriptions !== undefined &&
+      Object.keys(this.opts.effortDescriptions).length > 0
+    );
+  }
+
+  private commitChoice(choice: ModelChoice, sessionOnly: boolean): void {
+    const payload: ModelSelection = {
+      alias: choice.alias,
+      thinking: commitEffort(choice, this.effectiveEffort(choice)),
+    };
+    if (sessionOnly && this.opts.onSessionOnlySelect !== undefined) {
+      this.opts.onSessionOnlySelect(payload);
+      return;
+    }
+    this.opts.onSelect(payload);
   }
 
   private selectedChoice(): ModelChoice | undefined {
     return this.list.selected();
   }
 
-  private renderThinkingControl(choice: ModelChoice): string {
+  private renderThinkingControl(choice: ModelChoice): {
+    readonly line: string;
+    readonly regions: readonly MouseColRegion[];
+  } {
     const segment = (label: string, active: boolean): string =>
       active
         ? currentTheme.boldFg('primary', `[ ${label} ]`)
@@ -365,15 +540,25 @@ export class ModelSelectorComponent extends Container implements Focusable {
     const efforts = effortsOf(choice.model);
     const availability = thinkingAvailability(choice.model);
     if (efforts.length === 0 && availability === 'always-on') {
-      return `  ${segment('On', true)} ${unavailable('Off')}`;
+      return { line: `  ${segment('On', true)} ${unavailable('Off')}`, regions: [] };
     }
     if (efforts.length === 0 && availability === 'unsupported') {
-      return `  ${unavailable('On')} ${segment('Off', true)}`;
+      return { line: `  ${unavailable('On')} ${segment('Off', true)}`, regions: [] };
     }
 
     const segments = segmentsFor(choice.model);
     const active = this.effectiveEffort(choice);
-    const rendered = segments.map((effort) => segment(effortLabel(effort), effort === active));
-    return `  ${rendered.join('  ')}`;
+    const regions: MouseColRegion[] = [];
+    let col = 2;
+    const rendered = segments.map((effort, index) => {
+      const label = effortLabel(effort);
+      const isActive = effort === active;
+      const rawText = isActive ? `[ ${label} ]` : `  ${label}  `;
+      const segWidth = visibleWidth(rawText);
+      regions.push({ start: col, end: col + segWidth, index });
+      col += segWidth + 2;
+      return segment(label, isActive);
+    });
+    return { line: `  ${rendered.join('  ')}`, regions };
   }
 }

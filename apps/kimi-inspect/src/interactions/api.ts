@@ -1,15 +1,3 @@
-/**
- * REST client for the pending-interactions endpoints:
- * `GET {baseUrl}/api/v1/sessions/{sessionId}/approvals` and `.../questions`
- * list them; `POST .../interactions/{id}` answers either kind.
- *
- * These are the only remaining surfaces for listing and answering a session's
- * pending approvals/questions: the engine's interaction kernel is a
- * process-global singleton with no DI channel on the `/api/v1/debug`
- * dispatcher, so the inspector talks to the same public REST surface the
- * clients use.
- */
-
 export interface ApprovalWire {
   readonly approval_id: string;
   readonly session_id: string;

@@ -94,8 +94,15 @@ The theme apply/switch mechanics live in the `write-tui` skill. The following ru
 
 ## General Coding Requirements
 
+- `src/cli/exec-server.ts` loads the executor only through the SDK's light `@moonshot-ai/kimi-code-sdk/exec-server` subpath; the process entry must not import the SDK main module or heavy CLI modules (`test/cli/exec-server.test.ts` enforces this).
 - The startup path before the workspace trust gate (`KimiTUI.start()` -> `maybeRunWorkspaceTrustPrompt()`) must not spawn child processes by bare command name — on Windows, cmd.exe / CreateProcess resolve them from the current directory first, so a binary planted in an untrusted workspace would run before the user confirms trust. When an external command is unavoidable, resolve it with `resolveCommandPath` from `src/utils/process/resolve-command.ts`, which returns an absolute PATH hit and refuses matches inside the cwd.
 - For optional object properties, pass `undefined` directly — do not use conditional spread.
 - Optional object properties do not need to additionally allow `undefined` in the type.
 - Internal methods with only a single parameter should not be turned into options objects just for stylistic uniformity.
 - Except for a package's own `index.ts`, other `index.ts` files should prefer `export * from './module'`.
+
+## Browser Web UI artifacts
+
+- Desktop and browser share `apps/desktop/src/renderer`. Run `pnpm build:web` from the repository root; the web build is emitted to `apps/desktop/web-dist`.
+- To package it for the CLI, run `pnpm sync:web` from the repository root. `scripts/sync-web-dist.mjs` builds the web version and copies it to `apps/kimi-code/web-dist`. The full `pnpm build` syncs it during the CLI prebuild, and `scripts/check-web-assets.mjs` verifies the entry file during packaging. Both artifact directories are gitignored.
+- For local development, run `pnpm dev:server` and `pnpm dev:web` from the repository root. The web dev server proxies `/api/v1` and `/api/v2` to `KIMI_SERVER_URL`, defaulting to `http://127.0.0.1:58627`.
